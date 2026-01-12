@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VAM CEO Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { 900: '#0a0a0f', 800: '#12121a', 700: '#1a1a24', 600: '#22222e', 500: '#2a2a38' },
+                        accent: { cyan: '#00d4ff', purple: '#a855f7', green: '#10b981', yellow: '#fbbf24', red: '#ef4444' }
+                    },
+                    fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0a0a0f; color: #e5e5e5; }
+        .gradient-text { background: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .card-gradient { background: linear-gradient(145deg, #12121a 0%, #1a1a24 100%); border: 1px solid rgba(255,255,255,0.05); }
+        .stat-card { background: linear-gradient(145deg, #12121a 0%, #1a1a24 100%); border: 1px solid rgba(255,255,255,0.08); transition: all 0.3s ease; }
+        .stat-card:hover { transform: translateY(-2px); border-color: rgba(0, 212, 255, 0.3); }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #1a1a24; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a2a38; border-radius: 3px; }
+        .table-row:hover { background: rgba(0, 212, 255, 0.05); }
+        .slide-in { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        .fade-up { animation: fadeUp 0.5s ease-out forwards; opacity: 0; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .grid-bg { background-image: linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px); background-size: 50px 50px; }
+    </style>
+</head>
+<body class="min-h-screen grid-bg">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // ============ ALL CLIENTS TAB ============
+        const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=133498635&single=true&output=csv';
+
+        // Parse currency/number strings
+        const parseNum = (val) => parseFloat(String(val || '0').replace(/[$,%]/g, '').replace(/,/g, '')) || 0;
+
+        // Map columns from your sheet
+        const mapRow = (row) => ({
+            client: row['Client'] || '',
+            adAccount: row['Ad Account Name'] || '',
+            state: row['State'] || '',
+            campaign: row['CAMPAIGN'] || '',
+            callingStatus: row['Calling/Non-calling'] || '',
+            startDate: row['Start Date'] || '',
+            leadySync: row['Leady Sync'] || '',
+            monthsRunning: parseNum(row['Months Running']),
+            weeksRunning: parseNum(row['Weeks Running']),
+            daysRunning: parseNum(row['Days Running']),
+            totalAdSpend: parseNum(row['Total Ad Spend']),
+            sellerAdSpend: parseNum(row['Seller Ad Spend']),
+            monthlySellerAdSpend: parseNum(row['Monthly Seller Ad Spend']),
+            buyerAdSpend: parseNum(row['Buyer Ad Spend']),
+            dailyBudget: parseNum(row['Daily Ad Spend Budget']),
+            adSpendPerDay: parseNum(row['Ad Spend Per Day']),
+            adSpendPerMonth: parseNum(row['Ad Spend Per Month']),
+            totalLeads: parseNum(row['Total Leads']),
+            cpl: parseNum(row['Cost Per Lead']),
+            sellerLeads: parseNum(row['Seller Leads']),
+            costPerSellerLead: parseNum(row['Cost Per Seller Lead']),
+            sellerLeadsPerDay: parseNum(row['Seller Leads/Per day']),
+            sellerLeadsPerWeek: parseNum(row['Seller Leads/Week']),
+            buyerLeads: parseNum(row['Buyer Leads']),
+            listingLeads: parseNum(row['Listing Leads']),
+            mortgageLeads: parseNum(row['Mortgage Leads']),
+            agentAttraction: parseNum(row['Agent Attraction']),
+            apptsLast7Days: parseNum(row['Appts in the Last 7 Days']),
+            totalAppts: parseNum(row['Total Appts']),
+            apptsPerWeek: parseNum(row['Appt per Week']),
+            sellerAppts: parseNum(row['Seller Appts']),
+            sellerLeadToAppt: parseNum(row['Seller Lead > Appt']),
+            costPerSellerAppt: parseNum(row['Cost per Seller Appts']),
+            buyerAppts: parseNum(row['Buyer Appts']),
+            costPerBuyerAppt: parseNum(row['Cost per Buyer Appt']),
+            potentialDeals: parseNum(row['Potential Deals']),
+            listings: parseNum(row['Listing']),
+            buyerSigned: parseNum(row['Buyer Signed']),
+            leadsPerListing: parseNum(row['Leads/Listing']),
+        });
+
+        // Formatting
+        const fmt = (val) => '$' + (parseFloat(val) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        const fmtDec = (val) => '$' + (parseFloat(val) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtNum = (val) => (parseFloat(val) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        const fmtPct = (val) => (parseFloat(val) || 0).toFixed(1) + '%';
+
+        // Health by CPL (adjust thresholds as needed)
+        const getHealth = (cpl) => { const n = parseFloat(cpl) || 0; if (n === 0) return 'Gray'; if (n <= 25) return 'Green'; if (n <= 50) return 'Yellow'; return 'Red'; };
+
+        // Phase by days
+        const getPhase = (days) => {
+            if (days <= 14) return { num: 1, name: 'Setup', color: 'cyan' };
+            if (days <= 30) return { num: 2, name: 'Optimization', color: 'purple' };
+            if (days <= 60) return { num: 3, name: 'Scaling', color: 'green' };
+            return { num: 4, name: 'Systemization', color: 'yellow' };
+        };
+
+        const HealthBadge = ({ health, size = 'md' }) => {
+            const colors = { Green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', Yellow: 'bg-amber-500/20 text-amber-400 border-amber-500/30', Red: 'bg-red-500/20 text-red-400 border-red-500/30', Gray: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
+            const sizes = { sm: 'px-2 py-0.5 text-xs', md: 'px-3 py-1 text-sm' };
+            return <span className={`rounded-full font-semibold border ${colors[health]} ${sizes[size]}`}>{health}</span>;
+        };
+
+        const PhaseBadge = ({ days }) => {
+            const p = getPhase(days);
+            const colors = { cyan: 'bg-cyan-500/20 text-cyan-400', purple: 'bg-purple-500/20 text-purple-400', green: 'bg-emerald-500/20 text-emerald-400', yellow: 'bg-amber-500/20 text-amber-400' };
+            return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${colors[p.color]}`}>P{p.num}</span>;
+        };
+
+        const StatCard = ({ title, value, icon, color = 'cyan', delay = 0, sub }) => {
+            const cls = { cyan: 'border-l-accent-cyan', green: 'border-l-accent-green', yellow: 'border-l-accent-yellow', red: 'border-l-accent-red', purple: 'border-l-accent-purple' };
+            return (
+                <div className={`stat-card rounded-xl p-5 border-l-4 ${cls[color]} fade-up`} style={{ animationDelay: `${delay}s` }}>
+                    <p className="text-gray-400 text-sm">{title}</p>
+                    <p className="text-2xl font-bold text-white mt-1">{value}</p>
+                    {sub && <div className="mt-2">{sub}</div>}
+                </div>
+            );
+        };
+
+        const HealthDist = ({ clients }) => {
+            const d = useMemo(() => {
+                const g = clients.filter(c => getHealth(c.cpl) === 'Green').length;
+                const y = clients.filter(c => getHealth(c.cpl) === 'Yellow').length;
+                const r = clients.filter(c => getHealth(c.cpl) === 'Red').length;
+                const gr = clients.filter(c => getHealth(c.cpl) === 'Gray').length;
+                return { g, y, r, gr, t: clients.length || 1 };
+            }, [clients]);
+
+            return (
+                <div className="card-gradient rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Client Health (CPL)</h3>
+                    <div className="flex gap-1 h-4 rounded-full overflow-hidden mb-6">
+                        {d.g > 0 && <div className="bg-emerald-500" style={{ width: `${(d.g / d.t) * 100}%` }} />}
+                        {d.y > 0 && <div className="bg-amber-500" style={{ width: `${(d.y / d.t) * 100}%` }} />}
+                        {d.r > 0 && <div className="bg-red-500" style={{ width: `${(d.r / d.t) * 100}%` }} />}
+                        {d.gr > 0 && <div className="bg-gray-500" style={{ width: `${(d.gr / d.t) * 100}%` }} />}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                        <div><div className="text-xl font-bold text-emerald-400">{d.g}</div><div className="text-xs text-gray-500">≤$25</div></div>
+                        <div><div className="text-xl font-bold text-amber-400">{d.y}</div><div className="text-xs text-gray-500">$25-50</div></div>
+                        <div><div className="text-xl font-bold text-red-400">{d.r}</div><div className="text-xs text-gray-500">$50+</div></div>
+                        <div><div className="text-xl font-bold text-gray-400">{d.gr}</div><div className="text-xs text-gray-500">No Data</div></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Alerts = ({ clients }) => {
+            const red = clients.filter(c => getHealth(c.cpl) === 'Red');
+            const yellow = clients.filter(c => getHealth(c.cpl) === 'Yellow').slice(0, 3);
+            const fresh = clients.filter(c => c.daysRunning > 0 && c.daysRunning <= 14);
+
+            return (
+                <div className="card-gradient rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">🚨 Alerts</h3>
+                    <div className="space-y-3 max-h-[300px] overflow-y-auto scrollbar-thin">
+                        {red.map(c => (
+                            <div key={c.client} className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                                <div className="text-red-400 font-semibold">{c.client}</div>
+                                <div className="text-sm text-gray-400">CPL: {fmtDec(c.cpl)} • {fmtNum(c.totalLeads)} leads • Day {c.daysRunning}</div>
+                            </div>
+                        ))}
+                        {yellow.map(c => (
+                            <div key={c.client} className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                                <div className="text-amber-400 font-semibold">{c.client}</div>
+                                <div className="text-sm text-gray-400">CPL: {fmtDec(c.cpl)} • {fmtNum(c.totalLeads)} leads</div>
+                            </div>
+                        ))}
+                        {fresh.map(c => (
+                            <div key={`new-${c.client}`} className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3">
+                                <div className="text-cyan-400 font-semibold">{c.client}</div>
+                                <div className="text-sm text-gray-400">Day {c.daysRunning} • Phase 1 Setup</div>
+                            </div>
+                        ))}
+                        {red.length === 0 && yellow.length === 0 && fresh.length === 0 && (
+                            <div className="text-center py-4 text-gray-500">✨ All clients on track!</div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const ClientTable = ({ clients, sort, onSort, onClick }) => {
+            const sorted = useMemo(() => {
+                const s = [...clients];
+                if (sort.key) s.sort((a, b) => {
+                    let av = a[sort.key], bv = b[sort.key];
+                    if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase(); }
+                    return av < bv ? (sort.dir === 'asc' ? -1 : 1) : av > bv ? (sort.dir === 'asc' ? 1 : -1) : 0;
+                });
+                return s;
+            }, [clients, sort]);
+
+            const TH = ({ label, k }) => (
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase cursor-pointer hover:text-white" onClick={() => onSort(k)}>
+                    {label} {sort.key === k && <span className="text-accent-cyan">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+            );
+
+            return (
+                <div className="card-gradient rounded-xl overflow-hidden">
+                    <div className="overflow-x-auto scrollbar-thin">
+                        <table className="w-full">
+                            <thead className="bg-dark-800">
+                                <tr>
+                                    <TH label="Client" k="client" />
+                                    <TH label="State" k="state" />
+                                    <TH label="Days" k="daysRunning" />
+                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Phase</th>
+                                    <TH label="Ad Spend" k="totalAdSpend" />
+                                    <TH label="Leads" k="totalLeads" />
+                                    <TH label="CPL" k="cpl" />
+                                    <TH label="Appts" k="totalAppts" />
+                                    <TH label="Deals" k="potentialDeals" />
+                                    <TH label="Listings" k="listings" />
+                                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Health</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-dark-600">
+                                {sorted.map(c => (
+                                    <tr key={c.client} className="table-row cursor-pointer" onClick={() => onClick(c)}>
+                                        <td className="px-3 py-3 font-semibold text-white">{c.client}</td>
+                                        <td className="px-3 py-3 text-gray-400">{c.state}</td>
+                                        <td className="px-3 py-3 font-mono text-gray-300">{c.daysRunning}</td>
+                                        <td className="px-3 py-3"><PhaseBadge days={c.daysRunning} /></td>
+                                        <td className="px-3 py-3 font-mono text-white">{fmt(c.totalAdSpend)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-cyan">{fmtNum(c.totalLeads)}</td>
+                                        <td className="px-3 py-3 font-mono text-white">{fmtDec(c.cpl)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-purple">{fmtNum(c.totalAppts)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-green">{fmtNum(c.potentialDeals)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-yellow">{fmtNum(c.listings)}</td>
+                                        <td className="px-3 py-3"><HealthBadge health={getHealth(c.cpl)} size="sm" /></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        const Modal = ({ client: c, onClose }) => {
+            if (!c) return null;
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div className="bg-dark-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-dark-600 flex justify-between">
+                            <div><h2 className="text-2xl font-bold text-white">{c.client}</h2><p className="text-gray-400">{c.state} • {c.campaign} • {c.callingStatus}</p></div>
+                            <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+                        </div>
+                        <div className="p-6 space-y-6">
+                            <div className="flex items-center gap-4 flex-wrap">
+                                <HealthBadge health={getHealth(c.cpl)} />
+                                <PhaseBadge days={c.daysRunning} />
+                                <span className="text-gray-500">Day {c.daysRunning} of 90</span>
+                            </div>
+                            <div className="w-full bg-dark-700 rounded-full h-2">
+                                <div className="bg-gradient-to-r from-accent-cyan to-accent-purple h-2 rounded-full" style={{ width: `${Math.min((c.daysRunning / 90) * 100, 100)}%` }} />
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="bg-dark-700 rounded-xl p-4 text-center"><div className="text-2xl font-bold text-white">{fmt(c.totalAdSpend)}</div><div className="text-sm text-gray-500">Total Spend</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4 text-center"><div className="text-2xl font-bold text-accent-cyan">{fmtNum(c.totalLeads)}</div><div className="text-sm text-gray-500">Total Leads</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4 text-center"><div className="text-2xl font-bold text-white">{fmtDec(c.cpl)}</div><div className="text-sm text-gray-500">CPL</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4 text-center"><div className="text-2xl font-bold text-accent-purple">{fmtNum(c.totalAppts)}</div><div className="text-sm text-gray-500">Appointments</div></div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                <div className="bg-dark-700 rounded-xl p-4"><div className="text-sm text-gray-400">Seller Leads</div><div className="text-xl font-bold text-white">{fmtNum(c.sellerLeads)}</div><div className="text-xs text-gray-500">{fmtDec(c.costPerSellerLead)}/lead</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4"><div className="text-sm text-gray-400">Buyer Leads</div><div className="text-xl font-bold text-white">{fmtNum(c.buyerLeads)}</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4"><div className="text-sm text-gray-400">Lead → Appt</div><div className="text-xl font-bold text-white">{fmtPct(c.sellerLeadToAppt)}</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4"><div className="text-sm text-gray-400">Potential Deals</div><div className="text-xl font-bold text-accent-green">{fmtNum(c.potentialDeals)}</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4"><div className="text-sm text-gray-400">Listings</div><div className="text-xl font-bold text-accent-yellow">{fmtNum(c.listings)}</div></div>
+                                <div className="bg-dark-700 rounded-xl p-4"><div className="text-sm text-gray-400">Buyer Signed</div><div className="text-xl font-bold text-accent-purple">{fmtNum(c.buyerSigned)}</div></div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-gray-400">Daily Budget:</span> <span className="text-white font-mono">{fmtDec(c.dailyBudget)}</span></div>
+                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-gray-400">Appts/Week:</span> <span className="text-white font-mono">{c.apptsPerWeek.toFixed(1)}</span></div>
+                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-gray-400">Cost/Appt:</span> <span className="text-white font-mono">{fmtDec(c.costPerSellerAppt)}</span></div>
+                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-gray-400">Leads/Listing:</span> <span className="text-white font-mono">{c.leadsPerListing.toFixed(0)}</span></div>
+                            </div>
+                        </div>
+                        <div className="p-6 border-t border-dark-600 flex gap-3">
+                            <a href={`index.html?client=${encodeURIComponent(c.client)}`} className="flex-1 py-3 bg-accent-cyan text-dark-900 font-semibold rounded-lg text-center hover:bg-cyan-400">Open in Hub</a>
+                            <button onClick={onClose} className="px-6 py-3 bg-dark-700 text-white rounded-lg hover:bg-dark-600">Close</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AIChat = ({ open, onClose, clients, totals }) => {
+            const [msgs, setMsgs] = useState([]);
+            const [input, setInput] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const send = () => {
+                if (!input.trim()) return;
+                setMsgs(p => [...p, { role: 'user', content: input }]);
+                setLoading(true);
+                const q = input.toLowerCase();
+                setInput('');
+
+                setTimeout(() => {
+                    const red = clients.filter(c => getHealth(c.cpl) === 'Red');
+                    const best = [...clients].filter(c => c.totalLeads > 0).sort((a, b) => a.cpl - b.cpl)[0];
+                    const topLeads = [...clients].sort((a, b) => b.totalLeads - a.totalLeads)[0];
+                    const topDeals = [...clients].sort((a, b) => b.potentialDeals - a.potentialDeals)[0];
+                    const green = clients.filter(c => getHealth(c.cpl) === 'Green').length;
+                    const yellow = clients.filter(c => getHealth(c.cpl) === 'Yellow').length;
+
+                    let res = '';
+                    if (q.includes('attention') || q.includes('worst') || q.includes('red')) {
+                        res = red.length > 0 ? `🚨 High CPL Clients:\n${red.map(c => `• ${c.client}: ${fmtDec(c.cpl)} CPL`).join('\n')}` : '✨ No critical clients!';
+                    } else if (q.includes('best') || q.includes('top')) {
+                        res = `🏆 Top Performers:\n\nBest CPL: ${best?.client || 'N/A'} (${fmtDec(best?.cpl)})\nMost Leads: ${topLeads?.client || 'N/A'} (${fmtNum(topLeads?.totalLeads)})\nMost Deals: ${topDeals?.client || 'N/A'} (${fmtNum(topDeals?.potentialDeals)})`;
+                    } else if (q.includes('summary') || q.includes('overview')) {
+                        res = `📊 Summary:\n• ${clients.length} clients\n• ${fmt(totals.spend)} spend\n• ${fmtNum(totals.leads)} leads\n• ${fmtDec(totals.avgCPL)} avg CPL\n• ${fmtNum(totals.appts)} appts\n• ${fmtNum(totals.deals)} deals\n• ${fmtNum(totals.listings)} listings\n\nHealth: ${green} green, ${yellow} yellow, ${red.length} red`;
+                    } else {
+                        res = `Try:\n• "Who needs attention?"\n• "Show top performers"\n• "Give me a summary"`;
+                    }
+                    setMsgs(p => [...p, { role: 'assistant', content: res }]);
+                    setLoading(false);
+                }, 500);
+            };
+
+            if (!open) return null;
+            return (
+                <div className="fixed inset-y-0 right-0 w-96 bg-dark-800 border-l border-dark-600 z-50 flex flex-col slide-in">
+                    <div className="p-4 border-b border-dark-600 flex justify-between">
+                        <div><h3 className="font-bold text-white">AI Assistant</h3><p className="text-xs text-gray-500">{clients.length} clients</p></div>
+                        <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+                        {msgs.length === 0 && (
+                            <div className="text-center py-8 text-gray-500">
+                                <div className="text-4xl mb-3">🤖</div>
+                                {['Who needs attention?', 'Top performers', 'Summary'].map((s, i) => (
+                                    <button key={i} onClick={() => setInput(s)} className="block w-full text-left px-3 py-2 mb-2 bg-dark-700 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-dark-600">{s}</button>
+                                ))}
+                            </div>
+                        )}
+                        {msgs.map((m, i) => <div key={i} className={m.role === 'user' ? 'ml-8' : 'mr-8'}><div className={`p-3 rounded-xl whitespace-pre-wrap ${m.role === 'user' ? 'bg-accent-cyan/20 text-cyan-100' : 'bg-dark-700 text-gray-300'}`}>{m.content}</div></div>)}
+                        {loading && <div className="mr-8"><div className="bg-dark-700 text-gray-500 p-3 rounded-xl">Analyzing...</div></div>}
+                    </div>
+                    <div className="p-4 border-t border-dark-600 flex gap-2">
+                        <input type="text" value={input} onChange={e => setInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && send()} className="flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan" placeholder="Ask..." />
+                        <button onClick={send} className="px-4 py-2 bg-accent-cyan text-dark-900 rounded-lg font-semibold">Send</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [clients, setClients] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [sort, setSort] = useState({ key: 'cpl', dir: 'desc' });
+            const [filter, setFilter] = useState('all');
+            const [search, setSearch] = useState('');
+            const [selected, setSelected] = useState(null);
+            const [aiOpen, setAiOpen] = useState(false);
+
+            const sample = [
+                { client: 'Sample Client A', state: 'TX', campaign: 'Seller', callingStatus: 'Calling', daysRunning: 45, totalAdSpend: 5000, totalLeads: 200, cpl: 25, sellerLeads: 150, buyerLeads: 50, totalAppts: 30, potentialDeals: 5, listings: 2, costPerSellerLead: 28, sellerLeadToAppt: 20, buyerSigned: 1, dailyBudget: 100, apptsPerWeek: 4, costPerSellerAppt: 120, leadsPerListing: 100 },
+                { client: 'Sample Client B', state: 'FL', campaign: 'Buyer', callingStatus: 'Non-calling', daysRunning: 22, totalAdSpend: 3000, totalLeads: 80, cpl: 37.5, sellerLeads: 30, buyerLeads: 50, totalAppts: 15, potentialDeals: 3, listings: 1, costPerSellerLead: 45, sellerLeadToAppt: 15, buyerSigned: 2, dailyBudget: 80, apptsPerWeek: 2, costPerSellerAppt: 150, leadsPerListing: 80 },
+                { client: 'Sample Client C', state: 'CA', campaign: 'Seller', callingStatus: 'Calling', daysRunning: 67, totalAdSpend: 12000, totalLeads: 180, cpl: 66.67, sellerLeads: 120, buyerLeads: 60, totalAppts: 25, potentialDeals: 4, listings: 3, costPerSellerLead: 72, sellerLeadToAppt: 18, buyerSigned: 1, dailyBudget: 150, apptsPerWeek: 3, costPerSellerAppt: 200, leadsPerListing: 60 },
+            ];
+
+            useEffect(() => {
+                fetch(GOOGLE_SHEET_CSV_URL)
+                    .then(r => r.ok ? r.text() : Promise.reject('Network error'))
+                    .then(csv => {
+                        const rows = Papa.parse(csv, { header: true, skipEmptyLines: true }).data.map(mapRow).filter(r => r.client?.trim());
+                        setClients(rows.length > 0 ? rows : sample);
+                        setLoading(false);
+                    })
+                    .catch(() => { setClients(sample); setLoading(false); });
+            }, []);
+
+            const filtered = useMemo(() => {
+                let r = clients;
+                if (filter !== 'all') r = r.filter(c => getHealth(c.cpl) === filter);
+                if (search) r = r.filter(c => c.client.toLowerCase().includes(search.toLowerCase()) || c.state.toLowerCase().includes(search.toLowerCase()));
+                return r;
+            }, [clients, filter, search]);
+
+            const totals = useMemo(() => {
+                const spend = clients.reduce((s, c) => s + c.totalAdSpend, 0);
+                const leads = clients.reduce((s, c) => s + c.totalLeads, 0);
+                const appts = clients.reduce((s, c) => s + c.totalAppts, 0);
+                const deals = clients.reduce((s, c) => s + c.potentialDeals, 0);
+                const listings = clients.reduce((s, c) => s + c.listings, 0);
+                return { spend, leads, avgCPL: leads > 0 ? spend / leads : 0, appts, deals, listings };
+            }, [clients]);
+
+            const handleSort = (k) => setSort(p => ({ key: k, dir: p.key === k && p.dir === 'desc' ? 'asc' : 'desc' }));
+
+            if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl">⏳</div></div>;
+
+            return (
+                <div className="min-h-screen">
+                    <header className="bg-dark-800/80 backdrop-blur-lg border-b border-dark-600 sticky top-0 z-40">
+                        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                            <div><h1 className="text-2xl font-bold gradient-text">VAM CEO Dashboard</h1><p className="text-sm text-gray-500">All Clients</p></div>
+                            <div className="flex gap-4">
+                                <a href="index.html" className="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-sm">← Hub</a>
+                                <button onClick={() => setAiOpen(true)} className="px-4 py-2 bg-gradient-to-r from-accent-cyan to-accent-purple text-dark-900 font-semibold rounded-lg">🤖 Ask AI</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-6 py-8">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+                            <StatCard title="Clients" value={clients.length} icon="👥" color="cyan" delay={0.1} />
+                            <StatCard title="Total Spend" value={fmt(totals.spend)} icon="💰" color="purple" delay={0.15} />
+                            <StatCard title="Total Leads" value={fmtNum(totals.leads)} icon="🎯" color="green" delay={0.2} />
+                            <StatCard title="Avg CPL" value={fmtDec(totals.avgCPL)} icon="📊" color="yellow" delay={0.25} sub={<HealthBadge health={getHealth(totals.avgCPL)} size="sm" />} />
+                            <StatCard title="Appointments" value={fmtNum(totals.appts)} icon="📅" color="cyan" delay={0.3} />
+                            <StatCard title="Deals" value={fmtNum(totals.deals)} icon="🏠" color="green" delay={0.35} />
+                        </div>
+
+                        <div className="grid lg:grid-cols-3 gap-6 mb-8">
+                            <div className="fade-up" style={{ animationDelay: '0.3s' }}><HealthDist clients={clients} /></div>
+                            <div className="lg:col-span-2 fade-up" style={{ animationDelay: '0.4s' }}><Alerts clients={clients} /></div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-4 mb-6 fade-up" style={{ animationDelay: '0.5s' }}>
+                            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..." className="flex-1 min-w-[200px] bg-dark-700 border border-dark-500 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan" />
+                            <div className="flex gap-2">
+                                {['all', 'Green', 'Yellow', 'Red'].map(f => (
+                                    <button key={f} onClick={() => setFilter(f)} className={`px-4 py-2 rounded-lg text-sm font-medium ${filter === f ? 'bg-accent-cyan text-dark-900' : 'bg-dark-700 text-gray-400 hover:text-white'}`}>{f === 'all' ? 'All' : f}</button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="fade-up" style={{ animationDelay: '0.6s' }}>
+                            <ClientTable clients={filtered} sort={sort} onSort={handleSort} onClick={setSelected} />
+                        </div>
+                    </main>
+
+                    <Modal client={selected} onClose={() => setSelected(null)} />
+                    <AIChat open={aiOpen} onClose={() => setAiOpen(false)} clients={clients} totals={totals} />
+                    {!aiOpen && <button onClick={() => setAiOpen(true)} className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-accent-cyan to-accent-purple rounded-full flex items-center justify-center text-2xl shadow-lg hover:scale-110 transition-transform z-40">🤖</button>}
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
