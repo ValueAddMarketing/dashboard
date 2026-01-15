@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VAM Client Success Hub</title>
+    <title>VAM Client Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
@@ -18,173 +18,119 @@
                         dark: { 900: '#0a0a0f', 800: '#12121a', 700: '#1a1a24', 600: '#22222e', 500: '#2a2a38' },
                         accent: { cyan: '#00d4ff', purple: '#a855f7', green: '#10b981', yellow: '#fbbf24', red: '#ef4444' }
                     },
-                    fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] }
+                    fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'] }
                 }
             }
         }
     </script>
     <style>
-        * { box-sizing: border-box; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0a0a0f; color: #e5e5e5; }
-        .tab-active { background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%); border-left: 3px solid #00d4ff; }
-        .gradient-text { background: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .card-gradient { background: linear-gradient(145deg, #12121a 0%, #1a1a24 100%); border: 1px solid rgba(255,255,255,0.05); }
-        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
-        .scrollbar-thin::-webkit-scrollbar-track { background: #1a1a24; }
-        .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a2a38; border-radius: 3px; }
+        .gradient-text { background: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .card { background: linear-gradient(145deg, #12121a 0%, #1a1a24 100%); border: 1px solid rgba(255,255,255,0.05); }
+        .tab-active { background: linear-gradient(135deg, rgba(0,212,255,0.15) 0%, rgba(168,85,247,0.15) 100%); border-left: 3px solid #00d4ff; }
+        .scrollbar::-webkit-scrollbar { width: 6px; }
+        .scrollbar::-webkit-scrollbar-thumb { background: #2a2a38; border-radius: 3px; }
         .slide-in { animation: slideIn 0.3s ease-out; }
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
-        .fade-in { animation: fadeIn 0.4s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="min-h-screen">
     <div id="root"></div>
-
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=133498635&single=true&output=csv';
+        const URLS = {
+            clients: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=133498635&single=true&output=csv',
+            days7: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=1447475730&single=true&output=csv',
+            days30: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=1196243237&single=true&output=csv'
+        };
 
-        const parseNum = (val) => parseFloat(String(val || '0').replace(/[$,%]/g, '').replace(/,/g, '')) || 0;
+        const pn = v => parseFloat(String(v||'0').replace(/[$,%]/g,'').replace(/,/g,''))||0;
+        const fmt = v => '$'+(pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+        const fmtD = v => '$'+(pn(v)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+        const fmtP = v => (pn(v)).toFixed(1)+'%';
 
-        const mapRow = (row) => ({
-            client: row['Client'] || '',
-            adAccount: row['Ad Account Name'] || '',
-            state: row['State'] || '',
-            campaign: row['CAMPAIGN'] || '',
-            callingStatus: row['Calling/Non-calling'] || '',
-            startDate: row['Start Date'] || '',
-            daysRunning: parseNum(row['Days Running']),
-            weeksRunning: parseNum(row['Weeks Running']),
-            monthsRunning: parseNum(row['Months Running']),
-            totalAdSpend: parseNum(row['Total Ad Spend']),
-            sellerAdSpend: parseNum(row['Seller Ad Spend']),
-            buyerAdSpend: parseNum(row['Buyer Ad Spend']),
-            dailyBudget: parseNum(row['Daily Ad Spend Budget']),
-            adSpendPerDay: parseNum(row['Ad Spend Per Day']),
-            totalLeads: parseNum(row['Total Leads']),
-            cpl: parseNum(row['Cost Per Lead']),
-            sellerLeads: parseNum(row['Seller Leads']),
-            costPerSellerLead: parseNum(row['Cost Per Seller Lead']),
-            sellerLeadsPerWeek: parseNum(row['Seller Leads/Week']),
-            buyerLeads: parseNum(row['Buyer Leads']),
-            listingLeads: parseNum(row['Listing Leads']),
-            apptsLast7Days: parseNum(row['Appts in the Last 7 Days']),
-            totalAppts: parseNum(row['Total Appts']),
-            apptsPerWeek: parseNum(row['Appt per Week']),
-            sellerAppts: parseNum(row['Seller Appts']),
-            sellerLeadToAppt: parseNum(row['Seller Lead > Appt']),
-            costPerSellerAppt: parseNum(row['Cost per Seller Appts']),
-            potentialDeals: parseNum(row['Potential Deals']),
-            listings: parseNum(row['Listing']),
-            buyerSigned: parseNum(row['Buyer Signed']),
-            leadsPerListing: parseNum(row['Leads/Listing']),
+        const mapClient = r => ({
+            client: r['Client']||'', adAccount: r['Ad Account Name']||'', state: r['State']||'', 
+            campaign: r['CAMPAIGN']||'', callingStatus: r['Calling/Non-calling']||'', startDate: r['Start Date']||'',
+            days: pn(r['Days Running']), weeks: pn(r['Weeks Running']), months: pn(r['Months Running']),
+            spend: pn(r['Total Ad Spend']), sellerSpend: pn(r['Seller Ad Spend']), buyerSpend: pn(r['Buyer Ad Spend']),
+            dailyBudget: pn(r['Daily Ad Spend Budget']), spendPerDay: pn(r['Ad Spend Per Day']),
+            leads: pn(r['Total Leads']), cpl: pn(r['Cost Per Lead']),
+            sellerLeads: pn(r['Seller Leads']), sellerCPL: pn(r['Cost Per Seller Lead']), sellerLeadsWeek: pn(r['Seller Leads/Week']),
+            buyerLeads: pn(r['Buyer Leads']), listingLeads: pn(r['Listing Leads']),
+            appts: pn(r['Total Appts']), apptsWeek: pn(r['Appt per Week']), appts7: pn(r['Appts in the Last 7 Days']),
+            sellerAppts: pn(r['Seller Appts']), sellerLeadToAppt: pn(r['Seller Lead > Appt']), sellerApptCost: pn(r['Cost per Seller Appts']),
+            buyerAppts: pn(r['Buyer Appts']), buyerApptCost: pn(r['Cost per Buyer Appt']),
+            deals: pn(r['Potential Deals']), listings: pn(r['Listing']), buyerSigned: pn(r['Buyer Signed']), leadsPerListing: pn(r['Leads/Listing'])
         });
 
-        const fmt = (v) => '$' + (parseFloat(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-        const fmtDec = (v) => '$' + (parseFloat(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const fmtNum = (v) => (parseFloat(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-        const fmtPct = (v) => (parseFloat(v) || 0).toFixed(1) + '%';
-
-        const getHealth = (cpl) => { const n = parseFloat(cpl) || 0; if (n === 0) return 'Gray'; if (n <= 25) return 'Green'; if (n <= 50) return 'Yellow'; return 'Red'; };
-        const getPhase = (days) => {
-            if (days <= 14) return { num: 1, name: 'Setup', color: 'cyan' };
-            if (days <= 30) return { num: 2, name: 'Optimization', color: 'purple' };
-            if (days <= 60) return { num: 3, name: 'Scaling', color: 'green' };
-            return { num: 4, name: 'Systemization', color: 'yellow' };
+        const getHealth = cpl => { if(!cpl) return 'Gray'; if(cpl<=25) return 'Green'; if(cpl<=50) return 'Yellow'; return 'Red'; };
+        const getPhase = days => {
+            if(days<=14) return {n:1,name:'Setup',color:'cyan'};
+            if(days<=30) return {n:2,name:'Optimization',color:'purple'};
+            if(days<=60) return {n:3,name:'Scaling',color:'green'};
+            return {n:4,name:'Systemization',color:'yellow'};
         };
+
+        const healthColors = { Green:'bg-emerald-500', Yellow:'bg-amber-500', Red:'bg-red-500', Gray:'bg-gray-500' };
+        const healthText = { Green:'text-emerald-400', Yellow:'text-amber-400', Red:'text-red-400', Gray:'text-gray-400' };
+        const phaseColors = { cyan:'bg-cyan-500/20 text-cyan-400', purple:'bg-purple-500/20 text-purple-400', green:'bg-emerald-500/20 text-emerald-400', yellow:'bg-amber-500/20 text-amber-400' };
+
+        const Badge = ({health}) => <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${healthColors[health]}/20 ${healthText[health]} border border-current/30`}>{health}</span>;
+        const PhaseBadge = ({days}) => { const p=getPhase(days); return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${phaseColors[p.color]}`}>Phase {p.n}: {p.name}</span>; };
 
         const tabs = [
             { id: 'overview', name: 'Overview', icon: '📊' },
             { id: 'performance', name: 'Performance', icon: '📈' },
-            { id: 'leads', name: 'Leads', icon: '🎯' },
-            { id: 'appointments', name: 'Appointments', icon: '📅' },
-            { id: 'deals', name: 'Deals', icon: '🏠' },
-            { id: 'strategy', name: 'Strategy', icon: '🧠' },
-            { id: 'notes', name: 'Notes', icon: '📝' },
+            { id: 'strategy', name: 'Strategy & Notes', icon: '📝' },
         ];
 
-        const phaseChecklists = {
+        const phaseChecks = {
             1: ['CRM Access Setup', 'Ad Account Connected', 'Strategy Call Completed', 'First Ads Live', 'Tracking Verified'],
-            2: ['Lead Flow Optimized', 'CPL Under Target', 'Follow-up Sequences Active', 'Weekly Check-in Scheduled'],
-            3: ['Budget Scaling', 'Retargeting Active', 'Conversion Tracking', 'ROI Positive'],
-            4: ['SOPs Documented', 'Team Trained', 'Automation Complete', 'Handoff Ready'],
+            2: ['Lead Flow Optimized', 'CPL Under Target', 'Follow-up Sequences Active', 'Weekly Check-in Done'],
+            3: ['Budget Scaling Started', 'Retargeting Active', 'Conversion Tracking', 'ROI Positive'],
+            4: ['SOPs Documented', 'Team Trained', 'Automation Complete', 'Handoff Ready']
         };
 
-        const HealthBadge = ({ health, size = 'md' }) => {
-            const colors = { Green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', Yellow: 'bg-amber-500/20 text-amber-400 border-amber-500/30', Red: 'bg-red-500/20 text-red-400 border-red-500/30', Gray: 'bg-gray-500/20 text-gray-400 border-gray-500/30' };
-            return <span className={`rounded-full font-semibold border ${colors[health]} ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm'}`}>{health}</span>;
-        };
-
-        const PhaseBadge = ({ days }) => {
-            const p = getPhase(days);
-            const colors = { cyan: 'bg-cyan-500/20 text-cyan-400', purple: 'bg-purple-500/20 text-purple-400', green: 'bg-emerald-500/20 text-emerald-400', yellow: 'bg-amber-500/20 text-amber-400' };
-            return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${colors[p.color]}`}>Phase {p.num}: {p.name}</span>;
-        };
-
-        const ClientSelector = ({ clients, selected, onSelect }) => (
-            <div className="relative">
-                <select value={selected?.client || ''} onChange={(e) => onSelect(clients.find(c => c.client === e.target.value))} className="w-full bg-dark-700 border border-dark-500 rounded-lg px-4 py-3 text-white appearance-none cursor-pointer hover:border-accent-cyan/50 focus:outline-none focus:border-accent-cyan">
-                    <option value="">Select a client...</option>
-                    {clients.map(c => <option key={c.client} value={c.client}>{c.client} — {c.state}</option>)}
-                </select>
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▼</div>
-            </div>
-        );
-
-        const OverviewTab = ({ client }) => {
-            if (!client) return <div className="card-gradient rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
-            const phase = getPhase(client.daysRunning);
+        // ========== OVERVIEW TAB ==========
+        const OverviewTab = ({c}) => {
             const [checks, setChecks] = useState({});
-
+            if(!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
+            const phase = getPhase(c.days);
             return (
-                <div className="space-y-6 fade-in">
+                <div className="space-y-6">
                     <div className="flex items-center gap-4 flex-wrap">
-                        <HealthBadge health={getHealth(client.cpl)} />
-                        <PhaseBadge days={client.daysRunning} />
-                        <span className="text-gray-500">{client.campaign} • {client.callingStatus}</span>
+                        <Badge health={getHealth(c.cpl)}/>
+                        <PhaseBadge days={c.days}/>
+                        <span className="text-gray-500">{c.campaign} • {c.callingStatus}</span>
                     </div>
-
-                    <div className="card-gradient rounded-xl p-6">
+                    <div className="card rounded-xl p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-semibold text-white">90-Day Progress</h3>
-                            <span className="text-gray-400">Day {client.daysRunning} of 90</span>
+                            <span className="text-gray-400">Day {c.days} of 90</span>
                         </div>
                         <div className="w-full bg-dark-700 rounded-full h-3 mb-2">
-                            <div className="bg-gradient-to-r from-accent-cyan to-accent-purple h-3 rounded-full transition-all" style={{ width: `${Math.min((client.daysRunning / 90) * 100, 100)}%` }} />
+                            <div className="bg-gradient-to-r from-accent-cyan to-accent-purple h-3 rounded-full" style={{width:`${Math.min(c.days/90*100,100)}%`}}/>
                         </div>
                         <div className="flex justify-between text-xs text-gray-500 mt-2">
                             <span>Phase 1</span><span>Phase 2</span><span>Phase 3</span><span>Phase 4</span>
                         </div>
                     </div>
-
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-2xl font-bold text-white">{fmt(client.totalAdSpend)}</div>
-                            <div className="text-sm text-gray-500">Total Spend</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-2xl font-bold text-accent-cyan">{fmtNum(client.totalLeads)}</div>
-                            <div className="text-sm text-gray-500">Total Leads</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-2xl font-bold text-white">{fmtDec(client.cpl)}</div>
-                            <div className="text-sm text-gray-500">Cost Per Lead</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-2xl font-bold text-accent-purple">{fmtNum(client.totalAppts)}</div>
-                            <div className="text-sm text-gray-500">Appointments</div>
-                        </div>
+                        <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{fmt(c.spend)}</div><div className="text-sm text-gray-500">Total Spend</div></div>
+                        <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-cyan">{fmtN(c.leads)}</div><div className="text-sm text-gray-500">Total Leads</div></div>
+                        <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{fmtD(c.cpl)}</div><div className="text-sm text-gray-500">Cost Per Lead</div></div>
+                        <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-purple">{fmtN(c.appts)}</div><div className="text-sm text-gray-500">Appointments</div></div>
                     </div>
-
-                    <div className="card-gradient rounded-xl p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">Phase {phase.num} Checklist: {phase.name}</h3>
-                        <div className="space-y-3">
-                            {phaseChecklists[phase.num].map((item, i) => (
-                                <label key={i} className="flex items-center gap-3 p-3 bg-dark-800 rounded-lg cursor-pointer hover:bg-dark-700 transition-colors">
-                                    <input type="checkbox" checked={checks[`${phase.num}-${i}`] || false} onChange={() => setChecks(p => ({ ...p, [`${phase.num}-${i}`]: !p[`${phase.num}-${i}`] }))} className="w-5 h-5 rounded border-gray-600 text-accent-cyan focus:ring-accent-cyan bg-dark-900" />
-                                    <span className={checks[`${phase.num}-${i}`] ? 'text-gray-500 line-through' : 'text-gray-300'}>{item}</span>
+                    <div className="card rounded-xl p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">Phase {phase.n} Checklist: {phase.name}</h3>
+                        <div className="space-y-2">
+                            {phaseChecks[phase.n].map((item,i) => (
+                                <label key={i} className="flex items-center gap-3 p-3 bg-dark-800 rounded-lg cursor-pointer hover:bg-dark-700">
+                                    <input type="checkbox" checked={checks[`${phase.n}-${i}`]||false} onChange={()=>setChecks(p=>({...p,[`${phase.n}-${i}`]:!p[`${phase.n}-${i}`]}))} className="w-5 h-5 rounded border-gray-600 text-accent-cyan"/>
+                                    <span className={checks[`${phase.n}-${i}`]?'text-gray-500 line-through':'text-gray-300'}>{item}</span>
                                 </label>
                             ))}
                         </div>
@@ -193,39 +139,81 @@
             );
         };
 
-        const PerformanceTab = ({ client }) => {
-            if (!client) return <div className="card-gradient rounded-xl p-12 text-center text-gray-500">Select a client</div>;
+        // ========== PERFORMANCE TAB (Combined) ==========
+        const PerformanceTab = ({c}) => {
+            if(!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
             return (
-                <div className="space-y-6 fade-in">
-                    <h2 className="text-2xl font-bold gradient-text">Performance Metrics</h2>
-                    <div className="grid md:grid-cols-3 gap-4">
-                        <div className="card-gradient rounded-xl p-5">
-                            <div className="text-gray-400 text-sm">Daily Budget</div>
-                            <div className="text-2xl font-bold text-white mt-1">{fmtDec(client.dailyBudget)}</div>
+                <div className="space-y-6">
+                    {/* Spend Overview */}
+                    <div>
+                        <h2 className="text-xl font-bold text-white mb-4">💰 Spend Overview</h2>
+                        <div className="grid md:grid-cols-4 gap-4">
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{fmt(c.spend)}</div><div className="text-sm text-gray-500">Total Spend</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{fmtD(c.dailyBudget)}</div><div className="text-sm text-gray-500">Daily Budget</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-cyan">{fmtD(c.spendPerDay)}</div><div className="text-sm text-gray-500">Actual/Day</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-purple">{c.weeks}</div><div className="text-sm text-gray-500">Weeks Running</div></div>
                         </div>
-                        <div className="card-gradient rounded-xl p-5">
-                            <div className="text-gray-400 text-sm">Actual Spend/Day</div>
-                            <div className="text-2xl font-bold text-white mt-1">{fmtDec(client.adSpendPerDay)}</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5">
-                            <div className="text-gray-400 text-sm">Weeks Running</div>
-                            <div className="text-2xl font-bold text-accent-cyan mt-1">{client.weeksRunning}</div>
+                        <div className="card rounded-xl p-5 mt-4">
+                            <div className="grid grid-cols-3 gap-4 text-center">
+                                <div><div className="text-lg font-bold text-white">{fmt(c.sellerSpend)}</div><div className="text-xs text-gray-500">Seller Spend</div></div>
+                                <div><div className="text-lg font-bold text-white">{fmt(c.buyerSpend)}</div><div className="text-xs text-gray-500">Buyer Spend</div></div>
+                                <div><div className="text-lg font-bold text-accent-cyan">{fmt(c.spend)}</div><div className="text-xs text-gray-500">Total</div></div>
+                            </div>
                         </div>
                     </div>
-                    <div className="card-gradient rounded-xl p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">Spend Breakdown</h3>
-                        <div className="space-y-4">
-                            <div className="flex justify-between items-center">
-                                <span className="text-gray-400">Seller Ad Spend</span>
-                                <span className="font-mono text-white">{fmt(client.sellerAdSpend)}</span>
+
+                    {/* Leads */}
+                    <div>
+                        <h2 className="text-xl font-bold text-white mb-4">🎯 Lead Generation</h2>
+                        <div className="grid md:grid-cols-4 gap-4">
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-cyan">{fmtN(c.leads)}</div><div className="text-sm text-gray-500">Total Leads</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{fmtN(c.sellerLeads)}</div><div className="text-sm text-gray-500">Seller Leads</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{fmtN(c.buyerLeads)}</div><div className="text-sm text-gray-500">Buyer Leads</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-purple">{fmtN(c.listingLeads)}</div><div className="text-sm text-gray-500">Listing Leads</div></div>
+                        </div>
+                        <div className="card rounded-xl p-5 mt-4">
+                            <h4 className="font-semibold text-white mb-3">Cost Efficiency</h4>
+                            <div className="grid md:grid-cols-3 gap-4">
+                                <div className="flex justify-between"><span className="text-gray-400">Overall CPL</span><span className="font-mono text-white">{fmtD(c.cpl)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Seller CPL</span><span className="font-mono text-white">{fmtD(c.sellerCPL)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Seller Leads/Week</span><span className="font-mono text-accent-cyan">{c.sellerLeadsWeek.toFixed(1)}</span></div>
                             </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-gray-400">Buyer Ad Spend</span>
-                                <span className="font-mono text-white">{fmt(client.buyerAdSpend)}</span>
+                        </div>
+                    </div>
+
+                    {/* Appointments */}
+                    <div>
+                        <h2 className="text-xl font-bold text-white mb-4">📅 Appointments</h2>
+                        <div className="grid md:grid-cols-4 gap-4">
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-purple">{fmtN(c.appts)}</div><div className="text-sm text-gray-500">Total Appts</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-cyan">{fmtN(c.appts7)}</div><div className="text-sm text-gray-500">Last 7 Days</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-white">{c.apptsWeek.toFixed(1)}</div><div className="text-sm text-gray-500">Appts/Week</div></div>
+                            <div className="card rounded-xl p-5 text-center"><div className="text-2xl font-bold text-accent-green">{fmtP(c.sellerLeadToAppt)}</div><div className="text-sm text-gray-500">Lead→Appt Rate</div></div>
+                        </div>
+                        <div className="card rounded-xl p-5 mt-4">
+                            <div className="grid md:grid-cols-4 gap-4">
+                                <div className="flex justify-between"><span className="text-gray-400">Seller Appts</span><span className="font-mono text-white">{fmtN(c.sellerAppts)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Cost/Seller Appt</span><span className="font-mono text-white">{fmtD(c.sellerApptCost)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Buyer Appts</span><span className="font-mono text-white">{fmtN(c.buyerAppts)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Cost/Buyer Appt</span><span className="font-mono text-white">{fmtD(c.buyerApptCost)}</span></div>
                             </div>
-                            <div className="flex justify-between items-center border-t border-dark-600 pt-4">
-                                <span className="text-white font-semibold">Total</span>
-                                <span className="font-mono text-accent-cyan font-bold">{fmt(client.totalAdSpend)}</span>
+                        </div>
+                    </div>
+
+                    {/* Deals */}
+                    <div>
+                        <h2 className="text-xl font-bold text-white mb-4">🏠 Deals & Closings</h2>
+                        <div className="grid md:grid-cols-3 gap-4">
+                            <div className="card rounded-xl p-6 text-center"><div className="text-3xl font-bold text-accent-green">{fmtN(c.deals)}</div><div className="text-sm text-gray-500 mt-1">Potential Deals</div></div>
+                            <div className="card rounded-xl p-6 text-center"><div className="text-3xl font-bold text-accent-yellow">{fmtN(c.listings)}</div><div className="text-sm text-gray-500 mt-1">Listings</div></div>
+                            <div className="card rounded-xl p-6 text-center"><div className="text-3xl font-bold text-accent-purple">{fmtN(c.buyerSigned)}</div><div className="text-sm text-gray-500 mt-1">Buyer Signed</div></div>
+                        </div>
+                        <div className="card rounded-xl p-5 mt-4">
+                            <h4 className="font-semibold text-white mb-3">ROI Metrics</h4>
+                            <div className="grid md:grid-cols-3 gap-4">
+                                <div className="flex justify-between"><span className="text-gray-400">Leads/Listing</span><span className="font-mono text-white">{c.leadsPerListing.toFixed(0)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Total Closed</span><span className="font-mono text-accent-green">{fmtN(c.listings + c.buyerSigned)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-400">Cost/Closed Deal</span><span className="font-mono text-white">{(c.listings+c.buyerSigned)>0?fmtD(c.spend/(c.listings+c.buyerSigned)):'N/A'}</span></div>
                             </div>
                         </div>
                     </div>
@@ -233,292 +221,234 @@
             );
         };
 
-        const LeadsTab = ({ client }) => {
-            if (!client) return <div className="card-gradient rounded-xl p-12 text-center text-gray-500">Select a client</div>;
-            return (
-                <div className="space-y-6 fade-in">
-                    <h2 className="text-2xl font-bold gradient-text">Lead Generation</h2>
-                    <div className="grid md:grid-cols-4 gap-4">
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-accent-cyan">{fmtNum(client.totalLeads)}</div>
-                            <div className="text-sm text-gray-500">Total Leads</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-white">{fmtNum(client.sellerLeads)}</div>
-                            <div className="text-sm text-gray-500">Seller Leads</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-white">{fmtNum(client.buyerLeads)}</div>
-                            <div className="text-sm text-gray-500">Buyer Leads</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-accent-purple">{fmtNum(client.listingLeads)}</div>
-                            <div className="text-sm text-gray-500">Listing Leads</div>
-                        </div>
-                    </div>
-                    <div className="card-gradient rounded-xl p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">Cost Efficiency</h3>
-                        <div className="grid md:grid-cols-2 gap-6">
-                            <div>
-                                <div className="flex justify-between mb-2"><span className="text-gray-400">Overall CPL</span><span className="font-mono text-white">{fmtDec(client.cpl)}</span></div>
-                                <div className="flex justify-between mb-2"><span className="text-gray-400">Seller CPL</span><span className="font-mono text-white">{fmtDec(client.costPerSellerLead)}</span></div>
-                            </div>
-                            <div>
-                                <div className="flex justify-between mb-2"><span className="text-gray-400">Seller Leads/Week</span><span className="font-mono text-accent-cyan">{client.sellerLeadsPerWeek.toFixed(1)}</span></div>
-                                <div className="flex justify-between mb-2"><span className="text-gray-400">Leads per Listing</span><span className="font-mono text-accent-purple">{client.leadsPerListing.toFixed(0)}</span></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const AppointmentsTab = ({ client }) => {
-            if (!client) return <div className="card-gradient rounded-xl p-12 text-center text-gray-500">Select a client</div>;
-            return (
-                <div className="space-y-6 fade-in">
-                    <h2 className="text-2xl font-bold gradient-text">Appointments</h2>
-                    <div className="grid md:grid-cols-4 gap-4">
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-accent-purple">{fmtNum(client.totalAppts)}</div>
-                            <div className="text-sm text-gray-500">Total Appts</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-accent-cyan">{fmtNum(client.apptsLast7Days)}</div>
-                            <div className="text-sm text-gray-500">Last 7 Days</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-white">{client.apptsPerWeek.toFixed(1)}</div>
-                            <div className="text-sm text-gray-500">Appts/Week</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-5 text-center">
-                            <div className="text-3xl font-bold text-accent-green">{fmtPct(client.sellerLeadToAppt)}</div>
-                            <div className="text-sm text-gray-500">Lead→Appt Rate</div>
-                        </div>
-                    </div>
-                    <div className="card-gradient rounded-xl p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">Appointment Breakdown</h3>
-                        <div className="grid md:grid-cols-2 gap-6">
-                            <div>
-                                <div className="flex justify-between mb-3"><span className="text-gray-400">Seller Appts</span><span className="font-mono text-white">{fmtNum(client.sellerAppts)}</span></div>
-                                <div className="flex justify-between mb-3"><span className="text-gray-400">Cost per Seller Appt</span><span className="font-mono text-white">{fmtDec(client.costPerSellerAppt)}</span></div>
-                            </div>
-                            <div>
-                                <div className="flex justify-between mb-3"><span className="text-gray-400">Buyer Appts</span><span className="font-mono text-white">{fmtNum(client.buyerAppts)}</span></div>
-                                <div className="flex justify-between mb-3"><span className="text-gray-400">Cost per Buyer Appt</span><span className="font-mono text-white">{fmtDec(client.costPerBuyerAppt)}</span></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const DealsTab = ({ client }) => {
-            if (!client) return <div className="card-gradient rounded-xl p-12 text-center text-gray-500">Select a client</div>;
-            return (
-                <div className="space-y-6 fade-in">
-                    <h2 className="text-2xl font-bold gradient-text">Deals & Closings</h2>
-                    <div className="grid md:grid-cols-3 gap-4">
-                        <div className="card-gradient rounded-xl p-6 text-center">
-                            <div className="text-4xl font-bold text-accent-green">{fmtNum(client.potentialDeals)}</div>
-                            <div className="text-sm text-gray-500 mt-2">Potential Deals</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-6 text-center">
-                            <div className="text-4xl font-bold text-accent-yellow">{fmtNum(client.listings)}</div>
-                            <div className="text-sm text-gray-500 mt-2">Listings</div>
-                        </div>
-                        <div className="card-gradient rounded-xl p-6 text-center">
-                            <div className="text-4xl font-bold text-accent-purple">{fmtNum(client.buyerSigned)}</div>
-                            <div className="text-sm text-gray-500 mt-2">Buyer Signed</div>
-                        </div>
-                    </div>
-                    <div className="card-gradient rounded-xl p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">ROI Metrics</h3>
-                        <div className="space-y-4">
-                            <div className="flex justify-between"><span className="text-gray-400">Leads per Listing</span><span className="font-mono text-white">{client.leadsPerListing.toFixed(0)}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-400">Total Closed (Listings + Buyers)</span><span className="font-mono text-accent-green">{fmtNum(client.listings + client.buyerSigned)}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-400">Cost per Closed Deal</span><span className="font-mono text-white">{(client.listings + client.buyerSigned) > 0 ? fmtDec(client.totalAdSpend / (client.listings + client.buyerSigned)) : 'N/A'}</span></div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const StrategyTab = ({ client }) => (
-            <div className="space-y-6 fade-in">
-                <h2 className="text-2xl font-bold gradient-text">Strategy & Notes</h2>
-                <div className="card-gradient rounded-xl p-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">Current Strategy</h3>
-                    <textarea className="w-full bg-dark-800 border border-dark-500 rounded-lg p-4 text-white min-h-[150px] focus:outline-none focus:border-accent-cyan" placeholder="Document the current strategy for this client..." />
-                </div>
-                <div className="card-gradient rounded-xl p-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">Action Items</h3>
-                    <textarea className="w-full bg-dark-800 border border-dark-500 rounded-lg p-4 text-white min-h-[150px] focus:outline-none focus:border-accent-cyan" placeholder="List action items and next steps..." />
-                </div>
-                <button className="px-6 py-3 bg-accent-cyan text-dark-900 font-semibold rounded-lg hover:bg-cyan-400 transition-colors">Save Strategy</button>
-            </div>
-        );
-
-        const NotesTab = ({ client }) => {
+        // ========== STRATEGY & NOTES TAB (Combined) ==========
+        const StrategyTab = ({c}) => {
             const [notes, setNotes] = useState([]);
             const [newNote, setNewNote] = useState('');
-            const addNote = () => { if (newNote.trim()) { setNotes([{ time: new Date().toLocaleString(), text: newNote, client: client?.client || 'General' }, ...notes]); setNewNote(''); } };
+            const [strategy, setStrategy] = useState('');
+            const [actions, setActions] = useState('');
+
+            const addNote = () => {
+                if(newNote.trim()) {
+                    setNotes([{time: new Date().toLocaleString(), text: newNote, client: c?.client||'General'}, ...notes]);
+                    setNewNote('');
+                }
+            };
 
             return (
-                <div className="space-y-6 fade-in">
-                    <h2 className="text-2xl font-bold gradient-text">Notes Log</h2>
-                    <div className="card-gradient rounded-xl p-6">
-                        <div className="flex gap-4">
-                            <input type="text" value={newNote} onChange={e => setNewNote(e.target.value)} onKeyPress={e => e.key === 'Enter' && addNote()} className="flex-1 bg-dark-800 border border-dark-500 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" placeholder="Add a note..." />
-                            <button onClick={addNote} className="px-6 py-3 bg-accent-cyan text-dark-900 font-semibold rounded-lg hover:bg-cyan-400">Add</button>
+                <div className="space-y-6">
+                    {/* Strategy Section */}
+                    <div>
+                        <h2 className="text-xl font-bold text-white mb-4">🧠 Strategy</h2>
+                        <div className="card rounded-xl p-6">
+                            <h4 className="font-semibold text-white mb-3">Current Strategy</h4>
+                            <textarea 
+                                value={strategy} 
+                                onChange={e=>setStrategy(e.target.value)}
+                                className="w-full bg-dark-800 border border-dark-500 rounded-lg p-4 text-white min-h-[120px] focus:outline-none focus:border-accent-cyan" 
+                                placeholder="Document the current strategy for this client..."
+                            />
+                        </div>
+                        <div className="card rounded-xl p-6 mt-4">
+                            <h4 className="font-semibold text-white mb-3">Action Items</h4>
+                            <textarea 
+                                value={actions}
+                                onChange={e=>setActions(e.target.value)}
+                                className="w-full bg-dark-800 border border-dark-500 rounded-lg p-4 text-white min-h-[120px] focus:outline-none focus:border-accent-cyan" 
+                                placeholder="List action items and next steps..."
+                            />
                         </div>
                     </div>
-                    <div className="space-y-3">
-                        {notes.length === 0 && <div className="card-gradient rounded-xl p-8 text-center text-gray-500">No notes yet</div>}
-                        {notes.map((n, i) => (
-                            <div key={i} className="card-gradient rounded-xl p-4">
-                                <div className="flex gap-4 text-sm mb-2"><span className="font-mono text-gray-500">{n.time}</span><span className="text-accent-purple">{n.client}</span></div>
-                                <div className="text-gray-300">{n.text}</div>
+
+                    {/* Notes Section */}
+                    <div>
+                        <h2 className="text-xl font-bold text-white mb-4">📝 Notes Log</h2>
+                        <div className="card rounded-xl p-6">
+                            <div className="flex gap-4">
+                                <input 
+                                    type="text" 
+                                    value={newNote} 
+                                    onChange={e=>setNewNote(e.target.value)} 
+                                    onKeyPress={e=>e.key==='Enter'&&addNote()}
+                                    className="flex-1 bg-dark-800 border border-dark-500 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" 
+                                    placeholder="Add a note..."
+                                />
+                                <button onClick={addNote} className="px-6 py-3 bg-accent-cyan text-dark-900 font-semibold rounded-lg hover:bg-cyan-400">Add</button>
                             </div>
-                        ))}
+                        </div>
+                        <div className="space-y-3 mt-4">
+                            {notes.length===0 && <div className="card rounded-xl p-8 text-center text-gray-500">No notes yet. Add your first note above.</div>}
+                            {notes.map((n,i) => (
+                                <div key={i} className="card rounded-xl p-4">
+                                    <div className="flex gap-4 text-sm mb-2">
+                                        <span className="font-mono text-gray-500">{n.time}</span>
+                                        <span className="text-accent-purple">{n.client}</span>
+                                    </div>
+                                    <div className="text-gray-300">{n.text}</div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        const AIChat = ({ open, onClose, client, clients }) => {
+        // ========== AI CHAT ==========
+        const AIChat = ({open, onClose, client}) => {
             const [msgs, setMsgs] = useState([]);
             const [input, setInput] = useState('');
             const [loading, setLoading] = useState(false);
 
             const send = () => {
-                if (!input.trim()) return;
-                setMsgs(p => [...p, { role: 'user', content: input }]);
+                if(!input.trim()) return;
+                setMsgs(p=>[...p, {role:'user', content:input}]);
                 setLoading(true);
                 const q = input.toLowerCase();
                 setInput('');
 
                 setTimeout(() => {
                     let res = '';
-                    if (client) {
+                    if(client) {
                         const c = client;
-                        if (q.includes('summary') || q.includes('overview')) {
-                            res = `📊 ${c.client} Summary:\n• Day ${c.daysRunning} (Phase ${getPhase(c.daysRunning).num})\n• Spend: ${fmt(c.totalAdSpend)}\n• Leads: ${fmtNum(c.totalLeads)} (${fmtDec(c.cpl)} CPL)\n• Appts: ${fmtNum(c.totalAppts)}\n• Deals: ${fmtNum(c.potentialDeals)}\n• Listings: ${fmtNum(c.listings)}`;
-                        } else if (q.includes('improve') || q.includes('optimize')) {
-                            const health = getHealth(c.cpl);
-                            res = health === 'Red' ? `⚠️ CPL is high at ${fmtDec(c.cpl)}. Consider:\n• Reviewing ad targeting\n• Testing new creatives\n• Adjusting budget allocation` : health === 'Yellow' ? `📈 CPL at ${fmtDec(c.cpl)} - room to improve:\n• A/B test headlines\n• Refine audience\n• Check landing page conversion` : `✅ CPL looking good at ${fmtDec(c.cpl)}!\n• Consider scaling budget\n• Expand to new audiences\n• Maintain current strategy`;
+                        if(q.includes('summary')||q.includes('overview')) {
+                            res = `📊 ${c.client} Summary:\n• Day ${c.days} (Phase ${getPhase(c.days).n})\n• Spend: ${fmt(c.spend)}\n• Leads: ${fmtN(c.leads)} (${fmtD(c.cpl)} CPL)\n• Appts: ${fmtN(c.appts)}\n• Deals: ${fmtN(c.deals)}\n• Listings: ${fmtN(c.listings)}`;
+                        } else if(q.includes('improve')||q.includes('optimize')||q.includes('recommend')) {
+                            const h = getHealth(c.cpl);
+                            res = h==='Red' ? `⚠️ CPL is high at ${fmtD(c.cpl)}. Recommendations:\n• Review ad targeting\n• Test new creatives\n• Check landing page\n• Adjust budget allocation` 
+                                : h==='Yellow' ? `📈 CPL at ${fmtD(c.cpl)} - room to improve:\n• A/B test headlines\n• Refine audience\n• Optimize ad schedule\n• Review follow-up speed`
+                                : `✅ Great CPL at ${fmtD(c.cpl)}!\n• Consider scaling budget\n• Expand to new audiences\n• Document what's working\n• Test similar campaigns`;
+                        } else if(q.includes('appt')||q.includes('appointment')) {
+                            res = `📅 Appointment Analysis:\n• Total: ${fmtN(c.appts)}\n• Last 7 Days: ${fmtN(c.appts7)}\n• Per Week: ${c.apptsWeek.toFixed(1)}\n• Lead→Appt: ${fmtP(c.sellerLeadToAppt)}\n• Cost/Appt: ${fmtD(c.sellerApptCost)}`;
+                        } else if(q.includes('deal')||q.includes('close')||q.includes('listing')) {
+                            res = `🏠 Deal Pipeline:\n• Potential Deals: ${fmtN(c.deals)}\n• Listings: ${fmtN(c.listings)}\n• Buyer Signed: ${fmtN(c.buyerSigned)}\n• Leads/Listing: ${c.leadsPerListing.toFixed(0)}`;
                         } else {
-                            res = `Ask me about ${c.client}:\n• "Give me a summary"\n• "How can we improve?"\n• "What's the CPL trend?"`;
+                            res = `Ask me about ${c.client}:\n• "Give me a summary"\n• "How can we improve?"\n• "Appointment analysis"\n• "Deal pipeline"`;
                         }
                     } else {
                         res = 'Select a client first, then ask me about their performance!';
                     }
-                    setMsgs(p => [...p, { role: 'assistant', content: res }]);
+                    setMsgs(p=>[...p, {role:'assistant', content:res}]);
                     setLoading(false);
                 }, 500);
             };
 
-            if (!open) return null;
+            if(!open) return null;
             return (
                 <div className="fixed inset-y-0 right-0 w-96 bg-dark-800 border-l border-dark-600 z-50 flex flex-col slide-in">
                     <div className="p-4 border-b border-dark-600 flex justify-between">
-                        <div><h3 className="font-bold text-white">AI Assistant</h3><p className="text-xs text-gray-500">{client?.client || 'No client selected'}</p></div>
+                        <div><h3 className="font-bold text-white">AI Assistant</h3><p className="text-xs text-gray-500">{client?.client||'No client selected'}</p></div>
                         <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
-                        {msgs.length === 0 && (
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar">
+                        {msgs.length===0 && (
                             <div className="text-center py-8 text-gray-500">
                                 <div className="text-4xl mb-3">🤖</div>
-                                {['Give me a summary', 'How can we improve?'].map((s, i) => (
-                                    <button key={i} onClick={() => setInput(s)} className="block w-full text-left px-3 py-2 mb-2 bg-dark-700 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-dark-600">{s}</button>
+                                {['Give me a summary','How can we improve?','Appointment analysis'].map((s,i)=>(
+                                    <button key={i} onClick={()=>setInput(s)} className="block w-full text-left px-3 py-2 mb-2 bg-dark-700 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-dark-600">{s}</button>
                                 ))}
                             </div>
                         )}
-                        {msgs.map((m, i) => <div key={i} className={m.role === 'user' ? 'ml-8' : 'mr-8'}><div className={`p-3 rounded-xl whitespace-pre-wrap ${m.role === 'user' ? 'bg-accent-cyan/20 text-cyan-100' : 'bg-dark-700 text-gray-300'}`}>{m.content}</div></div>)}
+                        {msgs.map((m,i)=><div key={i} className={m.role==='user'?'ml-8':'mr-8'}><div className={`p-3 rounded-xl whitespace-pre-wrap ${m.role==='user'?'bg-accent-cyan/20 text-cyan-100':'bg-dark-700 text-gray-300'}`}>{m.content}</div></div>)}
                         {loading && <div className="mr-8"><div className="bg-dark-700 text-gray-500 p-3 rounded-xl">Thinking...</div></div>}
                     </div>
                     <div className="p-4 border-t border-dark-600 flex gap-2">
-                        <input type="text" value={input} onChange={e => setInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && send()} className="flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan" placeholder="Ask..." />
+                        <input type="text" value={input} onChange={e=>setInput(e.target.value)} onKeyPress={e=>e.key==='Enter'&&send()} className="flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan" placeholder="Ask..."/>
                         <button onClick={send} className="px-4 py-2 bg-accent-cyan text-dark-900 rounded-lg font-semibold">Send</button>
                     </div>
                 </div>
             );
         };
 
+        // ========== MAIN APP ==========
         const App = () => {
             const [clients, setClients] = useState([]);
             const [selected, setSelected] = useState(null);
-            const [activeTab, setActiveTab] = useState('overview');
+            const [tab, setTab] = useState('overview');
             const [aiOpen, setAiOpen] = useState(false);
             const [loading, setLoading] = useState(true);
 
-            const sample = [
-                { client: 'Sample A', state: 'TX', campaign: 'Seller', callingStatus: 'Calling', daysRunning: 45, totalAdSpend: 5000, totalLeads: 200, cpl: 25, sellerLeads: 150, buyerLeads: 50, costPerSellerLead: 28, sellerLeadsPerWeek: 20, listingLeads: 10, totalAppts: 30, apptsLast7Days: 5, apptsPerWeek: 4, sellerAppts: 20, sellerLeadToAppt: 13, costPerSellerAppt: 180, buyerAppts: 10, costPerBuyerAppt: 100, potentialDeals: 5, listings: 2, buyerSigned: 1, leadsPerListing: 100, dailyBudget: 100, adSpendPerDay: 95, weeksRunning: 6, sellerAdSpend: 3500, buyerAdSpend: 1500 },
-            ];
-
             useEffect(() => {
-                fetch(GOOGLE_SHEET_CSV_URL)
-                    .then(r => r.ok ? r.text() : Promise.reject())
-                    .then(csv => {
-                        // Skip first 2 rows (header decoration rows), then use row 3 as headers
+                fetch(URLS.clients)
+                    .then(r=>r.text())
+                    .then(csv=>{
                         const lines = csv.split('\n');
-                        const csvWithoutDecorationRows = lines.slice(2).join('\n');
-                        const rows = Papa.parse(csvWithoutDecorationRows, { header: true, skipEmptyLines: true }).data.map(mapRow).filter(r => r.client?.trim());
-                        setClients(rows.length > 0 ? rows : sample);
+                        const data = Papa.parse(lines.slice(2).join('\n'), {header:true, skipEmptyLines:true}).data.map(mapClient).filter(r=>r.client);
+                        setClients(data);
                         setLoading(false);
                     })
-                    .catch(() => { setClients(sample); setLoading(false); });
+                    .catch(()=>setLoading(false));
             }, []);
 
             const renderTab = () => {
-                switch (activeTab) {
-                    case 'overview': return <OverviewTab client={selected} />;
-                    case 'performance': return <PerformanceTab client={selected} />;
-                    case 'leads': return <LeadsTab client={selected} />;
-                    case 'appointments': return <AppointmentsTab client={selected} />;
-                    case 'deals': return <DealsTab client={selected} />;
-                    case 'strategy': return <StrategyTab client={selected} />;
-                    case 'notes': return <NotesTab client={selected} />;
-                    default: return <OverviewTab client={selected} />;
+                switch(tab) {
+                    case 'overview': return <OverviewTab c={selected}/>;
+                    case 'performance': return <PerformanceTab c={selected}/>;
+                    case 'strategy': return <StrategyTab c={selected}/>;
+                    default: return <OverviewTab c={selected}/>;
                 }
             };
 
-            if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-5xl">⏳</div></div>;
+            if(loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
 
             return (
                 <div className="flex min-h-screen">
+                    {/* Sidebar */}
                     <aside className="w-64 bg-dark-800 border-r border-dark-600 flex flex-col">
-                        <div className="p-5 border-b border-dark-600"><h1 className="text-xl font-bold gradient-text">VAM Client Hub</h1><p className="text-xs text-gray-500 mt-1">Success Manager</p></div>
-                        <div className="p-4"><ClientSelector clients={clients} selected={selected} onSelect={setSelected} /></div>
-                        <nav className="flex-1 overflow-y-auto scrollbar-thin py-2">
-                            {tabs.map(t => <button key={t.id} onClick={() => setActiveTab(t.id)} className={`w-full flex items-center gap-3 px-5 py-3 text-left transition-all ${activeTab === t.id ? 'tab-active text-white' : 'text-gray-400 hover:text-white hover:bg-dark-700'}`}><span>{t.icon}</span><span className="text-sm font-medium">{t.name}</span></button>)}
+                        <div className="p-5 border-b border-dark-600">
+                            <h1 className="text-xl font-bold gradient-text">VAM Client Hub</h1>
+                            <p className="text-xs text-gray-500 mt-1">Success Manager</p>
+                        </div>
+                        <div className="p-4">
+                            <select 
+                                value={selected?.client||''} 
+                                onChange={e=>setSelected(clients.find(c=>c.client===e.target.value))}
+                                className="w-full bg-dark-700 border border-dark-500 rounded-lg px-4 py-3 text-white appearance-none cursor-pointer hover:border-accent-cyan/50 focus:outline-none focus:border-accent-cyan"
+                            >
+                                <option value="">Select a client...</option>
+                                {clients.map(c=><option key={c.client} value={c.client}>{c.client}</option>)}
+                            </select>
+                        </div>
+                        <nav className="flex-1 py-2">
+                            {tabs.map(t=>(
+                                <button 
+                                    key={t.id} 
+                                    onClick={()=>setTab(t.id)} 
+                                    className={`w-full flex items-center gap-3 px-5 py-3 text-left transition-all ${tab===t.id?'tab-active text-white':'text-gray-400 hover:text-white hover:bg-dark-700'}`}
+                                >
+                                    <span>{t.icon}</span>
+                                    <span className="text-sm font-medium">{t.name}</span>
+                                </button>
+                            ))}
                         </nav>
-                        <div className="p-4 border-t border-dark-600"><a href="dashboard.html" className="block w-full text-center py-2 bg-dark-700 hover:bg-dark-600 text-gray-400 hover:text-white rounded-lg text-sm">→ CEO Dashboard</a></div>
+                        <div className="p-4 border-t border-dark-600">
+                            <a href="dashboard.html" className="block w-full text-center py-2 bg-dark-700 hover:bg-dark-600 text-gray-400 hover:text-white rounded-lg text-sm">→ CEO Dashboard</a>
+                        </div>
                     </aside>
 
+                    {/* Main Content */}
                     <main className="flex-1 flex flex-col">
                         <header className="bg-dark-800/50 backdrop-blur border-b border-dark-600 px-8 py-4 flex justify-between items-center">
                             <div>
                                 {selected ? (
                                     <div className="flex items-center gap-4">
                                         <h2 className="text-xl font-bold text-white">{selected.client}</h2>
-                                        <HealthBadge health={getHealth(selected.cpl)} size="sm" />
-                                        <span className="text-gray-500">Day {selected.daysRunning}</span>
+                                        <Badge health={getHealth(selected.cpl)}/>
+                                        <span className="text-gray-500">Day {selected.days}</span>
                                     </div>
                                 ) : <h2 className="text-xl text-gray-500">Select a client</h2>}
                             </div>
-                            <button onClick={() => setAiOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-accent-cyan to-accent-purple text-dark-900 font-semibold rounded-lg">🤖 Ask AI</button>
+                            <button onClick={()=>setAiOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-accent-cyan to-accent-purple text-dark-900 font-semibold rounded-lg">🤖 Ask AI</button>
                         </header>
-                        <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">{renderTab()}</div>
+                        <div className="flex-1 overflow-y-auto p-8 scrollbar">{renderTab()}</div>
                     </main>
 
-                    <AIChat open={aiOpen} onClose={() => setAiOpen(false)} client={selected} clients={clients} />
-                    {!aiOpen && <button onClick={() => setAiOpen(true)} className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-accent-cyan to-accent-purple rounded-full flex items-center justify-center text-2xl shadow-lg hover:scale-110 transition-transform z-40">🤖</button>}
+                    <AIChat open={aiOpen} onClose={()=>setAiOpen(false)} client={selected}/>
+                    {!aiOpen && <button onClick={()=>setAiOpen(true)} className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-accent-cyan to-accent-purple rounded-full flex items-center justify-center text-2xl shadow-lg hover:scale-110 transition-transform z-40">🤖</button>}
                 </div>
             );
         };
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
     </script>
 </body>
 </html>
