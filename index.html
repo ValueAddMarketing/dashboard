@@ -33,6 +33,8 @@
         .scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
         .section-title { font-size: 0.875rem; font-weight: 600; color: #a855f7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
         .saving { opacity: 0.6; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     </style>
 </head>
 <body class="min-h-screen">
@@ -122,7 +124,6 @@
                 e.preventDefault();
                 setLoading(true);
                 setError('');
-
                 try {
                     let result;
                     if (isSignUp) {
@@ -149,51 +150,22 @@
                             <h1 className="text-3xl font-bold gradient-text mb-2">VAM Client Hub</h1>
                             <p className="text-gray-500">Sign in to access the dashboard</p>
                         </div>
-                        
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label className="block text-sm text-gray-400 mb-2">Email</label>
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={e => setEmail(e.target.value)}
-                                    className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan"
-                                    placeholder="you@company.com"
-                                    required
-                                />
+                                <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" placeholder="you@company.com" required />
                             </div>
                             <div>
                                 <label className="block text-sm text-gray-400 mb-2">Password</label>
-                                <input
-                                    type="password"
-                                    value={password}
-                                    onChange={e => setPassword(e.target.value)}
-                                    className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan"
-                                    placeholder="••••••••"
-                                    required
-                                />
+                                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" placeholder="••••••••" required />
                             </div>
-                            
-                            {error && (
-                                <div className={`p-3 rounded-lg text-sm ${error.includes('Check your email') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                                    {error}
-                                </div>
-                            )}
-                            
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className="w-full py-3 bg-gradient-to-r from-accent-cyan to-accent-purple text-black font-semibold rounded-lg hover:opacity-90 disabled:opacity-50"
-                            >
+                            {error && <div className={`p-3 rounded-lg text-sm ${error.includes('Check your email') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>{error}</div>}
+                            <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-accent-cyan to-accent-purple text-black font-semibold rounded-lg hover:opacity-90 disabled:opacity-50">
                                 {loading ? 'Please wait...' : (isSignUp ? 'Create Account' : 'Sign In')}
                             </button>
                         </form>
-                        
                         <div className="mt-6 text-center">
-                            <button
-                                onClick={() => setIsSignUp(!isSignUp)}
-                                className="text-gray-500 hover:text-white text-sm"
-                            >
+                            <button onClick={() => setIsSignUp(!isSignUp)} className="text-gray-500 hover:text-white text-sm">
                                 {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
                             </button>
                         </div>
@@ -206,6 +178,7 @@
         const tabs = [
             { id: 'info', name: 'Client Information', icon: '👤' },
             { id: 'performance', name: 'Performance', icon: '📈' },
+            { id: 'meetings', name: 'Meeting Notes', icon: '🎙️' },
             { id: 'strategy', name: 'Strategy & Notes', icon: '📝' },
             { id: 'activity', name: 'Activity Log', icon: '📋' },
         ];
@@ -228,6 +201,7 @@
             </div>
         );
 
+        // ========== CLIENT INFO TAB ==========
         const ClientInfoTab = ({c, s}) => {
             if(!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
             return (
@@ -302,13 +276,13 @@
                             <DataRow label="Revenue Contracted" value={s?.revenueContracted} highlight color="text-accent-green"/>
                             <DataRow label="Contract Length" value={s?.contractLength}/>
                             <DataRow label="Platform" value={s?.platform}/><DataRow label="Amount Collected" value={s?.amountCollected} highlight color="text-accent-green"/>
-                            <DataRow label="Contract Notes" value={s?.contractNotes}/>
                         </Section>
                     </div>
                 </div>
             );
         };
 
+        // ========== PERFORMANCE TAB ==========
         const PerformanceTab = ({c}) => {
             if(!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
             return (
@@ -340,7 +314,378 @@
             );
         };
 
-        // Strategy Tab with User Tracking
+        // ========== MEETING NOTES TAB WITH AI SUMMARY ==========
+        const MeetingsTab = ({c}) => {
+            const { user } = useAuth();
+            const [transcript, setTranscript] = useState('');
+            const [meetingDate, setMeetingDate] = useState(new Date().toISOString().split('T')[0]);
+            const [meetingType, setMeetingType] = useState('check-in');
+            const [summary, setSummary] = useState(null);
+            const [processing, setProcessing] = useState(false);
+            const [meetings, setMeetings] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [selectedMeeting, setSelectedMeeting] = useState(null);
+
+            useEffect(() => {
+                if (c?.client) loadMeetings();
+            }, [c?.client]);
+
+            const loadMeetings = async () => {
+                if (!c?.client) return;
+                setLoading(true);
+                try {
+                    const { data } = await supabase
+                        .from('meeting_notes')
+                        .select('*')
+                        .eq('client_name', c.client)
+                        .order('meeting_date', { ascending: false });
+                    if (data) setMeetings(data);
+                } catch (err) {
+                    console.error('Load meetings error:', err);
+                }
+                setLoading(false);
+            };
+
+            const processTranscript = async () => {
+                if (!transcript.trim()) return;
+                setProcessing(true);
+                setSummary(null);
+
+                try {
+                    // Call Claude API for summarization
+                    const response = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 1500,
+                            messages: [{
+                                role: 'user',
+                                content: `You are a meeting summarizer for a real estate marketing company (Veriad Marketing). Analyze this client meeting transcript and extract key information.
+
+Client Name: ${c?.client || 'Unknown'}
+Meeting Type: ${meetingType}
+Date: ${meetingDate}
+
+TRANSCRIPT:
+${transcript}
+
+Please provide a structured summary in the following JSON format:
+{
+  "summary": "2-3 sentence overview of the meeting",
+  "clientSentiment": "positive/neutral/negative/concerned",
+  "keyPoints": ["point 1", "point 2", "point 3"],
+  "clientConcerns": ["concern 1", "concern 2"],
+  "actionItems": [
+    {"task": "description", "owner": "VAM/Client", "priority": "high/medium/low"}
+  ],
+  "clientWins": ["win 1", "win 2"],
+  "followUpDate": "suggested follow-up date or null",
+  "adPerformanceNotes": "any notes about ad performance mentioned",
+  "leadQualityFeedback": "any feedback about lead quality",
+  "upsellOpportunities": ["opportunity 1"],
+  "riskLevel": "low/medium/high",
+  "nextSteps": "recommended next steps"
+}
+
+Return ONLY valid JSON, no other text.`
+                            }]
+                        })
+                    });
+
+                    const data = await response.json();
+                    const content = data.content?.[0]?.text || '';
+                    
+                    // Parse the JSON response
+                    const parsed = JSON.parse(content);
+                    setSummary(parsed);
+
+                } catch (err) {
+                    console.error('AI processing error:', err);
+                    // Fallback to basic extraction if AI fails
+                    setSummary({
+                        summary: "Meeting transcript received. AI processing unavailable - please review manually.",
+                        clientSentiment: "neutral",
+                        keyPoints: ["Transcript uploaded for manual review"],
+                        clientConcerns: [],
+                        actionItems: [],
+                        clientWins: [],
+                        followUpDate: null,
+                        adPerformanceNotes: "",
+                        leadQualityFeedback: "",
+                        upsellOpportunities: [],
+                        riskLevel: "medium",
+                        nextSteps: "Review transcript manually"
+                    });
+                }
+                setProcessing(false);
+            };
+
+            const saveMeeting = async () => {
+                if (!summary || !c?.client || !user) return;
+                try {
+                    const { data, error } = await supabase.from('meeting_notes').insert({
+                        client_name: c.client,
+                        meeting_date: meetingDate,
+                        meeting_type: meetingType,
+                        transcript: transcript,
+                        summary: summary.summary,
+                        client_sentiment: summary.clientSentiment,
+                        key_points: summary.keyPoints,
+                        client_concerns: summary.clientConcerns,
+                        action_items: summary.actionItems,
+                        client_wins: summary.clientWins,
+                        follow_up_date: summary.followUpDate,
+                        ad_performance_notes: summary.adPerformanceNotes,
+                        lead_quality_feedback: summary.leadQualityFeedback,
+                        risk_level: summary.riskLevel,
+                        next_steps: summary.nextSteps,
+                        user_id: user.id,
+                        user_email: user.email
+                    }).select().single();
+
+                    if (error) throw error;
+                    
+                    setMeetings([data, ...meetings]);
+                    setTranscript('');
+                    setSummary(null);
+                    
+                    // Log activity
+                    await supabase.from('activity_log').insert({
+                        user_id: user.id,
+                        user_email: user.email,
+                        client_name: c.client,
+                        action: 'Added meeting notes',
+                        details: `${meetingType} - ${meetingDate}`
+                    });
+
+                    alert('Meeting saved successfully!');
+                } catch (err) {
+                    console.error('Save error:', err);
+                    alert('Error saving meeting');
+                }
+            };
+
+            const deleteMeeting = async (id) => {
+                if (!confirm('Delete this meeting?')) return;
+                try {
+                    await supabase.from('meeting_notes').delete().eq('id', id);
+                    setMeetings(meetings.filter(m => m.id !== id));
+                    if (selectedMeeting?.id === id) setSelectedMeeting(null);
+                } catch (err) {
+                    console.error('Delete error:', err);
+                }
+            };
+
+            if (!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view meeting notes</div>;
+
+            const sentimentColors = {
+                positive: 'bg-green-500/20 text-green-400 border-green-500/30',
+                neutral: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+                negative: 'bg-red-500/20 text-red-400 border-red-500/30',
+                concerned: 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+            };
+
+            const riskColors = {
+                low: 'bg-green-500/20 text-green-400',
+                medium: 'bg-amber-500/20 text-amber-400',
+                high: 'bg-red-500/20 text-red-400'
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* New Meeting Input */}
+                    <div className="card rounded-xl p-6">
+                        <h3 className="text-lg font-bold text-white mb-4">🎙️ New Meeting Transcript</h3>
+                        <div className="grid md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Meeting Date</label>
+                                <input type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white" />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Meeting Type</label>
+                                <select value={meetingType} onChange={e => setMeetingType(e.target.value)} className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white">
+                                    <option value="check-in">Check-in Call</option>
+                                    <option value="onboarding">Onboarding</option>
+                                    <option value="launch">Launch Call</option>
+                                    <option value="review">Performance Review</option>
+                                    <option value="concern">Concern/Issue Call</option>
+                                    <option value="upsell">Upsell Discussion</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                        <textarea
+                            value={transcript}
+                            onChange={e => setTranscript(e.target.value)}
+                            placeholder="Paste your meeting transcript here (from Fathom, Otter, Zoom, etc.)..."
+                            className="w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[200px] focus:outline-none focus:border-accent-cyan"
+                        />
+                        <div className="flex gap-4 mt-4">
+                            <button
+                                onClick={processTranscript}
+                                disabled={!transcript.trim() || processing}
+                                className="px-6 py-3 bg-gradient-to-r from-accent-cyan to-accent-purple text-black font-semibold rounded-lg disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {processing ? (
+                                    <><span className="pulse">🤖</span> Analyzing...</>
+                                ) : (
+                                    <>🤖 Analyze with AI</>
+                                )}
+                            </button>
+                            {summary && (
+                                <button onClick={saveMeeting} className="px-6 py-3 bg-accent-green text-black font-semibold rounded-lg">
+                                    💾 Save Meeting
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* AI Summary Results */}
+                    {summary && (
+                        <div className="card rounded-xl p-6 border border-accent-cyan/30">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-white">✨ AI Summary</h3>
+                                <div className="flex gap-2">
+                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${sentimentColors[summary.clientSentiment]}`}>
+                                        {summary.clientSentiment?.toUpperCase()}
+                                    </span>
+                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${riskColors[summary.riskLevel]}`}>
+                                        {summary.riskLevel?.toUpperCase()} RISK
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <p className="text-gray-300 mb-6">{summary.summary}</p>
+                            
+                            <div className="grid md:grid-cols-2 gap-6">
+                                {summary.keyPoints?.length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-accent-cyan mb-2">📌 Key Points</h4>
+                                        <ul className="space-y-1">
+                                            {summary.keyPoints.map((p, i) => <li key={i} className="text-gray-300 text-sm">• {p}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                                
+                                {summary.clientConcerns?.length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-amber-400 mb-2">⚠️ Client Concerns</h4>
+                                        <ul className="space-y-1">
+                                            {summary.clientConcerns.map((c, i) => <li key={i} className="text-gray-300 text-sm">• {c}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                                
+                                {summary.clientWins?.length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-green-400 mb-2">🎉 Client Wins</h4>
+                                        <ul className="space-y-1">
+                                            {summary.clientWins.map((w, i) => <li key={i} className="text-gray-300 text-sm">• {w}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                                
+                                {summary.actionItems?.length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-accent-purple mb-2">✅ Action Items</h4>
+                                        <ul className="space-y-2">
+                                            {summary.actionItems.map((a, i) => (
+                                                <li key={i} className="text-sm flex items-start gap-2">
+                                                    <span className={`px-2 py-0.5 rounded text-xs ${a.priority === 'high' ? 'bg-red-500/20 text-red-400' : a.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                                                        {a.priority}
+                                                    </span>
+                                                    <span className="text-gray-300">{a.task}</span>
+                                                    <span className="text-gray-500">({a.owner})</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+
+                            {(summary.adPerformanceNotes || summary.leadQualityFeedback) && (
+                                <div className="grid md:grid-cols-2 gap-4 mt-6 pt-4 border-t border-dark-600">
+                                    {summary.adPerformanceNotes && (
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-gray-400 mb-1">Ad Performance Notes</h4>
+                                            <p className="text-gray-300 text-sm">{summary.adPerformanceNotes}</p>
+                                        </div>
+                                    )}
+                                    {summary.leadQualityFeedback && (
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-gray-400 mb-1">Lead Quality Feedback</h4>
+                                            <p className="text-gray-300 text-sm">{summary.leadQualityFeedback}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {summary.nextSteps && (
+                                <div className="mt-4 pt-4 border-t border-dark-600">
+                                    <h4 className="text-sm font-semibold text-accent-cyan mb-1">🎯 Next Steps</h4>
+                                    <p className="text-gray-300">{summary.nextSteps}</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Past Meetings */}
+                    <div className="card rounded-xl p-6">
+                        <h3 className="text-lg font-bold text-white mb-4">📚 Meeting History</h3>
+                        {loading ? (
+                            <div className="text-center py-8 text-gray-500">Loading meetings...</div>
+                        ) : meetings.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500">No meetings recorded yet</div>
+                        ) : (
+                            <div className="space-y-3">
+                                {meetings.map(m => (
+                                    <div key={m.id} className={`bg-dark-700 rounded-xl p-4 cursor-pointer transition-all ${selectedMeeting?.id === m.id ? 'ring-2 ring-accent-cyan' : 'hover:bg-dark-600'}`} onClick={() => setSelectedMeeting(selectedMeeting?.id === m.id ? null : m)}>
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="text-white font-semibold">{m.meeting_type?.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
+                                                    <span className={`px-2 py-0.5 rounded text-xs ${sentimentColors[m.client_sentiment]}`}>{m.client_sentiment}</span>
+                                                    <span className={`px-2 py-0.5 rounded text-xs ${riskColors[m.risk_level]}`}>{m.risk_level} risk</span>
+                                                </div>
+                                                <div className="text-gray-500 text-sm">{new Date(m.meeting_date).toLocaleDateString()} • by {getDisplayName(m.user_email)}</div>
+                                            </div>
+                                            <button onClick={(e) => { e.stopPropagation(); deleteMeeting(m.id); }} className="text-gray-600 hover:text-red-400">✕</button>
+                                        </div>
+                                        <p className="text-gray-400 text-sm mt-2">{m.summary}</p>
+                                        
+                                        {selectedMeeting?.id === m.id && (
+                                            <div className="mt-4 pt-4 border-t border-dark-600 space-y-4">
+                                                {m.key_points?.length > 0 && (
+                                                    <div>
+                                                        <h5 className="text-xs font-semibold text-accent-cyan mb-1">Key Points</h5>
+                                                        <ul className="text-sm text-gray-300">{m.key_points.map((p,i) => <li key={i}>• {p}</li>)}</ul>
+                                                    </div>
+                                                )}
+                                                {m.action_items?.length > 0 && (
+                                                    <div>
+                                                        <h5 className="text-xs font-semibold text-accent-purple mb-1">Action Items</h5>
+                                                        <ul className="text-sm text-gray-300">{m.action_items.map((a,i) => <li key={i}>• [{a.priority}] {a.task} ({a.owner})</li>)}</ul>
+                                                    </div>
+                                                )}
+                                                {m.next_steps && (
+                                                    <div>
+                                                        <h5 className="text-xs font-semibold text-gray-400 mb-1">Next Steps</h5>
+                                                        <p className="text-sm text-gray-300">{m.next_steps}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== STRATEGY TAB ==========
         const StrategyTab = ({c}) => {
             const { user } = useAuth();
             const [notes, setNotes] = useState([]);
@@ -352,39 +697,23 @@
             const [saveStatus, setSaveStatus] = useState('');
             const [lastEditedBy, setLastEditedBy] = useState('');
 
-            useEffect(() => {
-                if (!c?.client) return;
-                loadData();
-            }, [c?.client]);
+            useEffect(() => { if (c?.client) loadData(); }, [c?.client]);
 
             const loadData = async () => {
                 if (!c?.client) return;
                 setLoading(true);
                 try {
-                    const { data: notesData } = await supabase
-                        .from('client_notes')
-                        .select('*')
-                        .eq('client_name', c.client)
-                        .order('created_at', { ascending: false });
+                    const { data: notesData } = await supabase.from('client_notes').select('*').eq('client_name', c.client).order('created_at', { ascending: false });
                     if (notesData) setNotes(notesData);
-
-                    const { data: strategyData } = await supabase
-                        .from('client_strategy')
-                        .select('*')
-                        .eq('client_name', c.client)
-                        .single();
+                    const { data: strategyData } = await supabase.from('client_strategy').select('*').eq('client_name', c.client).single();
                     if (strategyData) {
                         setStrategy(strategyData.strategy_text || '');
                         setActionItems(strategyData.action_items || '');
                         setLastEditedBy(strategyData.last_edited_by || '');
                     } else {
-                        setStrategy('');
-                        setActionItems('');
-                        setLastEditedBy('');
+                        setStrategy(''); setActionItems(''); setLastEditedBy('');
                     }
-                } catch (err) {
-                    console.error('Load error:', err);
-                }
+                } catch (err) { console.error('Load error:', err); }
                 setLoading(false);
             };
 
@@ -396,35 +725,16 @@
 
             const saveStrategy = async () => {
                 if (!c?.client || !user) return;
-                setSaving(true);
-                setSaveStatus('Saving...');
+                setSaving(true); setSaveStatus('Saving...');
                 try {
                     await supabase.from('client_strategy').upsert({
-                        client_name: c.client,
-                        strategy_text: strategy,
-                        action_items: actionItems,
-                        user_id: user.id,
-                        user_email: user.email,
-                        last_edited_by: user.email,
-                        updated_at: new Date().toISOString()
+                        client_name: c.client, strategy_text: strategy, action_items: actionItems,
+                        user_id: user.id, user_email: user.email, last_edited_by: user.email, updated_at: new Date().toISOString()
                     }, { onConflict: 'client_name' });
-
-                    // Log activity
-                    await supabase.from('activity_log').insert({
-                        user_id: user.id,
-                        user_email: user.email,
-                        client_name: c.client,
-                        action: 'Updated strategy',
-                        details: 'Strategy notes modified'
-                    });
-
                     setLastEditedBy(user.email);
                     setSaveStatus('✓ Saved');
                     setTimeout(() => setSaveStatus(''), 2000);
-                } catch (err) {
-                    console.error('Save error:', err);
-                    setSaveStatus('Error');
-                }
+                } catch (err) { console.error('Save error:', err); setSaveStatus('Error'); }
                 setSaving(false);
             };
 
@@ -433,47 +743,20 @@
                 setSaving(true);
                 try {
                     const { data, error } = await supabase.from('client_notes').insert({
-                        client_name: c.client,
-                        note_text: newNote,
-                        user_id: user.id,
-                        user_email: user.email,
-                        created_by: user.email
+                        client_name: c.client, note_text: newNote, user_id: user.id, user_email: user.email, created_by: user.email
                     }).select().single();
-                    
                     if (error) throw error;
                     setNotes([data, ...notes]);
                     setNewNote('');
-
-                    // Log activity
-                    await supabase.from('activity_log').insert({
-                        user_id: user.id,
-                        user_email: user.email,
-                        client_name: c.client,
-                        action: 'Added note',
-                        details: newNote.substring(0, 100)
-                    });
-                } catch (err) {
-                    console.error('Add note error:', err);
-                }
+                    await supabase.from('activity_log').insert({ user_id: user.id, user_email: user.email, client_name: c.client, action: 'Added note', details: newNote.substring(0, 100) });
+                } catch (err) { console.error('Add note error:', err); }
                 setSaving(false);
             };
 
             const deleteNote = async (id) => {
                 if (!confirm('Delete this note?')) return;
-                try {
-                    await supabase.from('client_notes').delete().eq('id', id);
-                    setNotes(notes.filter(n => n.id !== id));
-                    
-                    await supabase.from('activity_log').insert({
-                        user_id: user.id,
-                        user_email: user.email,
-                        client_name: c.client,
-                        action: 'Deleted note',
-                        details: ''
-                    });
-                } catch (err) {
-                    console.error('Delete error:', err);
-                }
+                await supabase.from('client_notes').delete().eq('id', id);
+                setNotes(notes.filter(n => n.id !== id));
             };
 
             if (!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
@@ -484,77 +767,33 @@
                         <div className="flex justify-between items-center mb-3">
                             <h4 className="font-semibold text-white">📝 Strategy Notes</h4>
                             <div className="flex items-center gap-4">
-                                {lastEditedBy && (
-                                    <span className="text-xs text-gray-500">
-                                        Last edited by <span className="text-accent-purple">{getDisplayName(lastEditedBy)}</span>
-                                    </span>
-                                )}
+                                {lastEditedBy && <span className="text-xs text-gray-500">Last edited by <span className="text-accent-purple">{getDisplayName(lastEditedBy)}</span></span>}
                                 <span className="text-sm text-gray-500">{saveStatus}</span>
                             </div>
                         </div>
-                        <textarea 
-                            value={strategy} 
-                            onChange={e => setStrategy(e.target.value)} 
-                            className={`w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[120px] focus:outline-none focus:border-accent-cyan ${saving ? 'saving' : ''}`}
-                            placeholder="Document the current strategy for this client..."
-                            disabled={loading}
-                        />
+                        <textarea value={strategy} onChange={e => setStrategy(e.target.value)} className={`w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[120px] focus:outline-none focus:border-accent-cyan ${saving ? 'saving' : ''}`} placeholder="Document the current strategy..." disabled={loading} />
                     </div>
-
                     <div className="card rounded-xl p-6">
                         <h4 className="font-semibold text-white mb-3">✅ Action Items</h4>
-                        <textarea 
-                            value={actionItems} 
-                            onChange={e => setActionItems(e.target.value)} 
-                            className={`w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[100px] focus:outline-none focus:border-accent-cyan ${saving ? 'saving' : ''}`}
-                            placeholder="List action items and next steps..."
-                            disabled={loading}
-                        />
+                        <textarea value={actionItems} onChange={e => setActionItems(e.target.value)} className={`w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[100px] focus:outline-none focus:border-accent-cyan ${saving ? 'saving' : ''}`} placeholder="List action items..." disabled={loading} />
                     </div>
-
                     <div className="card rounded-xl p-6">
                         <h4 className="font-semibold text-white mb-3">💬 Quick Notes</h4>
                         <div className="flex gap-4 mb-4">
-                            <input 
-                                type="text" 
-                                value={newNote} 
-                                onChange={e => setNewNote(e.target.value)} 
-                                onKeyPress={e => e.key === 'Enter' && addNote()} 
-                                className="flex-1 bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" 
-                                placeholder="Add a quick note..."
-                                disabled={loading || saving}
-                            />
-                            <button 
-                                onClick={addNote} 
-                                disabled={loading || saving || !newNote.trim()}
-                                className="px-6 py-3 bg-accent-cyan text-black font-semibold rounded-lg disabled:opacity-50 hover:bg-cyan-400"
-                            >
-                                Add
-                            </button>
+                            <input type="text" value={newNote} onChange={e => setNewNote(e.target.value)} onKeyPress={e => e.key === 'Enter' && addNote()} className="flex-1 bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" placeholder="Add a quick note..." disabled={loading || saving} />
+                            <button onClick={addNote} disabled={loading || saving || !newNote.trim()} className="px-6 py-3 bg-accent-cyan text-black font-semibold rounded-lg disabled:opacity-50">Add</button>
                         </div>
-                        
-                        {loading ? (
-                            <div className="text-center py-8 text-gray-500">Loading notes...</div>
-                        ) : (
+                        {loading ? <div className="text-center py-8 text-gray-500">Loading...</div> : (
                             <div className="space-y-2 max-h-96 overflow-y-auto scrollbar">
                                 {notes.length === 0 && <div className="text-gray-500 text-center py-4">No notes yet</div>}
                                 {notes.map((n) => (
                                     <div key={n.id} className="bg-dark-700 rounded-lg p-3 group">
                                         <div className="flex justify-between items-start">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-accent-purple text-sm font-medium">
-                                                    {getDisplayName(n.user_email || n.created_by)}
-                                                </span>
-                                                <span className="text-gray-600 text-xs">
-                                                    {new Date(n.created_at).toLocaleString()}
-                                                </span>
+                                                <span className="text-accent-purple text-sm font-medium">{getDisplayName(n.user_email || n.created_by)}</span>
+                                                <span className="text-gray-600 text-xs">{new Date(n.created_at).toLocaleString()}</span>
                                             </div>
-                                            <button 
-                                                onClick={() => deleteNote(n.id)}
-                                                className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100"
-                                            >
-                                                ✕
-                                            </button>
+                                            <button onClick={() => deleteNote(n.id)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100">✕</button>
                                         </div>
                                         <p className="text-white mt-1">{n.note_text}</p>
                                     </div>
@@ -566,34 +805,22 @@
             );
         };
 
-        // Activity Log Tab
+        // ========== ACTIVITY TAB ==========
         const ActivityTab = ({c}) => {
             const [activities, setActivities] = useState([]);
             const [loading, setLoading] = useState(false);
             const [filter, setFilter] = useState('all');
 
-            useEffect(() => {
-                loadActivities();
-            }, [c?.client, filter]);
+            useEffect(() => { loadActivities(); }, [c?.client, filter]);
 
             const loadActivities = async () => {
                 setLoading(true);
                 try {
-                    let query = supabase
-                        .from('activity_log')
-                        .select('*')
-                        .order('created_at', { ascending: false })
-                        .limit(100);
-                    
-                    if (c?.client && filter === 'client') {
-                        query = query.eq('client_name', c.client);
-                    }
-                    
+                    let query = supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(100);
+                    if (c?.client && filter === 'client') query = query.eq('client_name', c.client);
                     const { data } = await query;
                     if (data) setActivities(data);
-                } catch (err) {
-                    console.error('Load activities error:', err);
-                }
+                } catch (err) { console.error('Load activities error:', err); }
                 setLoading(false);
             };
 
@@ -602,31 +829,14 @@
                     <div className="flex justify-between items-center">
                         <h2 className="text-xl font-bold text-white">📋 Activity Log</h2>
                         <div className="flex gap-2">
-                            <button 
-                                onClick={() => setFilter('all')}
-                                className={`px-4 py-2 rounded-lg text-sm ${filter === 'all' ? 'bg-accent-cyan text-black' : 'bg-dark-700 text-gray-400'}`}
-                            >
-                                All Activity
-                            </button>
-                            {c && (
-                                <button 
-                                    onClick={() => setFilter('client')}
-                                    className={`px-4 py-2 rounded-lg text-sm ${filter === 'client' ? 'bg-accent-cyan text-black' : 'bg-dark-700 text-gray-400'}`}
-                                >
-                                    This Client Only
-                                </button>
-                            )}
+                            <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-lg text-sm ${filter === 'all' ? 'bg-accent-cyan text-black' : 'bg-dark-700 text-gray-400'}`}>All Activity</button>
+                            {c && <button onClick={() => setFilter('client')} className={`px-4 py-2 rounded-lg text-sm ${filter === 'client' ? 'bg-accent-cyan text-black' : 'bg-dark-700 text-gray-400'}`}>This Client</button>}
                         </div>
                     </div>
-
-                    {loading ? (
-                        <div className="text-center py-12 text-gray-500">Loading activity...</div>
-                    ) : (
+                    {loading ? <div className="text-center py-12 text-gray-500">Loading...</div> : (
                         <div className="card rounded-xl overflow-hidden">
                             <div className="max-h-[600px] overflow-y-auto scrollbar">
-                                {activities.length === 0 ? (
-                                    <div className="text-center py-12 text-gray-500">No activity yet</div>
-                                ) : (
+                                {activities.length === 0 ? <div className="text-center py-12 text-gray-500">No activity yet</div> : (
                                     <table className="w-full">
                                         <thead className="bg-dark-700 sticky top-0">
                                             <tr>
@@ -640,27 +850,11 @@
                                         <tbody className="divide-y divide-dark-600">
                                             {activities.map((a) => (
                                                 <tr key={a.id} className="hover:bg-dark-700/50">
-                                                    <td className="px-4 py-3 text-sm text-gray-400">
-                                                        {new Date(a.created_at).toLocaleString()}
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <span className="text-accent-purple font-medium">
-                                                            {getDisplayName(a.user_email)}
-                                                        </span>
-                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-gray-400">{new Date(a.created_at).toLocaleString()}</td>
+                                                    <td className="px-4 py-3"><span className="text-accent-purple font-medium">{getDisplayName(a.user_email)}</span></td>
                                                     <td className="px-4 py-3 text-white">{a.client_name}</td>
-                                                    <td className="px-4 py-3">
-                                                        <span className={`px-2 py-1 rounded text-xs ${
-                                                            a.action.includes('Added') ? 'bg-green-500/20 text-green-400' :
-                                                            a.action.includes('Deleted') ? 'bg-red-500/20 text-red-400' :
-                                                            'bg-accent-cyan/20 text-accent-cyan'
-                                                        }`}>
-                                                            {a.action}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-gray-400 text-sm max-w-xs truncate">
-                                                        {a.details}
-                                                    </td>
+                                                    <td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs ${a.action.includes('Added') ? 'bg-green-500/20 text-green-400' : a.action.includes('Deleted') ? 'bg-red-500/20 text-red-400' : 'bg-accent-cyan/20 text-accent-cyan'}`}>{a.action}</span></td>
+                                                    <td className="px-4 py-3 text-gray-400 text-sm max-w-xs truncate">{a.details}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -673,7 +867,7 @@
             );
         };
 
-        // Main App with Auth
+        // ========== MAIN APP ==========
         const App = () => {
             const [user, setUser] = useState(null);
             const [authLoading, setAuthLoading] = useState(true);
@@ -683,27 +877,21 @@
             const [tab, setTab] = useState('info');
             const [loading, setLoading] = useState(true);
 
-            // Check auth state on load
             useEffect(() => {
                 supabase.auth.getSession().then(({ data: { session } }) => {
                     setUser(session?.user || null);
                     setAuthLoading(false);
                 });
-
                 const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
                     setUser(session?.user || null);
                 });
-
                 return () => subscription.unsubscribe();
             }, []);
 
-            // Load data when authenticated
             useEffect(() => {
                 if (!user) return;
-                
                 const params = new URLSearchParams(window.location.search);
                 const clientParam = params.get('client');
-                
                 Promise.all([
                     fetch(URLS.clients).then(r=>r.text()).then(csv=>{
                         const lines = csv.split('\n');
@@ -711,13 +899,10 @@
                     }).catch(()=>[]),
                     fetch(URLS.setupTiming).then(r=>r.text()).then(csv=>{
                         const lines = csv.split('\n');
-                        const headerLine = lines[0];
-                        const dataLines = lines.slice(2);
-                        return Papa.parse([headerLine, ...dataLines].join('\n'), {header:true, skipEmptyLines:true}).data.map(mapSetupTiming).filter(r=>r.client && !r.client.includes('Active Clients'));
+                        return Papa.parse([lines[0], ...lines.slice(2)].join('\n'), {header:true, skipEmptyLines:true}).data.map(mapSetupTiming).filter(r=>r.client && !r.client.includes('Active Clients'));
                     }).catch(()=>[])
                 ]).then(([c, s]) => { 
-                    setClients(c); 
-                    setSetupData(s);
+                    setClients(c); setSetupData(s);
                     if(clientParam) {
                         const found = c.find(client => client.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase());
                         if(found) setSelected(found);
@@ -726,44 +911,32 @@
                 });
             }, [user]);
 
-            const handleLogout = async () => {
-                await supabase.auth.signOut();
-                setUser(null);
-            };
+            const handleLogout = async () => { await supabase.auth.signOut(); setUser(null); };
 
             const getSetupInfo = (client) => {
                 if(!client) return null;
                 const name = client.client.toLowerCase().trim();
                 return setupData.find(s => {
                     const sn = (s.client || '').toLowerCase().trim();
-                    if(sn === name) return true;
-                    if(sn.includes(name) || name.includes(sn)) return true;
-                    return name.split(' ').filter(p => p.length > 2).some(p => sn.includes(p));
+                    return sn === name || sn.includes(name) || name.includes(sn) || name.split(' ').filter(p => p.length > 2).some(p => sn.includes(p));
                 });
             };
 
-            // Show loading
-            if (authLoading) {
-                return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
-            }
-
-            // Show login if not authenticated
-            if (!user) {
-                return <LoginPage onLogin={setUser} />;
-            }
+            if (authLoading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            if (!user) return <LoginPage onLogin={setUser} />;
+            if (loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
 
             const s = getSetupInfo(selected);
             const renderTab = () => {
                 switch(tab) {
                     case 'info': return <ClientInfoTab c={selected} s={s}/>;
                     case 'performance': return <PerformanceTab c={selected}/>;
+                    case 'meetings': return <MeetingsTab c={selected}/>;
                     case 'strategy': return <StrategyTab c={selected}/>;
                     case 'activity': return <ActivityTab c={selected}/>;
                     default: return <ClientInfoTab c={selected} s={s}/>;
                 }
             };
-
-            if(loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
 
             return (
                 <AuthContext.Provider value={{ user }}>
@@ -787,9 +960,7 @@
                             </nav>
                             <div className="p-4 border-t border-dark-600 space-y-2">
                                 <a href="dashboard.html" className="block w-full text-center py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-sm">→ Media Buyer Overview</a>
-                                <button onClick={handleLogout} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">
-                                    Logout
-                                </button>
+                                <button onClick={handleLogout} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">Logout</button>
                             </div>
                         </aside>
                         <main className="flex-1 flex flex-col">
