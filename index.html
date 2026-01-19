@@ -38,12 +38,16 @@
 <body class="min-h-screen">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useCallback } = React;
+        const { useState, useEffect, useMemo, useCallback, createContext, useContext } = React;
 
         // Supabase Configuration
         const SUPABASE_URL = 'https://ecmhhonjazfbletyvncw.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbWhob25qYXpmYmxldHl2bmN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5NDMwMjYsImV4cCI6MjA4MTUxOTAyNn0.3LZ8dAOX_ZpoUNkgY_jSeC10SaCknfPfBaZsDRjFt7c';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // Auth Context
+        const AuthContext = createContext(null);
+        const useAuth = () => useContext(AuthContext);
 
         const URLS = {
             clients: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=133498635&single=true&output=csv',
@@ -56,6 +60,7 @@
         const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
         const fmtP = v => (pn(v)).toFixed(1)+'%';
         const clean = v => (v && v.toString().trim()) ? v.toString().trim() : '—';
+        const getDisplayName = (email) => email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
 
         const mapClient = r => ({
             client: r['Client']||'', adAccount: r['Ad Account Name']||'', state: r['State']||'', 
@@ -105,10 +110,104 @@
         const healthText = { Green:'text-emerald-400', Yellow:'text-amber-400', Red:'text-red-400', Gray:'text-gray-400' };
         const Badge = ({health}) => <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${healthColors[health]}/20 ${healthText[health]} border border-current/30`}>{health}</span>;
 
+        // ========== LOGIN PAGE ==========
+        const LoginPage = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [isSignUp, setIsSignUp] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+
+                try {
+                    let result;
+                    if (isSignUp) {
+                        result = await supabase.auth.signUp({ email, password });
+                        if (result.error) throw result.error;
+                        setError('Check your email for confirmation link!');
+                        setLoading(false);
+                        return;
+                    } else {
+                        result = await supabase.auth.signInWithPassword({ email, password });
+                        if (result.error) throw result.error;
+                        onLogin(result.data.user);
+                    }
+                } catch (err) {
+                    setError(err.message);
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="card rounded-2xl p-8 w-full max-w-md">
+                        <div className="text-center mb-8">
+                            <h1 className="text-3xl font-bold gradient-text mb-2">VAM Client Hub</h1>
+                            <p className="text-gray-500">Sign in to access the dashboard</p>
+                        </div>
+                        
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Email</label>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan"
+                                    placeholder="you@company.com"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Password</label>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan"
+                                    placeholder="••••••••"
+                                    required
+                                />
+                            </div>
+                            
+                            {error && (
+                                <div className={`p-3 rounded-lg text-sm ${error.includes('Check your email') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                                    {error}
+                                </div>
+                            )}
+                            
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full py-3 bg-gradient-to-r from-accent-cyan to-accent-purple text-black font-semibold rounded-lg hover:opacity-90 disabled:opacity-50"
+                            >
+                                {loading ? 'Please wait...' : (isSignUp ? 'Create Account' : 'Sign In')}
+                            </button>
+                        </form>
+                        
+                        <div className="mt-6 text-center">
+                            <button
+                                onClick={() => setIsSignUp(!isSignUp)}
+                                className="text-gray-500 hover:text-white text-sm"
+                            >
+                                {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== COMPONENTS ==========
         const tabs = [
             { id: 'info', name: 'Client Information', icon: '👤' },
             { id: 'performance', name: 'Performance', icon: '📈' },
             { id: 'strategy', name: 'Strategy & Notes', icon: '📝' },
+            { id: 'activity', name: 'Activity Log', icon: '📋' },
         ];
 
         const DataRow = ({label, value, highlight, color}) => {
@@ -206,12 +305,6 @@
                             <DataRow label="Contract Notes" value={s?.contractNotes}/>
                         </Section>
                     </div>
-                    <Section title="Sales & Commission" icon="💼">
-                        <div className="grid md:grid-cols-2 gap-1">
-                            <DataRow label="Closed On" value={s?.closedOn}/><DataRow label="Commission" value={s?.commission}/>
-                            <DataRow label="Setter & Closer" value={s?.setterCloser}/>
-                        </div>
-                    </Section>
                 </div>
             );
         };
@@ -247,8 +340,9 @@
             );
         };
 
-        // Strategy Tab with Supabase Integration
+        // Strategy Tab with User Tracking
         const StrategyTab = ({c}) => {
+            const { user } = useAuth();
             const [notes, setNotes] = useState([]);
             const [newNote, setNewNote] = useState('');
             const [strategy, setStrategy] = useState('');
@@ -256,8 +350,8 @@
             const [loading, setLoading] = useState(false);
             const [saving, setSaving] = useState(false);
             const [saveStatus, setSaveStatus] = useState('');
+            const [lastEditedBy, setLastEditedBy] = useState('');
 
-            // Load notes and strategy when client changes
             useEffect(() => {
                 if (!c?.client) return;
                 loadData();
@@ -267,7 +361,6 @@
                 if (!c?.client) return;
                 setLoading(true);
                 try {
-                    // Load notes
                     const { data: notesData } = await supabase
                         .from('client_notes')
                         .select('*')
@@ -275,7 +368,6 @@
                         .order('created_at', { ascending: false });
                     if (notesData) setNotes(notesData);
 
-                    // Load strategy
                     const { data: strategyData } = await supabase
                         .from('client_strategy')
                         .select('*')
@@ -284,9 +376,11 @@
                     if (strategyData) {
                         setStrategy(strategyData.strategy_text || '');
                         setActionItems(strategyData.action_items || '');
+                        setLastEditedBy(strategyData.last_edited_by || '');
                     } else {
                         setStrategy('');
                         setActionItems('');
+                        setLastEditedBy('');
                     }
                 } catch (err) {
                     console.error('Load error:', err);
@@ -294,59 +388,72 @@
                 setLoading(false);
             };
 
-            // Auto-save strategy with debounce
             useEffect(() => {
-                if (!c?.client) return;
-                const timer = setTimeout(() => {
-                    saveStrategy();
-                }, 1000);
+                if (!c?.client || loading) return;
+                const timer = setTimeout(() => saveStrategy(), 1000);
                 return () => clearTimeout(timer);
             }, [strategy, actionItems]);
 
             const saveStrategy = async () => {
-                if (!c?.client) return;
+                if (!c?.client || !user) return;
                 setSaving(true);
                 setSaveStatus('Saving...');
                 try {
-                    const { error } = await supabase
-                        .from('client_strategy')
-                        .upsert({
-                            client_name: c.client,
-                            strategy_text: strategy,
-                            action_items: actionItems,
-                            updated_at: new Date().toISOString()
-                        }, { onConflict: 'client_name' });
-                    
-                    if (error) throw error;
+                    await supabase.from('client_strategy').upsert({
+                        client_name: c.client,
+                        strategy_text: strategy,
+                        action_items: actionItems,
+                        user_id: user.id,
+                        user_email: user.email,
+                        last_edited_by: user.email,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'client_name' });
+
+                    // Log activity
+                    await supabase.from('activity_log').insert({
+                        user_id: user.id,
+                        user_email: user.email,
+                        client_name: c.client,
+                        action: 'Updated strategy',
+                        details: 'Strategy notes modified'
+                    });
+
+                    setLastEditedBy(user.email);
                     setSaveStatus('✓ Saved');
                     setTimeout(() => setSaveStatus(''), 2000);
                 } catch (err) {
                     console.error('Save error:', err);
-                    setSaveStatus('Error saving');
+                    setSaveStatus('Error');
                 }
                 setSaving(false);
             };
 
             const addNote = async () => {
-                if (!newNote.trim() || !c?.client) return;
+                if (!newNote.trim() || !c?.client || !user) return;
                 setSaving(true);
                 try {
-                    const { data, error } = await supabase
-                        .from('client_notes')
-                        .insert({
-                            client_name: c.client,
-                            note_text: newNote,
-                            created_by: 'user'
-                        })
-                        .select()
-                        .single();
+                    const { data, error } = await supabase.from('client_notes').insert({
+                        client_name: c.client,
+                        note_text: newNote,
+                        user_id: user.id,
+                        user_email: user.email,
+                        created_by: user.email
+                    }).select().single();
                     
                     if (error) throw error;
                     setNotes([data, ...notes]);
                     setNewNote('');
+
+                    // Log activity
+                    await supabase.from('activity_log').insert({
+                        user_id: user.id,
+                        user_email: user.email,
+                        client_name: c.client,
+                        action: 'Added note',
+                        details: newNote.substring(0, 100)
+                    });
                 } catch (err) {
                     console.error('Add note error:', err);
-                    alert('Error adding note');
                 }
                 setSaving(false);
             };
@@ -356,6 +463,14 @@
                 try {
                     await supabase.from('client_notes').delete().eq('id', id);
                     setNotes(notes.filter(n => n.id !== id));
+                    
+                    await supabase.from('activity_log').insert({
+                        user_id: user.id,
+                        user_email: user.email,
+                        client_name: c.client,
+                        action: 'Deleted note',
+                        details: ''
+                    });
                 } catch (err) {
                     console.error('Delete error:', err);
                 }
@@ -365,11 +480,17 @@
 
             return (
                 <div className="space-y-6">
-                    {/* Strategy Section */}
                     <div className="card rounded-xl p-6">
                         <div className="flex justify-between items-center mb-3">
                             <h4 className="font-semibold text-white">📝 Strategy Notes</h4>
-                            <span className="text-sm text-gray-500">{saveStatus}</span>
+                            <div className="flex items-center gap-4">
+                                {lastEditedBy && (
+                                    <span className="text-xs text-gray-500">
+                                        Last edited by <span className="text-accent-purple">{getDisplayName(lastEditedBy)}</span>
+                                    </span>
+                                )}
+                                <span className="text-sm text-gray-500">{saveStatus}</span>
+                            </div>
                         </div>
                         <textarea 
                             value={strategy} 
@@ -380,7 +501,6 @@
                         />
                     </div>
 
-                    {/* Action Items Section */}
                     <div className="card rounded-xl p-6">
                         <h4 className="font-semibold text-white mb-3">✅ Action Items</h4>
                         <textarea 
@@ -392,7 +512,6 @@
                         />
                     </div>
 
-                    {/* Quick Notes Section */}
                     <div className="card rounded-xl p-6">
                         <h4 className="font-semibold text-white mb-3">💬 Quick Notes</h4>
                         <div className="flex gap-4 mb-4">
@@ -410,7 +529,7 @@
                                 disabled={loading || saving || !newNote.trim()}
                                 className="px-6 py-3 bg-accent-cyan text-black font-semibold rounded-lg disabled:opacity-50 hover:bg-cyan-400"
                             >
-                                {saving ? '...' : 'Add'}
+                                Add
                             </button>
                         </div>
                         
@@ -418,18 +537,21 @@
                             <div className="text-center py-8 text-gray-500">Loading notes...</div>
                         ) : (
                             <div className="space-y-2 max-h-96 overflow-y-auto scrollbar">
-                                {notes.length === 0 && (
-                                    <div className="text-gray-500 text-center py-4">No notes yet. Add your first note above!</div>
-                                )}
+                                {notes.length === 0 && <div className="text-gray-500 text-center py-4">No notes yet</div>}
                                 {notes.map((n) => (
                                     <div key={n.id} className="bg-dark-700 rounded-lg p-3 group">
                                         <div className="flex justify-between items-start">
-                                            <span className="text-gray-500 text-sm">
-                                                {new Date(n.created_at).toLocaleString()}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-accent-purple text-sm font-medium">
+                                                    {getDisplayName(n.user_email || n.created_by)}
+                                                </span>
+                                                <span className="text-gray-600 text-xs">
+                                                    {new Date(n.created_at).toLocaleString()}
+                                                </span>
+                                            </div>
                                             <button 
                                                 onClick={() => deleteNote(n.id)}
-                                                className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100"
                                             >
                                                 ✕
                                             </button>
@@ -440,23 +562,145 @@
                             </div>
                         )}
                     </div>
-
-                    {/* Supabase Status */}
-                    <div className="text-center text-xs text-gray-600">
-                        💾 Data synced with Supabase • Auto-saves as you type
-                    </div>
                 </div>
             );
         };
 
+        // Activity Log Tab
+        const ActivityTab = ({c}) => {
+            const [activities, setActivities] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [filter, setFilter] = useState('all');
+
+            useEffect(() => {
+                loadActivities();
+            }, [c?.client, filter]);
+
+            const loadActivities = async () => {
+                setLoading(true);
+                try {
+                    let query = supabase
+                        .from('activity_log')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    
+                    if (c?.client && filter === 'client') {
+                        query = query.eq('client_name', c.client);
+                    }
+                    
+                    const { data } = await query;
+                    if (data) setActivities(data);
+                } catch (err) {
+                    console.error('Load activities error:', err);
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-xl font-bold text-white">📋 Activity Log</h2>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => setFilter('all')}
+                                className={`px-4 py-2 rounded-lg text-sm ${filter === 'all' ? 'bg-accent-cyan text-black' : 'bg-dark-700 text-gray-400'}`}
+                            >
+                                All Activity
+                            </button>
+                            {c && (
+                                <button 
+                                    onClick={() => setFilter('client')}
+                                    className={`px-4 py-2 rounded-lg text-sm ${filter === 'client' ? 'bg-accent-cyan text-black' : 'bg-dark-700 text-gray-400'}`}
+                                >
+                                    This Client Only
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {loading ? (
+                        <div className="text-center py-12 text-gray-500">Loading activity...</div>
+                    ) : (
+                        <div className="card rounded-xl overflow-hidden">
+                            <div className="max-h-[600px] overflow-y-auto scrollbar">
+                                {activities.length === 0 ? (
+                                    <div className="text-center py-12 text-gray-500">No activity yet</div>
+                                ) : (
+                                    <table className="w-full">
+                                        <thead className="bg-dark-700 sticky top-0">
+                                            <tr>
+                                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Time</th>
+                                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">User</th>
+                                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Client</th>
+                                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Action</th>
+                                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-dark-600">
+                                            {activities.map((a) => (
+                                                <tr key={a.id} className="hover:bg-dark-700/50">
+                                                    <td className="px-4 py-3 text-sm text-gray-400">
+                                                        {new Date(a.created_at).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="text-accent-purple font-medium">
+                                                            {getDisplayName(a.user_email)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-white">{a.client_name}</td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`px-2 py-1 rounded text-xs ${
+                                                            a.action.includes('Added') ? 'bg-green-500/20 text-green-400' :
+                                                            a.action.includes('Deleted') ? 'bg-red-500/20 text-red-400' :
+                                                            'bg-accent-cyan/20 text-accent-cyan'
+                                                        }`}>
+                                                            {a.action}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-gray-400 text-sm max-w-xs truncate">
+                                                        {a.details}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Main App with Auth
         const App = () => {
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
             const [clients, setClients] = useState([]);
             const [setupData, setSetupData] = useState([]);
             const [selected, setSelected] = useState(null);
             const [tab, setTab] = useState('info');
             const [loading, setLoading] = useState(true);
 
+            // Check auth state on load
             useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    setUser(session?.user || null);
+                    setAuthLoading(false);
+                });
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    setUser(session?.user || null);
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            // Load data when authenticated
+            useEffect(() => {
+                if (!user) return;
+                
                 const params = new URLSearchParams(window.location.search);
                 const clientParam = params.get('client');
                 
@@ -480,7 +724,12 @@
                     }
                     setLoading(false); 
                 });
-            }, []);
+            }, [user]);
+
+            const handleLogout = async () => {
+                await supabase.auth.signOut();
+                setUser(null);
+            };
 
             const getSetupInfo = (client) => {
                 if(!client) return null;
@@ -493,12 +742,23 @@
                 });
             };
 
+            // Show loading
+            if (authLoading) {
+                return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            }
+
+            // Show login if not authenticated
+            if (!user) {
+                return <LoginPage onLogin={setUser} />;
+            }
+
             const s = getSetupInfo(selected);
             const renderTab = () => {
                 switch(tab) {
                     case 'info': return <ClientInfoTab c={selected} s={s}/>;
                     case 'performance': return <PerformanceTab c={selected}/>;
                     case 'strategy': return <StrategyTab c={selected}/>;
+                    case 'activity': return <ActivityTab c={selected}/>;
                     default: return <ClientInfoTab c={selected} s={s}/>;
                 }
             };
@@ -506,39 +766,48 @@
             if(loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
 
             return (
-                <div className="flex min-h-screen">
-                    <aside className="w-64 bg-dark-800 border-r border-dark-600 flex flex-col">
-                        <div className="p-5 border-b border-dark-600">
-                            <h1 className="text-xl font-bold gradient-text">VAM Client Hub</h1>
-                        </div>
-                        <div className="p-4">
-                            <select value={selected?.client||''} onChange={e=>setSelected(clients.find(c=>c.client===e.target.value))} className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white cursor-pointer focus:outline-none focus:border-accent-cyan">
-                                <option value="">Select a client...</option>
-                                {clients.map(c=><option key={c.client} value={c.client}>{c.client}</option>)}
-                            </select>
-                        </div>
-                        <nav className="flex-1 py-2">
-                            {tabs.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} className={`w-full flex items-center gap-3 px-5 py-3 text-left ${tab===t.id?'tab-active text-white':'text-gray-400 hover:text-white hover:bg-dark-700'}`}><span>{t.icon}</span><span className="text-sm font-medium">{t.name}</span></button>))}
-                        </nav>
-                        <div className="p-4 border-t border-dark-600">
-                            <a href="dashboard.html" className="block w-full text-center py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-sm">→ Media Buyer Overview</a>
-                        </div>
-                    </aside>
-                    <main className="flex-1 flex flex-col">
-                        <header className="bg-dark-800/80 backdrop-blur border-b border-dark-600 px-8 py-4">
-                            {selected ? (
-                                <div className="flex items-center gap-3 flex-wrap">
-                                    <h2 className="text-xl font-bold text-white">{selected.client}</h2>
-                                    <Badge health={getHealth(selected.cpl)}/>
-                                    <span className="text-gray-400">Day {selected.days}</span>
-                                    {s?.csmRep && <span className="text-accent-purple text-sm">CSM: {s.csmRep}</span>}
-                                    {s?.mrr && <span className="text-accent-green text-sm">MRR: {s.mrr}</span>}
+                <AuthContext.Provider value={{ user }}>
+                    <div className="flex min-h-screen">
+                        <aside className="w-64 bg-dark-800 border-r border-dark-600 flex flex-col">
+                            <div className="p-5 border-b border-dark-600">
+                                <h1 className="text-xl font-bold gradient-text">VAM Client Hub</h1>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                    <span className="text-xs text-gray-400">{getDisplayName(user.email)}</span>
                                 </div>
-                            ) : <h2 className="text-xl text-gray-500">Select a client</h2>}
-                        </header>
-                        <div className="flex-1 overflow-y-auto p-8 scrollbar">{renderTab()}</div>
-                    </main>
-                </div>
+                            </div>
+                            <div className="p-4">
+                                <select value={selected?.client||''} onChange={e=>setSelected(clients.find(c=>c.client===e.target.value))} className="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white cursor-pointer focus:outline-none focus:border-accent-cyan">
+                                    <option value="">Select a client...</option>
+                                    {clients.map(c=><option key={c.client} value={c.client}>{c.client}</option>)}
+                                </select>
+                            </div>
+                            <nav className="flex-1 py-2">
+                                {tabs.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} className={`w-full flex items-center gap-3 px-5 py-3 text-left ${tab===t.id?'tab-active text-white':'text-gray-400 hover:text-white hover:bg-dark-700'}`}><span>{t.icon}</span><span className="text-sm font-medium">{t.name}</span></button>))}
+                            </nav>
+                            <div className="p-4 border-t border-dark-600 space-y-2">
+                                <a href="dashboard.html" className="block w-full text-center py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-sm">→ Media Buyer Overview</a>
+                                <button onClick={handleLogout} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">
+                                    Logout
+                                </button>
+                            </div>
+                        </aside>
+                        <main className="flex-1 flex flex-col">
+                            <header className="bg-dark-800/80 backdrop-blur border-b border-dark-600 px-8 py-4">
+                                {selected ? (
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <h2 className="text-xl font-bold text-white">{selected.client}</h2>
+                                        <Badge health={getHealth(selected.cpl)}/>
+                                        <span className="text-gray-400">Day {selected.days}</span>
+                                        {s?.csmRep && <span className="text-accent-purple text-sm">CSM: {s.csmRep}</span>}
+                                        {s?.mrr && <span className="text-accent-green text-sm">MRR: {s.mrr}</span>}
+                                    </div>
+                                ) : <h2 className="text-xl text-gray-500">Select a client</h2>}
+                            </header>
+                            <div className="flex-1 overflow-y-auto p-8 scrollbar">{renderTab()}</div>
+                        </main>
+                    </div>
+                </AuthContext.Provider>
             );
         };
 
