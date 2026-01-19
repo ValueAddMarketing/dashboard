@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VAM CEO Dashboard</title>
+    <title>VAM Media Buyer Overview</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -15,7 +15,7 @@
             theme: {
                 extend: {
                     colors: {
-                        dark: { 900: '#0a0a0f', 800: '#12121a', 700: '#1a1a24', 600: '#22222e', 500: '#2a2a38' },
+                        dark: { 900: '#000000', 800: '#0a0a0a', 700: '#111111', 600: '#1a1a1a', 500: '#222222' },
                         accent: { cyan: '#00d4ff', purple: '#a855f7', green: '#10b981', yellow: '#fbbf24', red: '#ef4444' }
                     },
                     fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'], mono: ['monospace'] }
@@ -24,12 +24,14 @@
         }
     </script>
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0a0a0f; color: #e5e5e5; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #000000; color: #ffffff; }
         .gradient-text { background: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .card { background: linear-gradient(145deg, #12121a 0%, #1a1a24 100%); border: 1px solid rgba(255,255,255,0.05); }
+        .card { background: #0a0a0a; border: 1px solid rgba(255,255,255,0.08); }
         .card:hover { border-color: rgba(0, 212, 255, 0.3); }
         .scrollbar::-webkit-scrollbar { width: 6px; }
-        .scrollbar::-webkit-scrollbar-thumb { background: #2a2a38; border-radius: 3px; }
+        .scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .client-row { cursor: pointer; transition: all 0.2s; }
+        .client-row:hover { background: rgba(0, 212, 255, 0.1); }
     </style>
 </head>
 <body class="min-h-screen">
@@ -92,6 +94,31 @@
             );
         };
 
+        const HealthBar = ({clients}) => {
+            const h = useMemo(() => {
+                const g=clients.filter(c=>getHealth(c.cpl)==='Green').length;
+                const y=clients.filter(c=>getHealth(c.cpl)==='Yellow').length;
+                const r=clients.filter(c=>getHealth(c.cpl)==='Red').length;
+                const t=clients.length||1;
+                return {g,y,r,gp:(g/t*100).toFixed(0),yp:(y/t*100).toFixed(0),rp:(r/t*100).toFixed(0)};
+            },[clients]);
+            return (
+                <div className="card rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">📊 Health Distribution</h3>
+                    <div className="flex h-4 rounded-full overflow-hidden bg-dark-700 mb-4">
+                        <div style={{width:`${h.gp}%`}} className="bg-emerald-500"/>
+                        <div style={{width:`${h.yp}%`}} className="bg-amber-500"/>
+                        <div style={{width:`${h.rp}%`}} className="bg-red-500"/>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                        <div><div className="text-2xl font-bold text-emerald-400">{h.g}</div><div className="text-xs text-gray-500">Green</div></div>
+                        <div><div className="text-2xl font-bold text-amber-400">{h.y}</div><div className="text-xs text-gray-500">Yellow</div></div>
+                        <div><div className="text-2xl font-bold text-red-400">{h.r}</div><div className="text-xs text-gray-500">Red</div></div>
+                    </div>
+                </div>
+            );
+        };
+
         const Trends = ({d7,d30}) => {
             const t7 = useMemo(() => ({ spend:d7.reduce((s,r)=>s+r.cost,0), leads:d7.reduce((s,r)=>s+r.leads,0) }), [d7]);
             const t30 = useMemo(() => ({ spend:d30.reduce((s,r)=>s+r.cost,0), leads:d30.reduce((s,r)=>s+r.leads,0) }), [d30]);
@@ -102,43 +129,18 @@
                 <div className="card rounded-xl p-6">
                     <h3 className="text-lg font-semibold text-white mb-4">📈 7-Day vs 30-Day Trends</h3>
                     <div className="space-y-3">
-                        <div className="flex justify-between p-3 bg-dark-800 rounded-lg">
+                        <div className="flex justify-between p-3 bg-dark-700 rounded-lg">
                             <span className="text-gray-400">Daily Spend</span>
                             <div className="text-right"><div className="text-white font-mono">{fmtD(daily7.spend)}/day</div><Tr v={daily30.spend>0?((daily7.spend-daily30.spend)/daily30.spend)*100:0}/></div>
                         </div>
-                        <div className="flex justify-between p-3 bg-dark-800 rounded-lg">
+                        <div className="flex justify-between p-3 bg-dark-700 rounded-lg">
                             <span className="text-gray-400">Daily Leads</span>
                             <div className="text-right"><div className="text-white font-mono">{daily7.leads.toFixed(1)}/day</div><Tr v={daily30.leads>0?((daily7.leads-daily30.leads)/daily30.leads)*100:0}/></div>
                         </div>
-                        <div className="flex justify-between p-3 bg-dark-800 rounded-lg">
-                            <span className="text-gray-400">CPL</span>
+                        <div className="flex justify-between p-3 bg-dark-700 rounded-lg">
+                            <span className="text-gray-400">CPL Trend</span>
                             <div className="text-right"><div className="text-white font-mono">{fmtD(daily7.cpl)}</div><Tr v={daily30.cpl>0?((daily7.cpl-daily30.cpl)/daily30.cpl)*100:0} inv/></div>
                         </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const HealthBar = ({clients}) => {
-            const d = useMemo(() => {
-                const g=clients.filter(c=>getHealth(c.cpl)==='Green').length, y=clients.filter(c=>getHealth(c.cpl)==='Yellow').length;
-                const r=clients.filter(c=>getHealth(c.cpl)==='Red').length, gr=clients.filter(c=>getHealth(c.cpl)==='Gray').length;
-                return {g,y,r,gr,t:clients.length||1};
-            }, [clients]);
-            return (
-                <div className="card rounded-xl p-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">Client Health</h3>
-                    <div className="flex gap-1 h-4 rounded-full overflow-hidden mb-4">
-                        {d.g>0&&<div className="bg-emerald-500" style={{width:`${d.g/d.t*100}%`}}/>}
-                        {d.y>0&&<div className="bg-amber-500" style={{width:`${d.y/d.t*100}%`}}/>}
-                        {d.r>0&&<div className="bg-red-500" style={{width:`${d.r/d.t*100}%`}}/>}
-                        {d.gr>0&&<div className="bg-gray-500" style={{width:`${d.gr/d.t*100}%`}}/>}
-                    </div>
-                    <div className="grid grid-cols-4 text-center">
-                        <div><div className="text-lg font-bold text-emerald-400">{d.g}</div><div className="text-xs text-gray-500">≤$25</div></div>
-                        <div><div className="text-lg font-bold text-amber-400">{d.y}</div><div className="text-xs text-gray-500">$25-50</div></div>
-                        <div><div className="text-lg font-bold text-red-400">{d.r}</div><div className="text-xs text-gray-500">$50+</div></div>
-                        <div><div className="text-lg font-bold text-gray-400">{d.gr}</div><div className="text-xs text-gray-500">No Data</div></div>
                     </div>
                 </div>
             );
@@ -159,6 +161,11 @@
             );
         };
 
+        // Navigate to Client Hub with selected client
+        const goToClient = (clientName) => {
+            window.location.href = `index.html?client=${encodeURIComponent(clientName)}`;
+        };
+
         const Table = ({clients,sort,setSort}) => {
             const sorted = useMemo(() => {
                 const s = [...clients];
@@ -170,9 +177,21 @@
                 <div className="card rounded-xl overflow-hidden">
                     <div className="overflow-x-auto scrollbar">
                         <table className="w-full">
-                            <thead className="bg-dark-800"><tr><TH l="Client" k="client"/><TH l="State" k="state"/><TH l="Days" k="days"/><TH l="Spend" k="spend"/><TH l="Leads" k="leads"/><TH l="CPL" k="cpl"/><TH l="Appts" k="appts"/><TH l="Deals" k="deals"/><th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Health</th></tr></thead>
+                            <thead className="bg-dark-700"><tr><TH l="Client" k="client"/><TH l="State" k="state"/><TH l="Days" k="days"/><TH l="Spend" k="spend"/><TH l="Leads" k="leads"/><TH l="CPL" k="cpl"/><TH l="Appts" k="appts"/><TH l="Deals" k="deals"/><th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Health</th></tr></thead>
                             <tbody className="divide-y divide-dark-600">
-                                {sorted.map(c=><tr key={c.client} className="hover:bg-dark-700/50"><td className="px-3 py-3 font-semibold text-white">{c.client}</td><td className="px-3 py-3 text-gray-400">{c.state}</td><td className="px-3 py-3 font-mono text-gray-300">{c.days}</td><td className="px-3 py-3 font-mono text-white">{fmt(c.spend)}</td><td className="px-3 py-3 font-mono text-accent-cyan">{fmtN(c.leads)}</td><td className="px-3 py-3 font-mono text-white">{fmtD(c.cpl)}</td><td className="px-3 py-3 font-mono text-accent-purple">{fmtN(c.appts)}</td><td className="px-3 py-3 font-mono text-accent-green">{fmtN(c.deals)}</td><td className="px-3 py-3"><Badge health={getHealth(c.cpl)}/></td></tr>)}
+                                {sorted.map(c=>(
+                                    <tr key={c.client} className="client-row" onClick={() => goToClient(c.client)}>
+                                        <td className="px-3 py-3 font-semibold text-white hover:text-accent-cyan">{c.client}</td>
+                                        <td className="px-3 py-3 text-gray-300">{c.state}</td>
+                                        <td className="px-3 py-3 font-mono text-gray-200">{c.days}</td>
+                                        <td className="px-3 py-3 font-mono text-white">{fmt(c.spend)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-cyan">{fmtN(c.leads)}</td>
+                                        <td className="px-3 py-3 font-mono text-white">{fmtD(c.cpl)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-purple">{fmtN(c.appts)}</td>
+                                        <td className="px-3 py-3 font-mono text-accent-green">{fmtN(c.deals)}</td>
+                                        <td className="px-3 py-3"><Badge health={getHealth(c.cpl)}/></td>
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
                     </div>
@@ -215,7 +234,7 @@
                 <div className="min-h-screen">
                     <header className="bg-dark-800/80 backdrop-blur border-b border-dark-600 sticky top-0 z-40">
                         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                            <div><h1 className="text-2xl font-bold gradient-text">VAM CEO Dashboard</h1><p className="text-sm text-gray-500">All Clients + Campaign Performance</p></div>
+                            <div><h1 className="text-2xl font-bold gradient-text">Media Buyer Overview</h1><p className="text-sm text-gray-500">All Clients + Campaign Performance</p></div>
                             <a href="index.html" className="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-sm">← Client Hub</a>
                         </div>
                     </header>
@@ -237,9 +256,10 @@
                             <Alerts clients={clients} d7={d7}/>
                         </div>
                         <div className="flex flex-wrap gap-4">
-                            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients..." className="flex-1 min-w-[200px] bg-dark-700 border border-dark-500 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan"/>
+                            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients..." className="flex-1 min-w-[200px] bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan"/>
                             <div className="flex gap-2">{['all','Green','Yellow','Red'].map(f=><button key={f} onClick={()=>setFilter(f)} className={`px-4 py-2 rounded-lg text-sm ${filter===f?'bg-accent-cyan text-dark-900':'bg-dark-700 text-gray-400 hover:text-white'}`}>{f==='all'?'All':f}</button>)}</div>
                         </div>
+                        <p className="text-gray-500 text-sm">💡 Click on any client row to view their full details</p>
                         <Table clients={filtered} sort={sort} setSort={setSort}/>
                     </main>
                 </div>
