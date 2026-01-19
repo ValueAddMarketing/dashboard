@@ -9,264 +9,530 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        dark: { 900: '#000000', 800: '#0a0a0a', 700: '#111111', 600: '#1a1a1a', 500: '#222222' },
-                        accent: { cyan: '#00d4ff', purple: '#a855f7', green: '#10b981', yellow: '#fbbf24', red: '#ef4444' }
+                        dark: { 950: '#030712', 900: '#0f172a', 800: '#1e293b', 700: '#334155', 600: '#475569' },
+                        brand: { cyan: '#06b6d4', purple: '#8b5cf6', blue: '#3b82f6' }
                     },
-                    fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'], mono: ['monospace'] }
+                    fontFamily: { sans: ['Inter', 'sans-serif'] }
                 }
             }
         }
     </script>
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #000000; color: #ffffff; }
-        .gradient-text { background: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .card { background: #0a0a0a; border: 1px solid rgba(255,255,255,0.08); }
-        .card:hover { border-color: rgba(0, 212, 255, 0.3); }
-        .scrollbar::-webkit-scrollbar { width: 6px; }
-        .scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-        .client-row { cursor: pointer; transition: all 0.2s; }
-        .client-row:hover { background: rgba(0, 212, 255, 0.1); }
+        body { font-family: 'Inter', sans-serif; background: #030712; color: #f1f5f9; }
+        .card { background: #0f172a; border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; }
+        .tab-active { background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(139,92,246,0.15)); border-left: 3px solid #06b6d4; }
+        .scrollbar::-webkit-scrollbar { width: 4px; }
+        .scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
     </style>
 </head>
 <body class="min-h-screen">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, createContext, useContext } = React;
+
+        const SUPABASE_URL = 'https://ecmhhonjazfbletyvncw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbWhob25qYXpmYmxldHl2bmN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5NDMwMjYsImV4cCI6MjA4MTUxOTAyNn0.3LZ8dAOX_ZpoUNkgY_jSeC10SaCknfPfBaZsDRjFt7c';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const AuthContext = createContext(null);
+        const useAuth = () => useContext(AuthContext);
 
         const URLS = {
             clients: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=133498635&single=true&output=csv',
-            days7: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=1447475730&single=true&output=csv',
-            days30: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=1196243237&single=true&output=csv'
+            setupTiming: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv'
         };
 
         const pn = v => parseFloat(String(v||'0').replace(/[$,%]/g,'').replace(/,/g,''))||0;
         const fmt = v => '$'+(pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
         const fmtD = v => '$'+(pn(v)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
         const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+        const getDisplayName = (email) => email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
 
         const mapClient = r => ({
             client: r['Client']||'', state: r['State']||'', campaign: r['CAMPAIGN']||'',
-            days: pn(r['Days Running']), spend: pn(r['Total Ad Spend']), leads: pn(r['Total Leads']),
-            cpl: pn(r['Cost Per Lead']), appts: pn(r['Total Appts']), deals: pn(r['Potential Deals']), listings: pn(r['Listing'])
+            days: pn(r['Days Running']), weeks: pn(r['Weeks Running']),
+            spend: pn(r['Total Ad Spend']), dailyBudget: pn(r['Daily Ad Spend Budget']),
+            leads: pn(r['Total Leads']), cpl: pn(r['Cost Per Lead']),
+            sellerLeads: pn(r['Seller Leads']), buyerLeads: pn(r['Buyer Leads']),
+            appts: pn(r['Total Appts']), appts7: pn(r['Appts in the Last 7 Days']),
+            deals: pn(r['Potential Deals']), listings: pn(r['Listing'])
         });
 
-        const mapCamp = r => ({
-            account: r['Account name']||'', campaign: r['Campaign name']||'',
-            cost: pn(r['Total Cost']), leads: pn(r['On Facebook Leads']), cpl: pn(r['Cost per On Facebook Leads'])
+        const mapSetupTiming = r => ({
+            client: r['VAM'] || '', csmRep: r['CSM'] || '', status: r['Status'] || '',
+            mrr: r['MRR'] || '', duePayment: r['Due Payment'] || '', redFlags: r['Red flags'] || '',
         });
 
-        const getHealth = cpl => { if(!cpl) return 'Gray'; if(cpl<=25) return 'Green'; if(cpl<=50) return 'Yellow'; return 'Red'; };
-        const healthColors = { Green:'bg-emerald-500', Yellow:'bg-amber-500', Red:'bg-red-500', Gray:'bg-gray-500' };
-        const healthText = { Green:'text-emerald-400', Yellow:'text-amber-400', Red:'text-red-400', Gray:'text-gray-400' };
+        const getHealth = cpl => { if(!cpl) return 'gray'; if(cpl<=25) return 'green'; if(cpl<=50) return 'yellow'; return 'red'; };
+        const healthColors = { green: 'bg-emerald-500', yellow: 'bg-amber-500', red: 'bg-red-500', gray: 'bg-slate-500' };
 
-        const Badge = ({health}) => <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${healthColors[health]}/20 ${healthText[health]}`}>{health}</span>;
+        const tabs = [
+            { id: 'overview', name: 'All Clients', icon: '📊', desc: 'Overview of all client metrics' },
+            { id: 'scripts', name: 'Call Scripts', icon: '📞', desc: 'Phone scripts for different scenarios' },
+            { id: 'livehelp', name: 'Live Call Help', icon: '🎧', desc: 'Real-time support during client calls' },
+            { id: 'strategy', name: 'Strategy', icon: '🎯', desc: 'Bottleneck identification and action planning' },
+            { id: 'ghl', name: 'GHL Help', icon: '⚙️', desc: 'Platform-specific guidance (GoHighLevel CRM)' },
+            { id: 'save', name: 'Save the Client', icon: '🚨', desc: 'Intervention playbooks for at-risk clients' },
+            { id: 'weekly', name: 'Weekly Updates', icon: '📅', desc: 'Log weekly check-in notes' },
+            { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
+        ];
 
-        const Card = ({title,value,sub,color='cyan'}) => (
-            <div className={`card rounded-xl p-5 border-l-4 border-accent-${color}`}>
-                <p className="text-gray-400 text-sm">{title}</p>
-                <p className="text-2xl font-bold text-white mt-1">{value}</p>
-                {sub && <div className="mt-2">{sub}</div>}
+        // ========== LOGIN ==========
+        const LoginPage = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    const result = await supabase.auth.signInWithPassword({ email, password });
+                    if (result.error) throw result.error;
+                    onLogin(result.data.user);
+                } catch (err) { setError(err.message); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="card p-8 w-full max-w-md">
+                        <div className="text-center mb-8">
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Media Buyer Overview</h1>
+                            <p className="text-slate-500 mt-2">Sign in to continue</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Email" required />
+                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Password" required />
+                            {error && <div className="p-3 rounded-xl bg-red-500/10 text-red-400 text-sm">{error}</div>}
+                            <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl">{loading ? 'Signing in...' : 'Sign In'}</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== ALL CLIENTS OVERVIEW TAB ==========
+        const AllClientsTab = ({ clients, setupData, onClientClick }) => {
+            const [sortBy, setSortBy] = useState('client');
+            const [sortDir, setSortDir] = useState('asc');
+            const [filter, setFilter] = useState('');
+
+            const getSetupInfo = (client) => {
+                const name = client.client.toLowerCase().trim();
+                return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn); });
+            };
+
+            const filteredClients = clients.filter(c => 
+                c.client.toLowerCase().includes(filter.toLowerCase()) ||
+                c.state.toLowerCase().includes(filter.toLowerCase())
+            );
+
+            const sortedClients = [...filteredClients].sort((a, b) => {
+                let aVal = a[sortBy], bVal = b[sortBy];
+                if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+                if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+                if (sortDir === 'asc') return aVal > bVal ? 1 : -1;
+                return aVal < bVal ? 1 : -1;
+            });
+
+            const totals = clients.reduce((acc, c) => ({
+                spend: acc.spend + c.spend,
+                leads: acc.leads + c.leads,
+                appts: acc.appts + c.appts,
+                deals: acc.deals + c.deals
+            }), { spend: 0, leads: 0, appts: 0, deals: 0 });
+
+            const handleSort = (col) => {
+                if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+                else { setSortBy(col); setSortDir('asc'); }
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Clients</div><div className="text-2xl font-bold text-white">{clients.length}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Spend</div><div className="text-2xl font-bold text-brand-cyan">{fmt(totals.spend)}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Leads</div><div className="text-2xl font-bold text-brand-purple">{fmtN(totals.leads)}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Appts</div><div className="text-2xl font-bold text-emerald-400">{fmtN(totals.appts)}</div></div>
+                    </div>
+
+                    {/* Search */}
+                    <div className="card p-4">
+                        <input 
+                            type="text" 
+                            value={filter} 
+                            onChange={e => setFilter(e.target.value)} 
+                            placeholder="Search clients..." 
+                            className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white"
+                        />
+                    </div>
+
+                    {/* Client Table */}
+                    <div className="card overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-dark-800">
+                                    <tr>
+                                        {[
+                                            { key: 'client', label: 'Client' },
+                                            { key: 'state', label: 'State' },
+                                            { key: 'days', label: 'Days' },
+                                            { key: 'spend', label: 'Spend' },
+                                            { key: 'leads', label: 'Leads' },
+                                            { key: 'cpl', label: 'CPL' },
+                                            { key: 'appts', label: 'Appts' },
+                                            { key: 'appts7', label: '7-Day' },
+                                            { key: 'deals', label: 'Deals' },
+                                        ].map(col => (
+                                            <th key={col.key} onClick={() => handleSort(col.key)} className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase cursor-pointer hover:text-white">
+                                                {col.label} {sortBy === col.key && (sortDir === 'asc' ? '↑' : '↓')}
+                                            </th>
+                                        ))}
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Health</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-dark-700">
+                                    {sortedClients.map(c => {
+                                        const s = getSetupInfo(c);
+                                        const health = getHealth(c.cpl);
+                                        return (
+                                            <tr 
+                                                key={c.client} 
+                                                onClick={() => onClientClick(c.client)}
+                                                className="hover:bg-dark-800 cursor-pointer transition-colors"
+                                            >
+                                                <td className="px-4 py-3">
+                                                    <div className="font-medium text-white">{c.client}</div>
+                                                    {s?.csmRep && <div className="text-xs text-slate-500">CSM: {s.csmRep}</div>}
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-300">{c.state || '—'}</td>
+                                                <td className="px-4 py-3 text-slate-300">{c.days}</td>
+                                                <td className="px-4 py-3 text-slate-300">{fmt(c.spend)}</td>
+                                                <td className="px-4 py-3 text-brand-cyan font-medium">{fmtN(c.leads)}</td>
+                                                <td className="px-4 py-3 text-white font-medium">{fmtD(c.cpl)}</td>
+                                                <td className="px-4 py-3 text-brand-purple font-medium">{fmtN(c.appts)}</td>
+                                                <td className="px-4 py-3 text-slate-300">{c.appts7}</td>
+                                                <td className="px-4 py-3 text-emerald-400 font-medium">{fmtN(c.deals)}</td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`w-3 h-3 rounded-full inline-block ${healthColors[health]}`}></span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <p className="text-center text-slate-500 text-sm">💡 Click on any client row to view their full details in Client Success Hub</p>
+                </div>
+            );
+        };
+
+        // ========== CALL SCRIPTS TAB (General - no client selected) ==========
+        const CallScriptsTab = () => {
+            const scripts = [
+                { name: 'Check-In Call', icon: '📞', content: `Hi [Client], this is [Your Name] from Veriad Marketing! How are you doing today?\n\n[Wait for response]\n\nGreat! I wanted to check in and see how things are going with your leads. Have you been able to connect with any of them this week?\n\n[Listen and take notes]\n\nLet me pull up your account... [Review their metrics]\n\nAny questions for me?` },
+                { name: 'Concern/Complaint Call', icon: '😟', content: `Hi [Client], thank you for reaching out. I understand you have some concerns and I want to make sure we address them properly.\n\nCan you tell me more about what's been happening?\n\n[Listen carefully, don't interrupt]\n\nI really appreciate you sharing that with me. I can understand how that would be frustrating.\n\nHere's what I'd like to do:\n1. [Immediate action]\n2. [Follow-up action]\n3. [Timeline]\n\nDoes that sound like a good plan?` },
+                { name: 'Lead Quality Issue', icon: '🎯', content: `Hi [Client], I wanted to follow up on the lead quality feedback you shared.\n\nA few questions to help me optimize:\n1. What percentage of leads are answering when you call?\n2. Are they motivated sellers/buyers?\n3. What's your typical follow-up process?\n\n[Based on answers, suggest optimization]` },
+                { name: 'Upsell/Expansion', icon: '📈', content: `Hi [Client], I've been looking at your results and I'm really impressed!\n\nI wanted to discuss an opportunity to scale your success. Have you considered:\n- Adding buyer leads to your campaign?\n- Expanding to additional zip codes?\n- Increasing your daily budget?\n\nWhat do you think would help you close more deals?` },
+            ];
+
+            return (
+                <div className="space-y-4">
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-2">📞 Call Scripts</h3>
+                        <p className="text-slate-400 text-sm">General phone scripts. Select a client from Client Hub for personalized scripts.</p>
+                    </div>
+                    {scripts.map((script, i) => (
+                        <details key={i} className="card">
+                            <summary className="p-4 cursor-pointer flex items-center gap-3 hover:bg-dark-800 rounded-xl">
+                                <span className="text-xl">{script.icon}</span>
+                                <span className="font-medium text-white">{script.name}</span>
+                            </summary>
+                            <div className="p-4 pt-0 border-t border-dark-700">
+                                <pre className="whitespace-pre-wrap text-sm text-slate-300 font-sans leading-relaxed">{script.content}</pre>
+                                <button onClick={() => navigator.clipboard.writeText(script.content)} className="mt-4 px-4 py-2 bg-brand-cyan/20 text-brand-cyan rounded-lg text-sm">📋 Copy Script</button>
+                            </div>
+                        </details>
+                    ))}
+                </div>
+            );
+        };
+
+        // ========== LIVE CALL HELP TAB ==========
+        const LiveCallHelpTab = () => {
+            const [situation, setSituation] = useState('');
+            const [response, setResponse] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const quickResponses = [
+                { q: 'Client says leads are bad', a: 'I understand your concern. Let me ask: How quickly are you calling these leads? Studies show calling within 5 minutes increases contact rate by 400%. Also, are you using the scripts we provided?' },
+                { q: 'Client wants to cancel', a: 'I hear you, and I want to make sure we find the right solution. Before we discuss cancellation, can you help me understand what specific results you were hoping for?' },
+                { q: 'Client not answering leads', a: 'Try: 1) Call within 5 minutes, 2) Try different times of day, 3) Send a text first, 4) Follow up at least 6-8 times.' },
+                { q: 'CPL is too high', a: 'We can: 1) Review targeting, 2) Test new creative, 3) Adjust budget, 4) Check landing page conversion.' },
+            ];
+
+            const getAIHelp = async () => {
+                if (!situation.trim()) return;
+                setLoading(true);
+                try {
+                    const res = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500,
+                            messages: [{ role: 'user', content: `You're a CSM at a real estate marketing company helping on a live call. Help with: "${situation}". Brief, practical response.` }]
+                        })
+                    });
+                    const data = await res.json();
+                    setResponse(data.content?.[0]?.text || 'Could not generate response.');
+                } catch { setResponse('AI unavailable. Try quick responses below.'); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🎧 Live Call Help</h3>
+                        <textarea value={situation} onChange={e => setSituation(e.target.value)} placeholder="Describe the situation..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
+                        <button onClick={getAIHelp} disabled={loading || !situation.trim()} className="mt-3 px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50">
+                            {loading ? '🤖 Thinking...' : '🤖 Get AI Help'}
+                        </button>
+                        {response && <div className="mt-4 p-4 bg-dark-800 rounded-xl text-sm text-slate-300">{response}</div>}
+                    </div>
+                    <div className="card p-6">
+                        <h4 className="font-semibold text-white mb-4">⚡ Quick Responses</h4>
+                        <div className="space-y-3">
+                            {quickResponses.map((qr, i) => (
+                                <details key={i} className="bg-dark-800 rounded-xl">
+                                    <summary className="p-3 cursor-pointer text-brand-cyan text-sm">{qr.q}</summary>
+                                    <div className="p-3 pt-0 text-sm text-slate-300">{qr.a}</div>
+                                </details>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== STRATEGY TAB ==========
+        const StrategyTab = () => (
+            <div className="card p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">🎯 Strategy</h3>
+                <p className="text-slate-400 mb-4">Select a specific client from the Client Success Hub to view and edit their strategy.</p>
+                <a href="index.html" className="inline-block px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Go to Client Success Hub →</a>
             </div>
         );
 
-        const TimeCard = ({title,icon,data,color}) => {
-            const t = useMemo(() => {
-                const spend = data.reduce((s,r)=>s+r.cost,0);
-                const leads = data.reduce((s,r)=>s+r.leads,0);
-                return { spend, leads, cpl: leads>0?spend/leads:0, accounts: [...new Set(data.map(r=>r.account))].length };
-            }, [data]);
+        // ========== GHL HELP TAB ==========
+        const GHLHelpTab = () => {
+            const guides = [
+                { title: 'How to Check Lead Status', steps: ['Log into GoHighLevel', 'Go to Contacts > Smart Lists', 'Filter by client name', 'Review lead status'] },
+                { title: 'How to Set Up Automations', steps: ['Go to Automation > Workflows', 'Click "Create Workflow"', 'Choose trigger', 'Add actions', 'Test and activate'] },
+                { title: 'Troubleshooting: Leads Not Syncing', steps: ['Check Facebook integration', 'Verify correct form connected', 'Check for errors', 'Re-sync integration'] },
+                { title: 'How to Create a Pipeline', steps: ['Go to Opportunities > Pipelines', 'Click "Add Pipeline"', 'Name it', 'Add stages', 'Save'] },
+            ];
             return (
-                <div className={`card rounded-xl p-6 border-l-4 border-accent-${color}`}>
-                    <div className="flex items-center gap-2 mb-4"><span className="text-2xl">{icon}</span><h3 className="text-lg font-semibold text-white">{title}</h3></div>
-                    <div className="grid grid-cols-4 gap-4">
-                        <div><div className="text-xl font-bold text-white">{fmt(t.spend)}</div><div className="text-xs text-gray-500">Spend</div></div>
-                        <div><div className="text-xl font-bold text-accent-cyan">{fmtN(t.leads)}</div><div className="text-xs text-gray-500">Leads</div></div>
-                        <div><div className="text-xl font-bold text-white">{fmtD(t.cpl)}</div><div className="text-xs text-gray-500">CPL</div></div>
-                        <div><div className="text-xl font-bold text-accent-purple">{t.accounts}</div><div className="text-xs text-gray-500">Accounts</div></div>
-                    </div>
+                <div className="space-y-4">
+                    <div className="card p-6"><h3 className="text-lg font-semibold text-white mb-2">⚙️ GoHighLevel Help</h3></div>
+                    {guides.map((guide, i) => (
+                        <details key={i} className="card">
+                            <summary className="p-4 cursor-pointer font-medium text-white">{guide.title}</summary>
+                            <div className="p-4 pt-0 border-t border-dark-700"><ul className="space-y-1">{guide.steps.map((step, j) => <li key={j} className="text-sm text-slate-300">{j+1}. {step}</li>)}</ul></div>
+                        </details>
+                    ))}
                 </div>
             );
         };
 
-        const HealthBar = ({clients}) => {
-            const h = useMemo(() => {
-                const g=clients.filter(c=>getHealth(c.cpl)==='Green').length;
-                const y=clients.filter(c=>getHealth(c.cpl)==='Yellow').length;
-                const r=clients.filter(c=>getHealth(c.cpl)==='Red').length;
-                const t=clients.length||1;
-                return {g,y,r,gp:(g/t*100).toFixed(0),yp:(y/t*100).toFixed(0),rp:(r/t*100).toFixed(0)};
-            },[clients]);
-            return (
-                <div className="card rounded-xl p-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">📊 Health Distribution</h3>
-                    <div className="flex h-4 rounded-full overflow-hidden bg-dark-700 mb-4">
-                        <div style={{width:`${h.gp}%`}} className="bg-emerald-500"/>
-                        <div style={{width:`${h.yp}%`}} className="bg-amber-500"/>
-                        <div style={{width:`${h.rp}%`}} className="bg-red-500"/>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                        <div><div className="text-2xl font-bold text-emerald-400">{h.g}</div><div className="text-xs text-gray-500">Green</div></div>
-                        <div><div className="text-2xl font-bold text-amber-400">{h.y}</div><div className="text-xs text-gray-500">Yellow</div></div>
-                        <div><div className="text-2xl font-bold text-red-400">{h.r}</div><div className="text-xs text-gray-500">Red</div></div>
-                    </div>
-                </div>
-            );
-        };
+        // ========== SAVE THE CLIENT TAB ==========
+        const SaveClientTab = ({ clients, setupData }) => {
+            const getSetupInfo = (client) => {
+                const name = client.client.toLowerCase().trim();
+                return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn); });
+            };
 
-        const Trends = ({d7,d30}) => {
-            const t7 = useMemo(() => ({ spend:d7.reduce((s,r)=>s+r.cost,0), leads:d7.reduce((s,r)=>s+r.leads,0) }), [d7]);
-            const t30 = useMemo(() => ({ spend:d30.reduce((s,r)=>s+r.cost,0), leads:d30.reduce((s,r)=>s+r.leads,0) }), [d30]);
-            const daily7 = { spend:t7.spend/7, leads:t7.leads/7, cpl:t7.leads>0?t7.spend/t7.leads:0 };
-            const daily30 = { spend:t30.spend/30, leads:t30.leads/30, cpl:t30.leads>0?t30.spend/t30.leads:0 };
-            const Tr = ({v,inv}) => { const g = inv?v<0:v>0; return <span className={Math.abs(v)<1?'text-gray-500':g?'text-emerald-400':'text-red-400'}>{v>0?'↑':'↓'} {Math.abs(v).toFixed(1)}%</span>; };
+            const atRiskClients = clients.filter(c => {
+                const s = getSetupInfo(c);
+                return c.cpl > 50 || (c.leads > 15 && c.appts === 0) || s?.duePayment?.includes('OVERDUE') || s?.redFlags;
+            });
+
+            const playbooks = [
+                { name: 'Payment Overdue', steps: ['Call immediately', 'Ask about service issues', 'Offer payment plan', 'Set deadline', 'Escalate if needed'] },
+                { name: 'High CPL (>$50)', steps: ['Review targeting', 'Check ad creative', 'Review landing page', 'Consider rebuild', 'Offer refresh'] },
+                { name: 'No Appointments', steps: ['Review lead quality', 'Check calling speed', 'Review scripts', 'Listen to recordings', 'Recommend ISA'] },
+                { name: 'Client Wants to Cancel', steps: ['LISTEN first', 'Acknowledge frustration', 'Review wins', 'Propose solutions', 'Offer pause', 'Get manager'] },
+            ];
+
             return (
-                <div className="card rounded-xl p-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">📈 7-Day vs 30-Day Trends</h3>
-                    <div className="space-y-3">
-                        <div className="flex justify-between p-3 bg-dark-700 rounded-lg">
-                            <span className="text-gray-400">Daily Spend</span>
-                            <div className="text-right"><div className="text-white font-mono">{fmtD(daily7.spend)}/day</div><Tr v={daily30.spend>0?((daily7.spend-daily30.spend)/daily30.spend)*100:0}/></div>
+                <div className="space-y-6">
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🚨 At-Risk Clients ({atRiskClients.length})</h3>
+                        {atRiskClients.length === 0 ? (
+                            <div className="text-slate-500 text-center py-4">No at-risk clients detected</div>
+                        ) : (
+                            <div className="space-y-2">
+                                {atRiskClients.map(c => {
+                                    const s = getSetupInfo(c);
+                                    const issues = [];
+                                    if (c.cpl > 50) issues.push(`High CPL: ${fmtD(c.cpl)}`);
+                                    if (c.leads > 15 && c.appts === 0) issues.push('No appointments');
+                                    if (s?.duePayment?.includes('OVERDUE')) issues.push('Payment overdue');
+                                    if (s?.redFlags) issues.push(`Red flag: ${s.redFlags}`);
+                                    return (
+                                        <div key={c.client} className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+                                            <div className="font-medium text-white">{c.client}</div>
+                                            <div className="text-sm text-red-400">{issues.join(' • ')}</div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🛟 Intervention Playbooks</h3>
+                        <div className="space-y-4">
+                            {playbooks.map((pb, i) => (
+                                <div key={i} className="p-4 bg-dark-800 rounded-xl">
+                                    <h4 className="font-semibold text-white mb-2">{pb.name}</h4>
+                                    <ul className="space-y-1 text-sm text-slate-300">{pb.steps.map((step, j) => <li key={j}>{j+1}. {step}</li>)}</ul>
+                                </div>
+                            ))}
                         </div>
-                        <div className="flex justify-between p-3 bg-dark-700 rounded-lg">
-                            <span className="text-gray-400">Daily Leads</span>
-                            <div className="text-right"><div className="text-white font-mono">{daily7.leads.toFixed(1)}/day</div><Tr v={daily30.leads>0?((daily7.leads-daily30.leads)/daily30.leads)*100:0}/></div>
-                        </div>
-                        <div className="flex justify-between p-3 bg-dark-700 rounded-lg">
-                            <span className="text-gray-400">CPL Trend</span>
-                            <div className="text-right"><div className="text-white font-mono">{fmtD(daily7.cpl)}</div><Tr v={daily30.cpl>0?((daily7.cpl-daily30.cpl)/daily30.cpl)*100:0} inv/></div>
-                        </div>
                     </div>
                 </div>
             );
         };
 
-        const Alerts = ({clients,d7}) => {
-            const red = clients.filter(c=>getHealth(c.cpl)==='Red').slice(0,3);
-            const high7 = d7.filter(r=>r.cpl>50&&r.leads>0).slice(0,3);
+        // ========== WEEKLY UPDATES TAB ==========
+        const WeeklyUpdatesTab = () => (
+            <div className="card p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">📅 Weekly Updates</h3>
+                <p className="text-slate-400 mb-4">Select a specific client from the Client Success Hub to log weekly updates.</p>
+                <a href="index.html" className="inline-block px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Go to Client Success Hub →</a>
+            </div>
+        );
+
+        // ========== NOTES & ACTIVITY TAB ==========
+        const NotesActivityTab = () => {
+            const { user } = useAuth();
+            const [activities, setActivities] = useState([]);
+
+            useEffect(() => { loadActivities(); }, []);
+
+            const loadActivities = async () => {
+                const { data } = await supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(100);
+                if (data) setActivities(data);
+            };
+
             return (
-                <div className="card rounded-xl p-6">
-                    <h3 className="text-lg font-semibold text-white mb-4">🚨 Alerts</h3>
-                    <div className="space-y-2 max-h-64 overflow-y-auto scrollbar">
-                        {high7.map((r,i)=><div key={i} className="bg-red-500/10 border border-red-500/30 rounded-lg p-3"><div className="text-red-400 font-semibold">{r.account}</div><div className="text-sm text-gray-400">7-Day CPL: {fmtD(r.cpl)}</div></div>)}
-                        {red.map(c=><div key={c.client} className="bg-red-500/10 border border-red-500/30 rounded-lg p-3"><div className="text-red-400 font-semibold">{c.client}</div><div className="text-sm text-gray-400">CPL: {fmtD(c.cpl)}</div></div>)}
-                        {high7.length===0&&red.length===0&&<div className="text-center py-4 text-gray-500">✨ All on track!</div>}
-                    </div>
+                <div className="card p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">📋 Recent Activity (All Clients)</h3>
+                    {activities.length === 0 ? (
+                        <div className="text-slate-500 text-center py-8">No activity yet</div>
+                    ) : (
+                        <div className="space-y-2 max-h-[500px] overflow-y-auto scrollbar">
+                            {activities.map(a => (
+                                <div key={a.id} className="p-3 bg-dark-800 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-brand-purple font-medium text-sm">{getDisplayName(a.user_email)}</span>
+                                        <span className="text-slate-600 text-xs">{new Date(a.created_at).toLocaleString()}</span>
+                                    </div>
+                                    <div className="text-slate-400 text-sm">{a.action} • <span className="text-white">{a.client_name}</span></div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             );
         };
 
-        // Navigate to Client Hub with selected client
-        const goToClient = (clientName) => {
-            window.location.href = `index.html?client=${encodeURIComponent(clientName)}`;
-        };
-
-        const Table = ({clients,sort,setSort}) => {
-            const sorted = useMemo(() => {
-                const s = [...clients];
-                if(sort.k) s.sort((a,b) => { let av=a[sort.k],bv=b[sort.k]; if(typeof av==='string'){av=av.toLowerCase();bv=bv.toLowerCase();} return av<bv?(sort.d==='asc'?-1:1):av>bv?(sort.d==='asc'?1:-1):0; });
-                return s;
-            }, [clients,sort]);
-            const TH = ({l,k}) => <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase cursor-pointer hover:text-white" onClick={()=>setSort({k,d:sort.k===k&&sort.d==='desc'?'asc':'desc'})}>{l} {sort.k===k&&<span className="text-accent-cyan">{sort.d==='asc'?'↑':'↓'}</span>}</th>;
-            return (
-                <div className="card rounded-xl overflow-hidden">
-                    <div className="overflow-x-auto scrollbar">
-                        <table className="w-full">
-                            <thead className="bg-dark-700"><tr><TH l="Client" k="client"/><TH l="State" k="state"/><TH l="Days" k="days"/><TH l="Spend" k="spend"/><TH l="Leads" k="leads"/><TH l="CPL" k="cpl"/><TH l="Appts" k="appts"/><TH l="Deals" k="deals"/><th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Health</th></tr></thead>
-                            <tbody className="divide-y divide-dark-600">
-                                {sorted.map(c=>(
-                                    <tr key={c.client} className="client-row" onClick={() => goToClient(c.client)}>
-                                        <td className="px-3 py-3 font-semibold text-white hover:text-accent-cyan">{c.client}</td>
-                                        <td className="px-3 py-3 text-gray-300">{c.state}</td>
-                                        <td className="px-3 py-3 font-mono text-gray-200">{c.days}</td>
-                                        <td className="px-3 py-3 font-mono text-white">{fmt(c.spend)}</td>
-                                        <td className="px-3 py-3 font-mono text-accent-cyan">{fmtN(c.leads)}</td>
-                                        <td className="px-3 py-3 font-mono text-white">{fmtD(c.cpl)}</td>
-                                        <td className="px-3 py-3 font-mono text-accent-purple">{fmtN(c.appts)}</td>
-                                        <td className="px-3 py-3 font-mono text-accent-green">{fmtN(c.deals)}</td>
-                                        <td className="px-3 py-3"><Badge health={getHealth(c.cpl)}/></td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            );
-        };
-
+        // ========== MAIN APP ==========
         const App = () => {
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
             const [clients, setClients] = useState([]);
-            const [d7, setD7] = useState([]);
-            const [d30, setD30] = useState([]);
+            const [setupData, setSetupData] = useState([]);
+            const [tab, setTab] = useState('overview');
             const [loading, setLoading] = useState(true);
-            const [sort, setSort] = useState({k:'cpl',d:'desc'});
-            const [filter, setFilter] = useState('all');
-            const [search, setSearch] = useState('');
 
             useEffect(() => {
-                Promise.all([
-                    fetch(URLS.clients).then(r=>r.text()).then(csv=>{const lines=csv.split('\n');return Papa.parse(lines.slice(2).join('\n'),{header:true,skipEmptyLines:true}).data.map(mapClient).filter(r=>r.client);}).catch(()=>[]),
-                    fetch(URLS.days7).then(r=>r.text()).then(csv=>Papa.parse(csv,{header:true,skipEmptyLines:true}).data.map(mapCamp).filter(r=>r.account)).catch(()=>[]),
-                    fetch(URLS.days30).then(r=>r.text()).then(csv=>Papa.parse(csv,{header:true,skipEmptyLines:true}).data.map(mapCamp).filter(r=>r.account)).catch(()=>[])
-                ]).then(([c,s7,s30])=>{ setClients(c); setD7(s7); setD30(s30); setLoading(false); });
+                supabase.auth.getSession().then(({ data: { session } }) => { setUser(session?.user || null); setAuthLoading(false); });
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user || null));
+                return () => subscription.unsubscribe();
             }, []);
 
-            const filtered = useMemo(() => {
-                let r = clients;
-                if(filter!=='all') r = r.filter(c=>getHealth(c.cpl)===filter);
-                if(search) r = r.filter(c=>c.client.toLowerCase().includes(search.toLowerCase()));
-                return r;
-            }, [clients,filter,search]);
+            useEffect(() => {
+                if (!user) return;
+                Promise.all([
+                    fetch(URLS.clients).then(r => r.text()).then(csv => Papa.parse(csv.split('\n').slice(2).join('\n'), { header: true, skipEmptyLines: true }).data.map(mapClient).filter(r => r.client)),
+                    fetch(URLS.setupTiming).then(r => r.text()).then(csv => { const lines = csv.split('\n'); return Papa.parse([lines[0], ...lines.slice(2)].join('\n'), { header: true, skipEmptyLines: true }).data.map(mapSetupTiming).filter(r => r.client); })
+                ]).then(([c, s]) => { setClients(c); setSetupData(s); setLoading(false); });
+            }, [user]);
 
-            const totals = useMemo(() => {
-                const spend=clients.reduce((s,c)=>s+c.spend,0), leads=clients.reduce((s,c)=>s+c.leads,0);
-                return { spend, leads, cpl:leads>0?spend/leads:0, appts:clients.reduce((s,c)=>s+c.appts,0), deals:clients.reduce((s,c)=>s+c.deals,0) };
-            }, [clients]);
+            const handleClientClick = (clientName) => {
+                window.location.href = `index.html?client=${encodeURIComponent(clientName)}`;
+            };
 
-            if(loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            if (authLoading || loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            if (!user) return <LoginPage onLogin={setUser} />;
+
+            const renderTab = () => {
+                switch (tab) {
+                    case 'overview': return <AllClientsTab clients={clients} setupData={setupData} onClientClick={handleClientClick} />;
+                    case 'scripts': return <CallScriptsTab />;
+                    case 'livehelp': return <LiveCallHelpTab />;
+                    case 'strategy': return <StrategyTab />;
+                    case 'ghl': return <GHLHelpTab />;
+                    case 'save': return <SaveClientTab clients={clients} setupData={setupData} />;
+                    case 'weekly': return <WeeklyUpdatesTab />;
+                    case 'notes': return <NotesActivityTab />;
+                    default: return <AllClientsTab clients={clients} setupData={setupData} onClientClick={handleClientClick} />;
+                }
+            };
 
             return (
-                <div className="min-h-screen">
-                    <header className="bg-dark-800/80 backdrop-blur border-b border-dark-600 sticky top-0 z-40">
-                        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                            <div><h1 className="text-2xl font-bold gradient-text">Media Buyer Overview</h1><p className="text-sm text-gray-500">All Clients + Campaign Performance</p></div>
-                            <a href="index.html" className="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg text-sm">← Client Hub</a>
-                        </div>
-                    </header>
-                    <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                            <Card title="Clients" value={clients.length} color="cyan"/>
-                            <Card title="Total Spend" value={fmt(totals.spend)} color="purple"/>
-                            <Card title="Total Leads" value={fmtN(totals.leads)} color="green"/>
-                            <Card title="Avg CPL" value={fmtD(totals.cpl)} color="yellow" sub={<Badge health={getHealth(totals.cpl)}/>}/>
-                            <Card title="Deals" value={fmtN(totals.deals)} color="green"/>
-                        </div>
-                        <div className="grid lg:grid-cols-2 gap-6">
-                            <TimeCard title="Last 7 Days" icon="📅" data={d7} color="cyan"/>
-                            <TimeCard title="Last 30 Days" icon="📆" data={d30} color="purple"/>
-                        </div>
-                        <div className="grid lg:grid-cols-3 gap-6">
-                            <Trends d7={d7} d30={d30}/>
-                            <HealthBar clients={clients}/>
-                            <Alerts clients={clients} d7={d7}/>
-                        </div>
-                        <div className="flex flex-wrap gap-4">
-                            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients..." className="flex-1 min-w-[200px] bg-dark-700 border border-dark-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-accent-cyan"/>
-                            <div className="flex gap-2">{['all','Green','Yellow','Red'].map(f=><button key={f} onClick={()=>setFilter(f)} className={`px-4 py-2 rounded-lg text-sm ${filter===f?'bg-accent-cyan text-dark-900':'bg-dark-700 text-gray-400 hover:text-white'}`}>{f==='all'?'All':f}</button>)}</div>
-                        </div>
-                        <p className="text-gray-500 text-sm">💡 Click on any client row to view their full details</p>
-                        <Table clients={filtered} sort={sort} setSort={setSort}/>
-                    </main>
-                </div>
+                <AuthContext.Provider value={{ user }}>
+                    <div className="flex min-h-screen">
+                        <aside className="w-72 bg-dark-900 border-r border-dark-700 flex flex-col">
+                            <div className="p-5 border-b border-dark-700">
+                                <h1 className="text-xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Media Buyer Overview</h1>
+                                <div className="flex items-center gap-2 mt-2"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span className="text-xs text-slate-400">{getDisplayName(user.email)}</span></div>
+                            </div>
+                            <nav className="flex-1 py-2 overflow-y-auto scrollbar">
+                                {tabs.map(t => (
+                                    <button key={t.id} onClick={() => setTab(t.id)} className={`w-full flex items-start gap-3 px-5 py-3 text-left ${tab === t.id ? 'tab-active text-white' : 'text-slate-400 hover:text-white hover:bg-dark-800'}`}>
+                                        <span className="text-lg">{t.icon}</span>
+                                        <div><div className="text-sm font-medium">{t.name}</div><div className="text-xs text-slate-500">{t.desc}</div></div>
+                                    </button>
+                                ))}
+                            </nav>
+                            <div className="p-4 border-t border-dark-700 space-y-2">
+                                <a href="index.html" className="block w-full text-center py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm">→ Client Success Hub</a>
+                                <button onClick={() => supabase.auth.signOut()} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">Logout</button>
+                            </div>
+                        </aside>
+                        <main className="flex-1 flex flex-col">
+                            <header className="bg-dark-900/80 backdrop-blur border-b border-dark-700 px-8 py-4">
+                                <h2 className="text-xl font-bold text-white">Media Buyer Overview</h2>
+                                <p className="text-slate-400 text-sm">All clients at a glance • Click any client to view details</p>
+                            </header>
+                            <div className="flex-1 overflow-y-auto p-8 scrollbar">{renderTab()}</div>
+                        </main>
+                    </div>
+                </AuthContext.Provider>
             );
         };
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
 </body>
 </html>
