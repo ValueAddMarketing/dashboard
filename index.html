@@ -30,6 +30,7 @@
         .tab-active { background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(139,92,246,0.15)); border-left: 3px solid #06b6d4; }
         .scrollbar::-webkit-scrollbar { width: 4px; }
         .scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        .section-title { font-size: 0.75rem; font-weight: 600; color: #8b5cf6; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
     </style>
 </head>
 <body class="min-h-screen">
@@ -57,28 +58,49 @@
         const clean = v => (v && v.toString().trim()) ? v.toString().trim() : '—';
         const getDisplayName = (email) => email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
 
+        // Full client mapping from Media Buying sheet
         const mapClient = r => ({
-            client: r['Client']||'', state: r['State']||'', campaign: r['CAMPAIGN']||'',
-            days: pn(r['Days Running']), weeks: pn(r['Weeks Running']),
-            spend: pn(r['Total Ad Spend']), dailyBudget: pn(r['Daily Ad Spend Budget']), spendPerDay: pn(r['Ad Spend Per Day']),
+            client: r['Client']||'', adAccount: r['Ad Account Name']||'', state: r['State']||'', 
+            campaign: r['CAMPAIGN']||'', callingStatus: r['Calling/Non-calling']||'', startDate: r['Start Date']||'',
+            days: pn(r['Days Running']), weeks: pn(r['Weeks Running']), months: pn(r['Months Running']),
+            spend: pn(r['Total Ad Spend']), sellerSpend: pn(r['Seller Ad Spend']), buyerSpend: pn(r['Buyer Ad Spend']),
+            dailyBudget: pn(r['Daily Ad Spend Budget']), spendPerDay: pn(r['Ad Spend Per Day']),
             leads: pn(r['Total Leads']), cpl: pn(r['Cost Per Lead']),
-            sellerLeads: pn(r['Seller Leads']), buyerLeads: pn(r['Buyer Leads']), listingLeads: pn(r['Listing Leads']),
+            sellerLeads: pn(r['Seller Leads']), sellerCPL: pn(r['Cost Per Seller Lead']), sellerLeadsWeek: pn(r['Seller Leads/Week']),
+            buyerLeads: pn(r['Buyer Leads']), listingLeads: pn(r['Listing Leads']),
             appts: pn(r['Total Appts']), apptsWeek: pn(r['Appt per Week']), appts7: pn(r['Appts in the Last 7 Days']),
-            sellerAppts: pn(r['Seller Appts']), buyerAppts: pn(r['Buyer Appts']), sellerLeadToAppt: pn(r['Seller Lead > Appt']),
-            deals: pn(r['Potential Deals']), listings: pn(r['Listing']), buyerSigned: pn(r['Buyer Signed'])
+            sellerAppts: pn(r['Seller Appts']), sellerLeadToAppt: pn(r['Seller Lead > Appt']), sellerApptCost: pn(r['Cost per Seller Appts']),
+            buyerAppts: pn(r['Buyer Appts']), buyerApptCost: pn(r['Cost per Buyer Appt']),
+            deals: pn(r['Potential Deals']), listings: pn(r['Listing']), buyerSigned: pn(r['Buyer Signed']), leadsPerListing: pn(r['Leads/Listing'])
         });
 
+        // Full setup timing mapping
         const mapSetupTiming = r => ({
-            client: r['VAM'] || '', csmRep: r['CSM'] || '', status: r['Status'] || '', concern: r['Concern'] || '',
-            state: r['State'] || '', campaign: r['Campaign'] || '', contractCategory: r['Contract Category'] || '',
-            mrr: r['MRR'] || '', fulfilled: r['Fullfilled'] || '', daysLeft: r['Days left'] || '',
-            duePayment: r['Due Payment'] || '', paidDate: r['Paid date'] || '', onboardedDate: r['Onboarded date'] || '',
+            client: r['VAM'] || '', csmRep: r['CSM'] || '', lastForm: r['Last Form'] || '', lastFormDate: r['Date'] || '',
+            status: r['Status'] || '', concern: r['Concern'] || '', referral: r['Referral'] || '', testimonial: r['Testmonial'] || '',
+            lender: r['Status_1'] || '', state: r['State'] || '', campaign: r['Campaign'] || '', contractCategory: r['Contract Category'] || '',
+            spanish: r['Spanish'] || '', mrr: r['MRR'] || '', fulfilled: r['Fullfilled'] || '', info: r['Info'] || '',
+            daysLeft: r['Days left'] || '', duePayment: r['Due Payment'] || '', lastCsmNote: r['Last CSM Rep - Note - date'] || '',
+            upcomingCsmDate: r['upcoming CSM rep - date'] || '', paidDate: r['Paid date'] || '', onboardedDate: r['Onboarded date'] || '',
             launchCallDate: r['Launch call date'] || '', adLiveDate: r[' Ad Live date'] || r['Ad Live date'] || '',
-            closings: r['Closings'] || '', signed: r['Signed'] || '', redFlags: r['Red flags'] || '',
-            unresolvedConcerns: r['Unresolved Concerns'] || '', personality: r['Personality'] || '',
-            expectations: r['Expectations'] || '', revenueContracted: r['Revenue Contracted'] || '',
-            contractLength: r['Contract length'] || '', calling: r['Calling'] || '', dialer: r['Dialer'] || '',
-            timezone: r['Timezone'] || '', billingCycle: r['Billing cycle'] || '',
+            billingCycle: r['Billing cycle'] || '', freeTrialDays: r['Free trial Days'] || '', adsOnPauseDays: r['ADs on pause total days'] || '',
+            closings: r['Closings'] || '', signed: r['Signed'] || '', appts: r[' Appts '] || r['Appts'] || '',
+            behindSchedule: r['Behind schedule'] || '', missing: r['Missing'] || '', shuPercent: r['SHU%'] || '',
+            calling: r['Calling'] || '', dialer: r['Dialer'] || '', sLeads: r['S Leads'] || '', bLeads: r['B Leads'] || '',
+            cpl: r['CPL'] || '', cpa: r['CPA'] || '', sAppts: r['(S)appts'] || '', bAppts: r['(B)appts'] || '',
+            shu: r['SHU'] || '', ns: r['NS'] || '', stageOnCrm: r['Stage on CRM'] || '', timezone: r['Timezone'] || '',
+            onboardingRep: r['Rep'] || '', redFlags: r['Red flags'] || '', crmFees: r['CRM Fees'] || '',
+            adSpendFees: r['ad spend fees'] || '', responsiveness: r['Responsivness'] || '', leadGenExp: r['Lead gen exp'] || '',
+            callingExpectations: r['Calling expectaions'] || '', fathom1: r['Fathom'] || '', adsOnPauseDaysDetail: r['ads on pause days'] || '',
+            adAccountName: r['Ad Account name'] || '', adSpend: r['Ad Spend'] || '', radius: r['radius'] || '',
+            city: r['City'] || '', target: r['Target'] || '', launch: r['Launch'] || '', adsRep: r['Rep'] || '',
+            readiness: r['Readiness'] || '', personality: r['Personality'] || '', expectations: r['Expectations'] || '',
+            unresolvedConcerns: r['Unresolved Concerns'] || '', firstCheckin: r['1st Check-in'] || '', firstCsm: r['1st CSM'] || '',
+            revenueContracted: r['Revenue Contracted'] || '', contractLength: r['Contract length'] || '',
+            moPaymentsCollected: r['mo payments collected'] || '', billingAdjust: r['Billing adjust'] || '',
+            platform: r['Platform'] || '', nameEmail: r['Name/email'] || '', contractNotes: r['contract notes'] || '',
+            paymentNotes: r['Payment notes'] || '', amountCollected: r['Amount collected'] || '', b2b: r['B2B'] || '',
+            closedOn: r['Closed on'] || '', commission: r['commision'] || '', setterCloser: r['Setter & Closer'] || '',
         });
 
         const getHealthScore = (c, s) => {
@@ -93,9 +115,9 @@
         };
 
         const getHealthColor = (score) => {
-            if (score >= 80) return { text: 'text-emerald-400', stroke: '#10b981', label: 'Healthy' };
-            if (score >= 60) return { text: 'text-amber-400', stroke: '#f59e0b', label: 'Needs Attention' };
-            return { text: 'text-red-400', stroke: '#ef4444', label: 'At Risk' };
+            if (score >= 80) return { text: 'text-emerald-400', bg: 'bg-emerald-500', label: 'Healthy' };
+            if (score >= 60) return { text: 'text-amber-400', bg: 'bg-amber-500', label: 'Needs Attention' };
+            return { text: 'text-red-400', bg: 'bg-red-500', label: 'At Risk' };
         };
 
         const tabs = [
@@ -106,9 +128,7 @@
             { id: 'ghl', name: 'GHL Help', icon: '⚙️', desc: 'Platform-specific guidance (GoHighLevel CRM)' },
             { id: 'save', name: 'Save the Client', icon: '🚨', desc: 'Intervention playbooks for at-risk clients' },
             { id: 'weekly', name: 'Weekly Updates', icon: '📅', desc: 'Log weekly check-in notes' },
-            { id: 'notes', name: 'Notes Log', icon: '📝', desc: 'Timestamped internal notes per client' },
-            { id: 'meetings', name: 'Meeting Notes', icon: '🎙️', desc: 'AI-powered meeting summaries' },
-            { id: 'activity', name: 'Activity Log', icon: '📋', desc: 'Track all team activity' },
+            { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
         ];
 
         // ========== LOGIN ==========
@@ -147,107 +167,187 @@
             );
         };
 
-        // ========== HEALTH RING ==========
-        const HealthRing = ({ score, size = 100 }) => {
-            const color = getHealthColor(score);
-            const circumference = 2 * Math.PI * 36;
-            const offset = circumference - (score / 100) * circumference;
+        // ========== DATA ROW & SECTION COMPONENTS ==========
+        const DataRow = ({label, value, highlight, color}) => {
+            const displayVal = clean(value);
+            const isEmpty = displayVal === '—';
             return (
-                <div className="relative" style={{ width: size, height: size }}>
-                    <svg style={{ transform: 'rotate(-90deg)' }} width={size} height={size}>
-                        <circle cx={size/2} cy={size/2} r="36" fill="none" stroke="#1e293b" strokeWidth="8" />
-                        <circle cx={size/2} cy={size/2} r="36" fill="none" stroke={color.stroke} strokeWidth="8" strokeLinecap="round" style={{ strokeDasharray: circumference, strokeDashoffset: offset, transition: 'stroke-dashoffset 1s' }} />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className={`text-2xl font-bold ${color.text}`}>{score}</span>
-                    </div>
+                <div className="flex justify-between items-center py-1.5">
+                    <span className="text-slate-400 text-sm">{label}</span>
+                    <span className={`text-sm font-medium ${isEmpty ? 'text-slate-600' : highlight ? (color || 'text-brand-cyan') : 'text-white'}`}>{displayVal}</span>
                 </div>
             );
         };
 
-        // ========== CLIENT HEALTH TAB ==========
+        const Section = ({title, children, cols = 1}) => (
+            <div className="card p-5">
+                <div className="section-title">{title}</div>
+                <div className={cols === 2 ? 'grid md:grid-cols-2 gap-x-6' : ''}>{children}</div>
+            </div>
+        );
+
+        // ========== CLIENT HEALTH TAB - FULL DETAILS ==========
         const ClientHealthTab = ({ c, s }) => {
-            if (!c) return <div className="card p-12 text-center text-slate-500">Select a client to view health metrics</div>;
+            if (!c) return <div className="card p-12 text-center text-slate-500">Select a client to view details</div>;
             const score = getHealthScore(c, s);
             const color = getHealthColor(score);
-            const phase = c.days <= 14 ? 'Onboarding' : c.days <= 30 ? 'Optimization' : c.days <= 60 ? 'Scaling' : 'Systemization';
 
             return (
                 <div className="space-y-6">
+                    {/* Quick Stats */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="card p-4 border-l-4 border-brand-cyan"><div className="text-2xl font-bold text-white">{fmt(c.spend)}</div><div className="text-xs text-slate-400">Total Spend</div></div>
+                        <div className="card p-4 border-l-4 border-brand-cyan"><div className="text-2xl font-bold text-brand-cyan">{fmtN(c.leads)}</div><div className="text-xs text-slate-400">Total Leads</div></div>
+                        <div className="card p-4 border-l-4 border-brand-purple"><div className="text-2xl font-bold text-white">{fmtD(c.cpl)}</div><div className="text-xs text-slate-400">Cost Per Lead</div></div>
+                        <div className="card p-4 border-l-4 border-brand-purple"><div className="text-2xl font-bold text-brand-purple">{fmtN(c.appts)}</div><div className="text-xs text-slate-400">Appointments</div></div>
+                    </div>
+
                     {/* Alerts */}
                     {(s?.duePayment?.includes('OVERDUE') || s?.redFlags || s?.unresolvedConcerns) && (
                         <div className="space-y-2">
-                            {s?.duePayment?.includes('OVERDUE') && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-3"><span className="text-xl">💳</span><span className="text-red-400">Payment Overdue</span></div>}
-                            {s?.redFlags && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-3"><span className="text-xl">🚩</span><span className="text-red-400">{s.redFlags}</span></div>}
-                            {s?.unresolvedConcerns && <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-3"><span className="text-xl">⚠️</span><span className="text-amber-400">{s.unresolvedConcerns}</span></div>}
+                            {s?.duePayment?.includes('OVERDUE') && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20"><span className="text-red-400 font-semibold">💳 PAYMENT OVERDUE</span></div>}
+                            {s?.redFlags && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20"><span className="text-red-400 font-semibold">🚩 Red Flags:</span> <span className="text-slate-300 ml-2">{s.redFlags}</span></div>}
+                            {s?.unresolvedConcerns && <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20"><span className="text-amber-400 font-semibold">⚠️ Concerns:</span> <span className="text-slate-300 ml-2">{s.unresolvedConcerns}</span></div>}
                         </div>
                     )}
 
-                    {/* Health Overview */}
-                    <div className="card p-6">
-                        <div className="flex items-center gap-6">
-                            <HealthRing score={score} />
-                            <div>
-                                <div className={`text-2xl font-bold ${color.text}`}>{color.label}</div>
-                                <div className="text-slate-400 mt-1">Day {c.days} • Phase: {phase}</div>
-                                <div className="text-slate-500 text-sm mt-1">CSM: {s?.csmRep || 'Unassigned'} • MRR: {s?.mrr || '—'}</div>
-                            </div>
-                        </div>
+                    {/* CSM & Status */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        <Section title="👤 CSM & Status">
+                            <DataRow label="CSM Rep" value={s?.csmRep} highlight color="text-brand-purple"/>
+                            <DataRow label="Status" value={s?.status}/>
+                            <DataRow label="Concern" value={s?.concern}/>
+                            <DataRow label="Referral" value={s?.referral}/>
+                            <DataRow label="Testimonial" value={s?.testimonial}/>
+                            <DataRow label="Lender" value={s?.lender}/>
+                            <DataRow label="Last CSM Note" value={s?.lastCsmNote}/>
+                            <DataRow label="Upcoming CSM Date" value={s?.upcomingCsmDate}/>
+                        </Section>
+
+                        <Section title="📋 Client Details">
+                            <DataRow label="State" value={s?.state || c.state}/>
+                            <DataRow label="Campaign" value={s?.campaign || c.campaign}/>
+                            <DataRow label="Contract Category" value={s?.contractCategory} highlight/>
+                            <DataRow label="MRR" value={s?.mrr} highlight color="text-emerald-400"/>
+                            <DataRow label="Fulfilled" value={s?.fulfilled} highlight color="text-emerald-400"/>
+                            <DataRow label="Days Left" value={s?.daysLeft} highlight color={pn(s?.daysLeft) < 0 ? 'text-red-400' : 'text-brand-cyan'}/>
+                            <DataRow label="Due Payment" value={s?.duePayment} highlight color={s?.duePayment?.includes('OVERDUE') ? 'text-red-400' : 'text-emerald-400'}/>
+                            <DataRow label="Spanish" value={s?.spanish}/>
+                        </Section>
                     </div>
 
-                    {/* 90-Day Journey */}
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">90-Day Journey</h3>
-                        <div className="relative mb-4">
-                            <div className="h-2 bg-dark-800 rounded-full overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-brand-cyan to-brand-purple rounded-full" style={{ width: `${Math.min(100, c.days / 90 * 100)}%` }} />
-                            </div>
-                            <div className="flex justify-between mt-2 text-xs text-slate-500"><span>Day 1</span><span>Day 30</span><span>Day 60</span><span>Day 90</span></div>
+                    {/* Key Dates */}
+                    <Section title="📅 Key Dates">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">💰</div><div className="text-lg font-bold text-white">{clean(s?.paidDate)}</div><div className="text-xs text-slate-400">Paid</div></div>
+                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">🚀</div><div className="text-lg font-bold text-white">{clean(s?.onboardedDate)}</div><div className="text-xs text-slate-400">Onboarded</div></div>
+                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">📞</div><div className="text-lg font-bold text-white">{clean(s?.launchCallDate)}</div><div className="text-xs text-slate-400">Launch Call</div></div>
+                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">📢</div><div className="text-lg font-bold text-white">{clean(s?.adLiveDate)}</div><div className="text-xs text-slate-400">Ads Live</div></div>
                         </div>
-                        <div className="grid grid-cols-4 gap-3 text-center">
-                            {[
-                                { name: 'Paid', icon: '💰', done: !!s?.paidDate, date: s?.paidDate },
-                                { name: 'Onboarded', icon: '🚀', done: !!s?.onboardedDate, date: s?.onboardedDate },
-                                { name: 'Launch Call', icon: '📞', done: !!s?.launchCallDate, date: s?.launchCallDate },
-                                { name: 'Ads Live', icon: '📢', done: !!s?.adLiveDate, date: s?.adLiveDate },
-                            ].map((m, i) => (
-                                <div key={i} className={`p-3 rounded-xl ${m.done ? 'bg-emerald-500/10' : 'bg-dark-800'}`}>
-                                    <div className="text-xl">{m.done ? '✓' : m.icon}</div>
-                                    <div className="text-xs text-slate-400 mt-1">{m.name}</div>
-                                    {m.date && <div className="text-xs text-slate-600">{m.date}</div>}
-                                </div>
-                            ))}
-                        </div>
+                    </Section>
+
+                    {/* Performance */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        <Section title="📊 Performance">
+                            <DataRow label="Closings" value={s?.closings} highlight color="text-emerald-400"/>
+                            <DataRow label="Signed" value={s?.signed} highlight color="text-emerald-400"/>
+                            <DataRow label="SHU%" value={s?.shuPercent}/>
+                            <DataRow label="Behind Schedule" value={s?.behindSchedule}/>
+                            <DataRow label="Missing" value={s?.missing}/>
+                        </Section>
+
+                        <Section title="📞 Calling & Leads">
+                            <DataRow label="Calling" value={s?.calling}/>
+                            <DataRow label="Dialer" value={s?.dialer}/>
+                            <DataRow label="S Leads" value={s?.sLeads} highlight color="text-brand-cyan"/>
+                            <DataRow label="B Leads" value={s?.bLeads} highlight color="text-brand-cyan"/>
+                            <DataRow label="CPL" value={s?.cpl}/>
+                            <DataRow label="CPA" value={s?.cpa}/>
+                        </Section>
                     </div>
 
-                    {/* Key Metrics */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="card p-4"><div className="text-slate-500 text-sm">Total Spend</div><div className="text-xl font-bold text-white">{fmt(c.spend)}</div></div>
-                        <div className="card p-4"><div className="text-slate-500 text-sm">Total Leads</div><div className="text-xl font-bold text-brand-cyan">{fmtN(c.leads)}</div></div>
-                        <div className="card p-4"><div className="text-slate-500 text-sm">CPL</div><div className="text-xl font-bold text-white">{fmtD(c.cpl)}</div></div>
-                        <div className="card p-4"><div className="text-slate-500 text-sm">Appointments</div><div className="text-xl font-bold text-brand-purple">{fmtN(c.appts)}</div><div className="text-xs text-slate-500">{c.appts7} this week</div></div>
+                    {/* Onboarding & Ads */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        <Section title="🎯 Onboarding">
+                            <DataRow label="Stage on CRM" value={s?.stageOnCrm}/>
+                            <DataRow label="Timezone" value={s?.timezone}/>
+                            <DataRow label="Onboarding Rep" value={s?.onboardingRep}/>
+                            <DataRow label="Red Flags" value={s?.redFlags} highlight color="text-red-400"/>
+                            <DataRow label="CRM Fees" value={s?.crmFees}/>
+                            <DataRow label="Ad Spend Fees" value={s?.adSpendFees}/>
+                            <DataRow label="Responsiveness" value={s?.responsiveness}/>
+                            <DataRow label="Lead Gen Exp" value={s?.leadGenExp}/>
+                        </Section>
+
+                        <Section title="📢 Ads & Targeting">
+                            <DataRow label="Ad Account" value={s?.adAccountName || c.adAccount}/>
+                            <DataRow label="Ad Spend" value={s?.adSpend} highlight color="text-brand-cyan"/>
+                            <DataRow label="City" value={s?.city}/>
+                            <DataRow label="Radius" value={s?.radius}/>
+                            <DataRow label="Target" value={s?.target}/>
+                            <DataRow label="Launch" value={s?.launch}/>
+                            <DataRow label="Ads Rep" value={s?.adsRep}/>
+                            <DataRow label="Ads On Pause Days" value={s?.adsOnPauseDays}/>
+                        </Section>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        <div className="card p-4"><div className="text-slate-500 text-sm">Deals</div><div className="text-xl font-bold text-emerald-400">{fmtN(c.deals)}</div></div>
-                        <div className="card p-4"><div className="text-slate-500 text-sm">Listings</div><div className="text-xl font-bold text-amber-400">{fmtN(c.listings)}</div></div>
-                        <div className="card p-4"><div className="text-slate-500 text-sm">Lead→Appt</div><div className="text-xl font-bold text-white">{fmtP(c.sellerLeadToAppt)}</div></div>
+                    {/* Client Profile & Billing */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        <Section title="🧠 Client Profile">
+                            <DataRow label="Personality" value={s?.personality}/>
+                            <DataRow label="Expectations" value={s?.expectations}/>
+                            <DataRow label="Calling Expectations" value={s?.callingExpectations}/>
+                            <DataRow label="Readiness" value={s?.readiness}/>
+                            <DataRow label="Unresolved Concerns" value={s?.unresolvedConcerns} highlight color="text-amber-400"/>
+                            <DataRow label="First Check-in" value={s?.firstCheckin}/>
+                            <DataRow label="First CSM" value={s?.firstCsm}/>
+                        </Section>
+
+                        <Section title="💳 Billing & Contract">
+                            <DataRow label="Revenue Contracted" value={s?.revenueContracted} highlight color="text-emerald-400"/>
+                            <DataRow label="Contract Length" value={s?.contractLength}/>
+                            <DataRow label="Billing Cycle" value={s?.billingCycle}/>
+                            <DataRow label="Free Trial Days" value={s?.freeTrialDays}/>
+                            <DataRow label="Mo Payments Collected" value={s?.moPaymentsCollected}/>
+                            <DataRow label="Billing Adjust" value={s?.billingAdjust}/>
+                            <DataRow label="Platform" value={s?.platform}/>
+                            <DataRow label="Amount Collected" value={s?.amountCollected} highlight color="text-emerald-400"/>
+                        </Section>
                     </div>
 
-                    {/* Client Details */}
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">Client Details</h3>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div><span className="text-slate-500">State:</span> <span className="text-white ml-2">{s?.state || c.state || '—'}</span></div>
-                            <div><span className="text-slate-500">Campaign:</span> <span className="text-white ml-2">{s?.campaign || c.campaign || '—'}</span></div>
-                            <div><span className="text-slate-500">Contract:</span> <span className="text-white ml-2">{s?.contractCategory || '—'}</span></div>
-                            <div><span className="text-slate-500">Days Left:</span> <span className={`ml-2 ${pn(s?.daysLeft) < 0 ? 'text-red-400' : 'text-white'}`}>{s?.daysLeft || '—'}</span></div>
-                            <div><span className="text-slate-500">Calling:</span> <span className="text-white ml-2">{s?.calling || '—'}</span></div>
-                            <div><span className="text-slate-500">Dialer:</span> <span className="text-white ml-2">{s?.dialer || '—'}</span></div>
-                            <div><span className="text-slate-500">Timezone:</span> <span className="text-white ml-2">{s?.timezone || '—'}</span></div>
-                            <div><span className="text-slate-500">Billing Cycle:</span> <span className="text-white ml-2">{s?.billingCycle || '—'}</span></div>
-                        </div>
-                    </div>
+                    {/* Sales & Commission */}
+                    <Section title="💼 Sales & Commission" cols={2}>
+                        <DataRow label="Closed On" value={s?.closedOn}/>
+                        <DataRow label="Commission" value={s?.commission}/>
+                        <DataRow label="Setter & Closer" value={s?.setterCloser}/>
+                        <DataRow label="B2B" value={s?.b2b}/>
+                        <DataRow label="Contract Notes" value={s?.contractNotes}/>
+                        <DataRow label="Payment Notes" value={s?.paymentNotes}/>
+                    </Section>
+
+                    {/* Media Buying Performance */}
+                    <Section title="📈 Media Buying Performance" cols={2}>
+                        <DataRow label="Days Running" value={c.days}/>
+                        <DataRow label="Weeks Running" value={c.weeks}/>
+                        <DataRow label="Daily Budget" value={fmtD(c.dailyBudget)}/>
+                        <DataRow label="Spend Per Day" value={fmtD(c.spendPerDay)}/>
+                        <DataRow label="Seller Leads" value={fmtN(c.sellerLeads)}/>
+                        <DataRow label="Seller CPL" value={fmtD(c.sellerCPL)}/>
+                        <DataRow label="Seller Leads/Week" value={c.sellerLeadsWeek.toFixed(1)}/>
+                        <DataRow label="Buyer Leads" value={fmtN(c.buyerLeads)}/>
+                        <DataRow label="Listing Leads" value={fmtN(c.listingLeads)}/>
+                        <DataRow label="Appts Last 7 Days" value={c.appts7}/>
+                        <DataRow label="Appts/Week" value={c.apptsWeek.toFixed(1)}/>
+                        <DataRow label="Seller Appts" value={fmtN(c.sellerAppts)}/>
+                        <DataRow label="Buyer Appts" value={fmtN(c.buyerAppts)}/>
+                        <DataRow label="Seller Lead→Appt" value={fmtP(c.sellerLeadToAppt)}/>
+                        <DataRow label="Cost/Seller Appt" value={fmtD(c.sellerApptCost)}/>
+                        <DataRow label="Cost/Buyer Appt" value={fmtD(c.buyerApptCost)}/>
+                        <DataRow label="Potential Deals" value={fmtN(c.deals)} highlight color="text-emerald-400"/>
+                        <DataRow label="Listings" value={fmtN(c.listings)} highlight color="text-amber-400"/>
+                        <DataRow label="Buyer Signed" value={fmtN(c.buyerSigned)}/>
+                        <DataRow label="Leads/Listing" value={c.leadsPerListing.toFixed(1)}/>
+                    </Section>
                 </div>
             );
         };
@@ -290,11 +390,10 @@
             const [loading, setLoading] = useState(false);
 
             const quickResponses = [
-                { q: 'Client says leads are bad', a: 'I understand your concern. Let me ask: How quickly are you calling these leads? Studies show calling within 5 minutes increases contact rate by 400%. Also, are you using the scripts we provided? Let me check your lead quality metrics...' },
-                { q: 'Client wants to cancel', a: 'I hear you, and I want to make sure we find the right solution. Before we discuss cancellation, can you help me understand what specific results you were hoping for? Let me pull up your account and see if there are optimizations we haven\'t tried yet.' },
-                { q: 'Client not answering leads', a: 'That can definitely be frustrating. A few things to try: 1) Call within 5 minutes of the lead coming in, 2) Try calling at different times of day, 3) Send a text first saying "Hey, I just got your request about selling your home. Is now a good time to chat?" 4) Follow up at least 6-8 times.' },
-                { q: 'CPL is too high', a: 'I see your CPL is currently at ' + fmtD(c?.cpl || 0) + '. Here\'s what we can do: 1) Review your targeting - are we in the right zip codes? 2) Test new ad creative, 3) Adjust the daily budget, 4) Look at the landing page conversion rate. Let me make some optimizations this week.' },
-                { q: 'No appointments yet', a: 'I understand that\'s frustrating. You have ' + fmtN(c?.leads || 0) + ' leads so far. Let\'s look at your calling process: 1) How many attempts per lead? 2) What\'s your voicemail script? 3) Are you texting as well? Sometimes it takes 6-8 touches to book an appointment.' },
+                { q: 'Client says leads are bad', a: 'I understand your concern. Let me ask: How quickly are you calling these leads? Studies show calling within 5 minutes increases contact rate by 400%. Also, are you using the scripts we provided?' },
+                { q: 'Client wants to cancel', a: 'I hear you, and I want to make sure we find the right solution. Before we discuss cancellation, can you help me understand what specific results you were hoping for?' },
+                { q: 'Client not answering leads', a: 'Try: 1) Call within 5 minutes, 2) Try different times of day, 3) Send a text first, 4) Follow up at least 6-8 times.' },
+                { q: 'CPL is too high', a: `Your CPL is ${fmtD(c?.cpl || 0)}. We can: 1) Review targeting, 2) Test new creative, 3) Adjust budget, 4) Check landing page.` },
             ];
 
             const getAIHelp = async () => {
@@ -302,38 +401,27 @@
                 setLoading(true);
                 try {
                     const res = await fetch('https://api.anthropic.com/v1/messages', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'claude-sonnet-4-20250514',
-                            max_tokens: 500,
-                            messages: [{ role: 'user', content: `You're a CSM at a real estate marketing company helping a rep on a live call. The client is ${c?.client || 'a real estate agent'}. They have ${c?.leads || 0} leads, ${fmtD(c?.cpl || 0)} CPL, ${c?.appts || 0} appointments. The rep needs help with: "${situation}". Give a brief, practical response they can use RIGHT NOW on the call. Be conversational and helpful.` }]
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500,
+                            messages: [{ role: 'user', content: `You're a CSM helping on a live call. Client: ${c?.client}, ${c?.leads} leads, ${fmtD(c?.cpl)} CPL, ${c?.appts} appts. Help with: "${situation}". Brief, practical response.` }]
                         })
                     });
                     const data = await res.json();
                     setResponse(data.content?.[0]?.text || 'Could not generate response.');
-                } catch (err) {
-                    setResponse('AI unavailable. Try the quick responses below.');
-                }
+                } catch { setResponse('AI unavailable. Try quick responses below.'); }
                 setLoading(false);
             };
 
             return (
                 <div className="space-y-6">
                     <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-2">🎧 Live Call Help</h3>
-                        <p className="text-slate-400 text-sm mb-4">Get real-time support while you're on a call with {c?.client || 'a client'}.</p>
-                        <textarea value={situation} onChange={e => setSituation(e.target.value)} placeholder="Describe the situation... (e.g., 'Client is upset about lead quality')" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
+                        <h3 className="text-lg font-semibold text-white mb-4">🎧 Live Call Help</h3>
+                        <textarea value={situation} onChange={e => setSituation(e.target.value)} placeholder="Describe the situation..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
                         <button onClick={getAIHelp} disabled={loading || !situation.trim()} className="mt-3 px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50">
                             {loading ? '🤖 Thinking...' : '🤖 Get AI Help'}
                         </button>
-                        {response && (
-                            <div className="mt-4 p-4 bg-dark-800 rounded-xl">
-                                <div className="text-sm text-slate-300 whitespace-pre-wrap">{response}</div>
-                            </div>
-                        )}
+                        {response && <div className="mt-4 p-4 bg-dark-800 rounded-xl text-sm text-slate-300">{response}</div>}
                     </div>
-
                     <div className="card p-6">
                         <h4 className="font-semibold text-white mb-4">⚡ Quick Responses</h4>
                         <div className="space-y-3">
@@ -356,18 +444,12 @@
             const [bottlenecks, setBottlenecks] = useState('');
             const [actions, setActions] = useState('');
             const [saving, setSaving] = useState(false);
-            const [lastSaved, setLastSaved] = useState('');
 
             useEffect(() => { if (c?.client) loadStrategy(); }, [c?.client]);
 
             const loadStrategy = async () => {
                 const { data } = await supabase.from('client_strategy').select('*').eq('client_name', c.client).single();
-                if (data) {
-                    setStrategy(data.strategy_text || '');
-                    setBottlenecks(data.bottlenecks || '');
-                    setActions(data.action_items || '');
-                    setLastSaved(data.last_edited_by ? `Last edited by ${getDisplayName(data.last_edited_by)}` : '');
-                }
+                if (data) { setStrategy(data.strategy_text || ''); setBottlenecks(data.bottlenecks || ''); setActions(data.action_items || ''); }
             };
 
             useEffect(() => {
@@ -379,20 +461,14 @@
             const saveStrategy = async () => {
                 if (!c?.client || !user) return;
                 setSaving(true);
-                await supabase.from('client_strategy').upsert({
-                    client_name: c.client, strategy_text: strategy, bottlenecks, action_items: actions,
-                    user_email: user.email, last_edited_by: user.email, updated_at: new Date().toISOString()
-                }, { onConflict: 'client_name' });
-                setLastSaved(`Saved • ${getDisplayName(user.email)}`);
+                await supabase.from('client_strategy').upsert({ client_name: c.client, strategy_text: strategy, bottlenecks, action_items: actions, user_email: user.email, last_edited_by: user.email, updated_at: new Date().toISOString() }, { onConflict: 'client_name' });
                 setSaving(false);
             };
 
-            // Auto-detect bottlenecks
             const detectedIssues = [];
-            if (c?.cpl > 40) detectedIssues.push({ icon: '📈', text: `High CPL (${fmtD(c.cpl)}) - Review targeting and creative` });
-            if (c?.appts7 === 0 && c?.days > 14) detectedIssues.push({ icon: '📅', text: 'No appointments this week - Check calling process' });
-            if (c?.leads > 20 && c?.appts === 0) detectedIssues.push({ icon: '📞', text: `${c.leads} leads but 0 appts - Lead follow-up issue` });
-            if (s?.duePayment?.includes('OVERDUE')) detectedIssues.push({ icon: '💳', text: 'Payment overdue - Address billing' });
+            if (c?.cpl > 40) detectedIssues.push({ icon: '📈', text: `High CPL (${fmtD(c.cpl)})` });
+            if (c?.appts7 === 0 && c?.days > 14) detectedIssues.push({ icon: '📅', text: 'No appointments this week' });
+            if (c?.leads > 20 && c?.appts === 0) detectedIssues.push({ icon: '📞', text: `${c.leads} leads but 0 appts` });
 
             if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
 
@@ -403,27 +479,22 @@
                             <h3 className="text-lg font-semibold text-white mb-4">🔍 Detected Issues</h3>
                             <div className="space-y-2">
                                 {detectedIssues.map((issue, i) => (
-                                    <div key={i} className="flex items-center gap-3 p-3 bg-amber-500/10 rounded-xl text-amber-400 text-sm">
-                                        <span>{issue.icon}</span><span>{issue.text}</span>
-                                    </div>
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-amber-500/10 rounded-xl text-amber-400 text-sm"><span>{issue.icon}</span><span>{issue.text}</span></div>
                                 ))}
                             </div>
                         </div>
                     )}
-
                     <div className="card p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-semibold text-white">🎯 Current Strategy</h3>
-                            <span className="text-xs text-slate-500">{saving ? 'Saving...' : lastSaved}</span>
+                            <span className="text-xs text-slate-500">{saving ? 'Saving...' : 'Auto-saved'}</span>
                         </div>
-                        <textarea value={strategy} onChange={e => setStrategy(e.target.value)} placeholder="What's the current strategy for this client?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[120px]" />
+                        <textarea value={strategy} onChange={e => setStrategy(e.target.value)} placeholder="What's the current strategy?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[120px]" />
                     </div>
-
                     <div className="card p-6">
                         <h3 className="text-lg font-semibold text-white mb-4">🚧 Bottlenecks</h3>
-                        <textarea value={bottlenecks} onChange={e => setBottlenecks(e.target.value)} placeholder="What's blocking this client's success?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
+                        <textarea value={bottlenecks} onChange={e => setBottlenecks(e.target.value)} placeholder="What's blocking success?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
                     </div>
-
                     <div className="card p-6">
                         <h3 className="text-lg font-semibold text-white mb-4">✅ Action Plan</h3>
                         <textarea value={actions} onChange={e => setActions(e.target.value)} placeholder="What actions need to be taken?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
@@ -435,27 +506,17 @@
         // ========== GHL HELP TAB ==========
         const GHLHelpTab = ({ c }) => {
             const guides = [
-                { title: 'How to Check Lead Status', steps: ['1. Log into GoHighLevel', '2. Go to Contacts > Smart Lists', '3. Filter by client name or pipeline stage', '4. Review lead status and last activity'] },
-                { title: 'How to Set Up Automations', steps: ['1. Go to Automation > Workflows', '2. Click "Create Workflow"', '3. Choose trigger (new lead, tag added, etc.)', '4. Add actions (send SMS, email, assign user)', '5. Test and activate'] },
-                { title: 'How to Create a Pipeline', steps: ['1. Go to Opportunities > Pipelines', '2. Click "Add Pipeline"', '3. Name it (e.g., "Seller Pipeline")', '4. Add stages: New Lead, Contacted, Appointment Set, Met, Contract, Closed', '5. Save and assign to campaigns'] },
-                { title: 'How to Check Call Tracking', steps: ['1. Go to Settings > Phone Numbers', '2. Find the tracking number for this client', '3. Click to see call logs', '4. Review missed calls and recordings'] },
-                { title: 'Troubleshooting: Leads Not Syncing', steps: ['1. Check Facebook integration in Settings > Integrations', '2. Verify the correct form is connected', '3. Check for error messages', '4. Re-sync the integration if needed', '5. Test with a dummy lead'] },
+                { title: 'How to Check Lead Status', steps: ['Log into GoHighLevel', 'Go to Contacts > Smart Lists', 'Filter by client name', 'Review lead status'] },
+                { title: 'How to Set Up Automations', steps: ['Go to Automation > Workflows', 'Click "Create Workflow"', 'Choose trigger', 'Add actions', 'Test and activate'] },
+                { title: 'Troubleshooting: Leads Not Syncing', steps: ['Check Facebook integration', 'Verify correct form connected', 'Check for errors', 'Re-sync integration'] },
             ];
-
             return (
                 <div className="space-y-4">
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-2">⚙️ GoHighLevel Help</h3>
-                        <p className="text-slate-400 text-sm">Quick guides for common GHL tasks.</p>
-                    </div>
+                    <div className="card p-6"><h3 className="text-lg font-semibold text-white mb-2">⚙️ GoHighLevel Help</h3></div>
                     {guides.map((guide, i) => (
                         <details key={i} className="card">
-                            <summary className="p-4 cursor-pointer font-medium text-white hover:bg-dark-800 rounded-xl">{guide.title}</summary>
-                            <div className="p-4 pt-0 border-t border-dark-700">
-                                <ul className="space-y-2">
-                                    {guide.steps.map((step, j) => <li key={j} className="text-sm text-slate-300">{step}</li>)}
-                                </ul>
-                            </div>
+                            <summary className="p-4 cursor-pointer font-medium text-white">{guide.title}</summary>
+                            <div className="p-4 pt-0 border-t border-dark-700"><ul className="space-y-1">{guide.steps.map((step, j) => <li key={j} className="text-sm text-slate-300">{j+1}. {step}</li>)}</ul></div>
                         </details>
                     ))}
                 </div>
@@ -466,75 +527,22 @@
         const SaveClientTab = ({ c, s }) => {
             const score = getHealthScore(c, s);
             const playbooks = [
-                { 
-                    name: 'Payment Overdue', 
-                    trigger: s?.duePayment?.includes('OVERDUE'),
-                    steps: [
-                        '1. Call client immediately - be empathetic but direct',
-                        '2. Ask if there are any issues with the service',
-                        '3. Offer payment plan if needed',
-                        '4. Set clear deadline for payment',
-                        '5. Document everything in notes',
-                        '6. Escalate to manager if not resolved in 48hrs'
-                    ]
-                },
-                {
-                    name: 'High CPL / Poor Performance',
-                    trigger: c?.cpl > 50,
-                    steps: [
-                        '1. Review targeting settings - zip codes, radius, demographics',
-                        '2. Check ad creative - is it compelling?',
-                        '3. Review landing page conversion rate',
-                        '4. Consider pausing and rebuilding the campaign',
-                        '5. Schedule call to discuss expectations',
-                        '6. Offer campaign refresh at no extra cost'
-                    ]
-                },
-                {
-                    name: 'No Appointments Despite Leads',
-                    trigger: c?.leads > 15 && c?.appts === 0,
-                    steps: [
-                        '1. Review lead quality - are they real?',
-                        '2. Check calling frequency - speed to lead?',
-                        '3. Review calling scripts with client',
-                        '4. Listen to call recordings if available',
-                        '5. Offer to set up automated follow-up',
-                        '6. Consider ISA service recommendation'
-                    ]
-                },
-                {
-                    name: 'Client Wants to Cancel',
-                    trigger: false,
-                    steps: [
-                        '1. LISTEN first - understand the real concern',
-                        '2. Acknowledge their frustration',
-                        '3. Review what HAS worked',
-                        '4. Propose specific solutions',
-                        '5. Offer pause instead of cancel',
-                        '6. Get manager involved if needed',
-                        '7. Document everything'
-                    ]
-                },
+                { name: 'Payment Overdue', trigger: s?.duePayment?.includes('OVERDUE'), steps: ['Call immediately', 'Ask about service issues', 'Offer payment plan', 'Set deadline', 'Escalate if needed'] },
+                { name: 'High CPL', trigger: c?.cpl > 50, steps: ['Review targeting', 'Check ad creative', 'Review landing page', 'Consider rebuild', 'Offer refresh'] },
+                { name: 'No Appointments', trigger: c?.leads > 15 && c?.appts === 0, steps: ['Review lead quality', 'Check calling speed', 'Review scripts', 'Listen to recordings', 'Recommend ISA'] },
+                { name: 'Client Wants to Cancel', trigger: false, steps: ['LISTEN first', 'Acknowledge frustration', 'Review wins', 'Propose solutions', 'Offer pause', 'Get manager'] },
             ];
-
             if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
-
             return (
                 <div className="space-y-6">
-                    <div className={`card p-6 ${score < 60 ? 'border-red-500/30' : 'border-amber-500/30'}`}>
+                    <div className={`card p-6 ${score < 60 ? 'border-red-500/30' : ''}`}>
                         <div className="flex items-center gap-4">
                             <span className="text-4xl">{score < 60 ? '🚨' : '⚠️'}</span>
-                            <div>
-                                <h3 className="text-lg font-bold text-white">Client Risk Assessment</h3>
-                                <p className={`${score < 60 ? 'text-red-400' : 'text-amber-400'}`}>
-                                    Health Score: {score}/100 - {score < 60 ? 'HIGH RISK' : 'AT RISK'}
-                                </p>
-                            </div>
+                            <div><h3 className="text-lg font-bold text-white">Risk Assessment</h3><p className={score < 60 ? 'text-red-400' : 'text-amber-400'}>Score: {score}/100</p></div>
                         </div>
                     </div>
-
                     <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">🛟 Intervention Playbooks</h3>
+                        <h3 className="text-lg font-semibold text-white mb-4">🛟 Playbooks</h3>
                         <div className="space-y-4">
                             {playbooks.map((pb, i) => (
                                 <div key={i} className={`p-4 rounded-xl ${pb.trigger ? 'bg-red-500/10 border border-red-500/30' : 'bg-dark-800'}`}>
@@ -542,9 +550,7 @@
                                         {pb.trigger && <span className="px-2 py-1 bg-red-500 text-white text-xs rounded">ACTIVE</span>}
                                         <h4 className="font-semibold text-white">{pb.name}</h4>
                                     </div>
-                                    <ul className="space-y-1 text-sm text-slate-300">
-                                        {pb.steps.map((step, j) => <li key={j}>{step}</li>)}
-                                    </ul>
+                                    <ul className="space-y-1 text-sm text-slate-300">{pb.steps.map((step, j) => <li key={j}>{j+1}. {step}</li>)}</ul>
                                 </div>
                             ))}
                         </div>
@@ -561,143 +567,67 @@
             const [weekOf, setWeekOf] = useState(new Date().toISOString().split('T')[0]);
 
             useEffect(() => { if (c?.client) loadUpdates(); }, [c?.client]);
-
-            const loadUpdates = async () => {
-                const { data } = await supabase.from('weekly_updates').select('*').eq('client_name', c.client).order('week_of', { ascending: false });
-                if (data) setUpdates(data);
-            };
-
-            const addUpdate = async () => {
-                if (!newUpdate.trim()) return;
-                const { data } = await supabase.from('weekly_updates').insert({
-                    client_name: c.client, week_of: weekOf, update_text: newUpdate, user_email: user?.email
-                }).select().single();
-                if (data) { setUpdates([data, ...updates]); setNewUpdate(''); }
-            };
+            const loadUpdates = async () => { const { data } = await supabase.from('weekly_updates').select('*').eq('client_name', c.client).order('week_of', { ascending: false }); if (data) setUpdates(data); };
+            const addUpdate = async () => { if (!newUpdate.trim()) return; const { data } = await supabase.from('weekly_updates').insert({ client_name: c.client, week_of: weekOf, update_text: newUpdate, user_email: user?.email }).select().single(); if (data) { setUpdates([data, ...updates]); setNewUpdate(''); } };
 
             if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
-
             return (
                 <div className="space-y-6">
                     <div className="card p-6">
                         <h3 className="text-lg font-semibold text-white mb-4">📅 Log Weekly Update</h3>
-                        <div className="flex gap-4 mb-4">
-                            <input type="date" value={weekOf} onChange={e => setWeekOf(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white" />
-                        </div>
-                        <textarea value={newUpdate} onChange={e => setNewUpdate(e.target.value)} placeholder="What happened this week? Key updates, client feedback, action items..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[120px]" />
+                        <input type="date" value={weekOf} onChange={e => setWeekOf(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white mb-4" />
+                        <textarea value={newUpdate} onChange={e => setNewUpdate(e.target.value)} placeholder="What happened this week?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[120px]" />
                         <button onClick={addUpdate} className="mt-3 px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Save Update</button>
                     </div>
-
                     <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">📚 Update History</h3>
-                        {updates.length === 0 ? (
-                            <div className="text-slate-500 text-center py-8">No weekly updates yet</div>
-                        ) : (
-                            <div className="space-y-4">
-                                {updates.map(u => (
-                                    <div key={u.id} className="p-4 bg-dark-800 rounded-xl">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="font-medium text-white">Week of {new Date(u.week_of).toLocaleDateString()}</span>
-                                            <span className="text-xs text-slate-500">{getDisplayName(u.user_email)}</span>
-                                        </div>
-                                        <p className="text-slate-300 text-sm whitespace-pre-wrap">{u.update_text}</p>
-                                    </div>
-                                ))}
-                            </div>
+                        <h3 className="text-lg font-semibold text-white mb-4">📚 History</h3>
+                        {updates.length === 0 ? <div className="text-slate-500 text-center py-8">No updates yet</div> : (
+                            <div className="space-y-4">{updates.map(u => (
+                                <div key={u.id} className="p-4 bg-dark-800 rounded-xl">
+                                    <div className="flex justify-between items-center mb-2"><span className="font-medium text-white">Week of {new Date(u.week_of).toLocaleDateString()}</span><span className="text-xs text-slate-500">{getDisplayName(u.user_email)}</span></div>
+                                    <p className="text-slate-300 text-sm whitespace-pre-wrap">{u.update_text}</p>
+                                </div>
+                            ))}</div>
                         )}
                     </div>
                 </div>
             );
         };
 
-        // ========== NOTES LOG TAB ==========
-        const NotesLogTab = ({ c }) => {
+        // ========== COMBINED NOTES & ACTIVITY TAB ==========
+        const NotesActivityTab = ({ c }) => {
             const { user } = useAuth();
+            const [activeSubTab, setActiveSubTab] = useState('notes');
             const [notes, setNotes] = useState([]);
-            const [newNote, setNewNote] = useState('');
-
-            useEffect(() => { if (c?.client) loadNotes(); }, [c?.client]);
-
-            const loadNotes = async () => {
-                const { data } = await supabase.from('client_notes').select('*').eq('client_name', c.client).order('created_at', { ascending: false });
-                if (data) setNotes(data);
-            };
-
-            const addNote = async () => {
-                if (!newNote.trim()) return;
-                const { data } = await supabase.from('client_notes').insert({
-                    client_name: c.client, note_text: newNote, user_email: user?.email, user_id: user?.id
-                }).select().single();
-                if (data) { setNotes([data, ...notes]); setNewNote(''); }
-                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: 'Added note', details: newNote.substring(0, 50) });
-            };
-
-            const deleteNote = async (id) => {
-                await supabase.from('client_notes').delete().eq('id', id);
-                setNotes(notes.filter(n => n.id !== id));
-            };
-
-            if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
-
-            return (
-                <div className="space-y-6">
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">📝 Add Note</h3>
-                        <div className="flex gap-3">
-                            <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyPress={e => e.key === 'Enter' && addNote()} placeholder="Add a quick note..." className="flex-1 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" />
-                            <button onClick={addNote} className="px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Add</button>
-                        </div>
-                    </div>
-
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">📚 Notes History</h3>
-                        {notes.length === 0 ? (
-                            <div className="text-slate-500 text-center py-8">No notes yet</div>
-                        ) : (
-                            <div className="space-y-3 max-h-[500px] overflow-y-auto scrollbar">
-                                {notes.map(n => (
-                                    <div key={n.id} className="p-4 bg-dark-800 rounded-xl group">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                <span className="text-brand-purple text-sm font-medium">{getDisplayName(n.user_email)}</span>
-                                                <span className="text-slate-600 text-sm ml-2">{new Date(n.created_at).toLocaleString()}</span>
-                                            </div>
-                                            <button onClick={() => deleteNote(n.id)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100">✕</button>
-                                        </div>
-                                        <p className="text-white mt-2">{n.note_text}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        };
-
-        // ========== MEETING NOTES TAB ==========
-        const MeetingNotesTab = ({ c }) => {
-            const { user } = useAuth();
             const [meetings, setMeetings] = useState([]);
+            const [activities, setActivities] = useState([]);
+            const [newNote, setNewNote] = useState('');
             const [transcript, setTranscript] = useState('');
             const [processing, setProcessing] = useState(false);
             const [summary, setSummary] = useState(null);
 
-            useEffect(() => { if (c?.client) loadMeetings(); }, [c?.client]);
+            useEffect(() => { if (c?.client) { loadNotes(); loadMeetings(); loadActivities(); } }, [c?.client]);
 
-            const loadMeetings = async () => {
-                const { data } = await supabase.from('meeting_notes').select('*').eq('client_name', c.client).order('meeting_date', { ascending: false });
-                if (data) setMeetings(data);
+            const loadNotes = async () => { const { data } = await supabase.from('client_notes').select('*').eq('client_name', c.client).order('created_at', { ascending: false }); if (data) setNotes(data); };
+            const loadMeetings = async () => { const { data } = await supabase.from('meeting_notes').select('*').eq('client_name', c.client).order('meeting_date', { ascending: false }); if (data) setMeetings(data); };
+            const loadActivities = async () => { const { data } = await supabase.from('activity_log').select('*').eq('client_name', c.client).order('created_at', { ascending: false }).limit(50); if (data) setActivities(data); };
+
+            const addNote = async () => {
+                if (!newNote.trim()) return;
+                const { data } = await supabase.from('client_notes').insert({ client_name: c.client, note_text: newNote, user_email: user?.email, user_id: user?.id }).select().single();
+                if (data) { setNotes([data, ...notes]); setNewNote(''); }
+                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: 'Added note', details: newNote.substring(0, 50) });
             };
+
+            const deleteNote = async (id) => { await supabase.from('client_notes').delete().eq('id', id); setNotes(notes.filter(n => n.id !== id)); };
 
             const processTranscript = async () => {
                 setProcessing(true);
                 try {
                     const res = await fetch('https://api.anthropic.com/v1/messages', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'claude-sonnet-4-20250514', max_tokens: 1000,
-                            messages: [{ role: 'user', content: `Summarize this meeting for ${c?.client}. Return JSON: {summary, clientSentiment (positive/neutral/negative), keyPoints[], actionItems[{task,owner}], riskLevel (low/medium/high)}\n\n${transcript}` }]
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+                            messages: [{ role: 'user', content: `Summarize this meeting for ${c?.client}. Return JSON: {summary, clientSentiment, keyPoints[], actionItems[{task,owner}], riskLevel}\n\n${transcript}` }]
                         })
                     });
                     const data = await res.json();
@@ -715,98 +645,99 @@
                     user_email: user?.email
                 }).select().single();
                 if (data) { setMeetings([data, ...meetings]); setTranscript(''); setSummary(null); }
+                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: 'Added meeting notes', details: summary.summary?.substring(0, 50) });
             };
 
             if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
 
             return (
                 <div className="space-y-6">
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">🎙️ New Meeting Transcript</h3>
-                        <textarea value={transcript} onChange={e => setTranscript(e.target.value)} placeholder="Paste meeting transcript from Fathom, Otter, etc..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[150px]" />
-                        <div className="flex gap-3 mt-3">
-                            <button onClick={processTranscript} disabled={!transcript.trim() || processing} className="px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50">
-                                {processing ? '🤖 Analyzing...' : '🤖 Analyze with AI'}
-                            </button>
-                            {summary && <button onClick={saveMeeting} className="px-6 py-3 bg-emerald-500/20 text-emerald-400 rounded-xl">💾 Save</button>}
-                        </div>
-                        {summary && (
-                            <div className="mt-4 p-4 bg-dark-800 rounded-xl">
-                                <p className="text-slate-300">{summary.summary}</p>
-                                {summary.actionItems?.length > 0 && (
-                                    <div className="mt-3">
-                                        <div className="text-xs text-slate-500 mb-1">Action Items:</div>
-                                        {summary.actionItems.map((a, i) => <div key={i} className="text-sm text-slate-400">• {a.task}</div>)}
+                    {/* Sub-tabs */}
+                    <div className="flex gap-2">
+                        {[{ id: 'notes', label: '📝 Notes' }, { id: 'meetings', label: '🎙️ Meetings' }, { id: 'activity', label: '📋 Activity' }].map(t => (
+                            <button key={t.id} onClick={() => setActiveSubTab(t.id)} className={`px-4 py-2 rounded-lg text-sm font-medium ${activeSubTab === t.id ? 'bg-brand-cyan text-dark-900' : 'bg-dark-800 text-slate-400'}`}>{t.label}</button>
+                        ))}
+                    </div>
+
+                    {/* Notes */}
+                    {activeSubTab === 'notes' && (
+                        <>
+                            <div className="card p-6">
+                                <h3 className="text-lg font-semibold text-white mb-4">📝 Quick Notes</h3>
+                                <div className="flex gap-3">
+                                    <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyPress={e => e.key === 'Enter' && addNote()} placeholder="Add a note..." className="flex-1 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" />
+                                    <button onClick={addNote} className="px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Add</button>
+                                </div>
+                            </div>
+                            <div className="card p-6">
+                                <h3 className="text-lg font-semibold text-white mb-4">📚 Notes History</h3>
+                                {notes.length === 0 ? <div className="text-slate-500 text-center py-8">No notes yet</div> : (
+                                    <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar">
+                                        {notes.map(n => (
+                                            <div key={n.id} className="p-4 bg-dark-800 rounded-xl group">
+                                                <div className="flex justify-between items-start">
+                                                    <div><span className="text-brand-purple text-sm font-medium">{getDisplayName(n.user_email)}</span><span className="text-slate-600 text-sm ml-2">{new Date(n.created_at).toLocaleString()}</span></div>
+                                                    <button onClick={() => deleteNote(n.id)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100">✕</button>
+                                                </div>
+                                                <p className="text-white mt-2">{n.note_text}</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
                             </div>
-                        )}
-                    </div>
+                        </>
+                    )}
 
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">📚 Meeting History</h3>
-                        {meetings.length === 0 ? (
-                            <div className="text-slate-500 text-center py-8">No meetings recorded</div>
-                        ) : (
-                            <div className="space-y-3">
-                                {meetings.map(m => (
-                                    <div key={m.id} className="p-4 bg-dark-800 rounded-xl">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="text-white font-medium">{new Date(m.meeting_date).toLocaleDateString()}</span>
-                                            <span className={`px-2 py-1 rounded text-xs ${m.risk_level === 'high' ? 'bg-red-500/20 text-red-400' : m.risk_level === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{m.risk_level}</span>
-                                        </div>
-                                        <p className="text-slate-400 text-sm">{m.summary}</p>
-                                    </div>
-                                ))}
+                    {/* Meetings */}
+                    {activeSubTab === 'meetings' && (
+                        <>
+                            <div className="card p-6">
+                                <h3 className="text-lg font-semibold text-white mb-4">🎙️ New Meeting Transcript</h3>
+                                <textarea value={transcript} onChange={e => setTranscript(e.target.value)} placeholder="Paste transcript from Fathom, Otter, etc..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[150px]" />
+                                <div className="flex gap-3 mt-3">
+                                    <button onClick={processTranscript} disabled={!transcript.trim() || processing} className="px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50">{processing ? '🤖 Analyzing...' : '🤖 Analyze'}</button>
+                                    {summary && <button onClick={saveMeeting} className="px-6 py-3 bg-emerald-500/20 text-emerald-400 rounded-xl">💾 Save</button>}
+                                </div>
+                                {summary && <div className="mt-4 p-4 bg-dark-800 rounded-xl"><p className="text-slate-300">{summary.summary}</p></div>}
                             </div>
-                        )}
-                    </div>
-                </div>
-            );
-        };
-
-        // ========== ACTIVITY LOG TAB ==========
-        const ActivityLogTab = ({ c }) => {
-            const [activities, setActivities] = useState([]);
-            const [filter, setFilter] = useState('all');
-
-            useEffect(() => { loadActivities(); }, [c?.client, filter]);
-
-            const loadActivities = async () => {
-                let query = supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(100);
-                if (c?.client && filter === 'client') query = query.eq('client_name', c.client);
-                const { data } = await query;
-                if (data) setActivities(data);
-            };
-
-            return (
-                <div className="space-y-6">
-                    <div className="card p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-semibold text-white">📋 Activity Log</h3>
-                            <div className="flex gap-2">
-                                <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-lg text-sm ${filter === 'all' ? 'bg-brand-cyan text-dark-900' : 'bg-dark-800 text-slate-400'}`}>All</button>
-                                {c && <button onClick={() => setFilter('client')} className={`px-4 py-2 rounded-lg text-sm ${filter === 'client' ? 'bg-brand-cyan text-dark-900' : 'bg-dark-800 text-slate-400'}`}>This Client</button>}
-                            </div>
-                        </div>
-                        {activities.length === 0 ? (
-                            <div className="text-slate-500 text-center py-8">No activity yet</div>
-                        ) : (
-                            <div className="space-y-2 max-h-[500px] overflow-y-auto scrollbar">
-                                {activities.map(a => (
-                                    <div key={a.id} className="p-3 bg-dark-800 rounded-lg flex items-center gap-4">
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-brand-purple font-medium text-sm">{getDisplayName(a.user_email)}</span>
-                                                <span className="text-slate-600 text-xs">{new Date(a.created_at).toLocaleString()}</span>
+                            <div className="card p-6">
+                                <h3 className="text-lg font-semibold text-white mb-4">📚 Meeting History</h3>
+                                {meetings.length === 0 ? <div className="text-slate-500 text-center py-8">No meetings</div> : (
+                                    <div className="space-y-3">{meetings.map(m => (
+                                        <div key={m.id} className="p-4 bg-dark-800 rounded-xl">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-white font-medium">{new Date(m.meeting_date).toLocaleDateString()}</span>
+                                                <span className={`px-2 py-1 rounded text-xs ${m.risk_level === 'high' ? 'bg-red-500/20 text-red-400' : m.risk_level === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{m.risk_level}</span>
                                             </div>
-                                            <div className="text-slate-400 text-sm">{a.action} • {a.client_name}</div>
+                                            <p className="text-slate-400 text-sm">{m.summary}</p>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}</div>
+                                )}
                             </div>
-                        )}
-                    </div>
+                        </>
+                    )}
+
+                    {/* Activity */}
+                    {activeSubTab === 'activity' && (
+                        <div className="card p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">📋 Activity Log</h3>
+                            {activities.length === 0 ? <div className="text-slate-500 text-center py-8">No activity</div> : (
+                                <div className="space-y-2 max-h-[500px] overflow-y-auto scrollbar">
+                                    {activities.map(a => (
+                                        <div key={a.id} className="p-3 bg-dark-800 rounded-lg flex items-center gap-4">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-brand-purple font-medium text-sm">{getDisplayName(a.user_email)}</span>
+                                                    <span className="text-slate-600 text-xs">{new Date(a.created_at).toLocaleString()}</span>
+                                                </div>
+                                                <div className="text-slate-400 text-sm">{a.action}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -844,7 +775,7 @@
             const getSetupInfo = (client) => {
                 if (!client) return null;
                 const name = client.client.toLowerCase().trim();
-                return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn); });
+                return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn) || name.split(' ').filter(p => p.length > 2).some(p => sn.includes(p)); });
             };
 
             if (authLoading || loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
@@ -861,9 +792,7 @@
                     case 'ghl': return <GHLHelpTab c={selected} />;
                     case 'save': return <SaveClientTab c={selected} s={s} />;
                     case 'weekly': return <WeeklyUpdatesTab c={selected} />;
-                    case 'notes': return <NotesLogTab c={selected} />;
-                    case 'meetings': return <MeetingNotesTab c={selected} />;
-                    case 'activity': return <ActivityLogTab c={selected} />;
+                    case 'notes': return <NotesActivityTab c={selected} />;
                     default: return <ClientHealthTab c={selected} s={s} />;
                 }
             };
@@ -871,52 +800,39 @@
             return (
                 <AuthContext.Provider value={{ user }}>
                     <div className="flex min-h-screen">
-                        {/* Sidebar */}
                         <aside className="w-72 bg-dark-900 border-r border-dark-700 flex flex-col">
                             <div className="p-5 border-b border-dark-700">
                                 <h1 className="text-xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Client Success Hub</h1>
-                                <div className="flex items-center gap-2 mt-2">
-                                    <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                                    <span className="text-xs text-slate-400">{getDisplayName(user.email)}</span>
-                                </div>
+                                <div className="flex items-center gap-2 mt-2"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span className="text-xs text-slate-400">{getDisplayName(user.email)}</span></div>
                             </div>
-
                             <div className="p-4">
                                 <select value={selected?.client || ''} onChange={e => setSelected(clients.find(c => c.client === e.target.value))} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white text-sm">
                                     <option value="">Select a client...</option>
                                     {clients.map(c => <option key={c.client} value={c.client}>{c.client}</option>)}
                                 </select>
                             </div>
-
                             <nav className="flex-1 py-2 overflow-y-auto scrollbar">
                                 {tabs.map(t => (
                                     <button key={t.id} onClick={() => setTab(t.id)} className={`w-full flex items-start gap-3 px-5 py-3 text-left ${tab === t.id ? 'tab-active text-white' : 'text-slate-400 hover:text-white hover:bg-dark-800'}`}>
                                         <span className="text-lg">{t.icon}</span>
-                                        <div>
-                                            <div className="text-sm font-medium">{t.name}</div>
-                                            <div className="text-xs text-slate-500">{t.desc}</div>
-                                        </div>
+                                        <div><div className="text-sm font-medium">{t.name}</div><div className="text-xs text-slate-500">{t.desc}</div></div>
                                     </button>
                                 ))}
                             </nav>
-
                             <div className="p-4 border-t border-dark-700 space-y-2">
                                 <a href="dashboard.html" className="block w-full text-center py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm">→ Media Buyer Overview</a>
                                 <button onClick={() => supabase.auth.signOut()} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">Logout</button>
                             </div>
                         </aside>
-
-                        {/* Main Content */}
                         <main className="flex-1 flex flex-col">
                             <header className="bg-dark-900/80 backdrop-blur border-b border-dark-700 px-8 py-4">
                                 {selected ? (
                                     <div className="flex items-center gap-4">
                                         <h2 className="text-xl font-bold text-white">{selected.client}</h2>
-                                        <span className={`px-3 py-1 rounded-full text-sm ${getHealthColor(getHealthScore(selected, s)).text} bg-dark-800`}>
-                                            {getHealthColor(getHealthScore(selected, s)).label}
-                                        </span>
+                                        <span className={`px-3 py-1 rounded-full text-sm ${getHealthColor(getHealthScore(selected, s)).text} bg-dark-800`}>{getHealthColor(getHealthScore(selected, s)).label}</span>
                                         <span className="text-slate-400">Day {selected.days}</span>
                                         {s?.csmRep && <span className="text-brand-purple text-sm">CSM: {s.csmRep}</span>}
+                                        {s?.mrr && <span className="text-emerald-400 text-sm">MRR: {s.mrr}</span>}
                                     </div>
                                 ) : <h2 className="text-xl text-slate-500">Select a client to get started</h2>}
                             </header>
