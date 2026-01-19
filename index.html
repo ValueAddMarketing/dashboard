@@ -9,6 +9,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
@@ -31,12 +32,18 @@
         .scrollbar::-webkit-scrollbar { width: 6px; }
         .scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
         .section-title { font-size: 0.875rem; font-weight: 600; color: #a855f7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+        .saving { opacity: 0.6; }
     </style>
 </head>
 <body class="min-h-screen">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // Supabase Configuration
+        const SUPABASE_URL = 'https://ecmhhonjazfbletyvncw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbWhob25qYXpmYmxldHl2bmN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5NDMwMjYsImV4cCI6MjA4MTUxOTAyNn0.3LZ8dAOX_ZpoUNkgY_jSeC10SaCknfPfBaZsDRjFt7c';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         const URLS = {
             clients: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRimOKUGksj-OVBSCpb9UGnkQU3Wu547GpcaUk4RT0oo5KM0fnVo2sk8mRpy4cwO5j9CckDORzmou-d/pub?gid=133498635&single=true&output=csv',
@@ -240,27 +247,203 @@
             );
         };
 
+        // Strategy Tab with Supabase Integration
         const StrategyTab = ({c}) => {
             const [notes, setNotes] = useState([]);
             const [newNote, setNewNote] = useState('');
             const [strategy, setStrategy] = useState('');
-            const addNote = () => { if(newNote.trim()) { setNotes([{time: new Date().toLocaleString(), text: newNote}, ...notes]); setNewNote(''); } };
+            const [actionItems, setActionItems] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [saving, setSaving] = useState(false);
+            const [saveStatus, setSaveStatus] = useState('');
+
+            // Load notes and strategy when client changes
+            useEffect(() => {
+                if (!c?.client) return;
+                loadData();
+            }, [c?.client]);
+
+            const loadData = async () => {
+                if (!c?.client) return;
+                setLoading(true);
+                try {
+                    // Load notes
+                    const { data: notesData } = await supabase
+                        .from('client_notes')
+                        .select('*')
+                        .eq('client_name', c.client)
+                        .order('created_at', { ascending: false });
+                    if (notesData) setNotes(notesData);
+
+                    // Load strategy
+                    const { data: strategyData } = await supabase
+                        .from('client_strategy')
+                        .select('*')
+                        .eq('client_name', c.client)
+                        .single();
+                    if (strategyData) {
+                        setStrategy(strategyData.strategy_text || '');
+                        setActionItems(strategyData.action_items || '');
+                    } else {
+                        setStrategy('');
+                        setActionItems('');
+                    }
+                } catch (err) {
+                    console.error('Load error:', err);
+                }
+                setLoading(false);
+            };
+
+            // Auto-save strategy with debounce
+            useEffect(() => {
+                if (!c?.client) return;
+                const timer = setTimeout(() => {
+                    saveStrategy();
+                }, 1000);
+                return () => clearTimeout(timer);
+            }, [strategy, actionItems]);
+
+            const saveStrategy = async () => {
+                if (!c?.client) return;
+                setSaving(true);
+                setSaveStatus('Saving...');
+                try {
+                    const { error } = await supabase
+                        .from('client_strategy')
+                        .upsert({
+                            client_name: c.client,
+                            strategy_text: strategy,
+                            action_items: actionItems,
+                            updated_at: new Date().toISOString()
+                        }, { onConflict: 'client_name' });
+                    
+                    if (error) throw error;
+                    setSaveStatus('✓ Saved');
+                    setTimeout(() => setSaveStatus(''), 2000);
+                } catch (err) {
+                    console.error('Save error:', err);
+                    setSaveStatus('Error saving');
+                }
+                setSaving(false);
+            };
+
+            const addNote = async () => {
+                if (!newNote.trim() || !c?.client) return;
+                setSaving(true);
+                try {
+                    const { data, error } = await supabase
+                        .from('client_notes')
+                        .insert({
+                            client_name: c.client,
+                            note_text: newNote,
+                            created_by: 'user'
+                        })
+                        .select()
+                        .single();
+                    
+                    if (error) throw error;
+                    setNotes([data, ...notes]);
+                    setNewNote('');
+                } catch (err) {
+                    console.error('Add note error:', err);
+                    alert('Error adding note');
+                }
+                setSaving(false);
+            };
+
+            const deleteNote = async (id) => {
+                if (!confirm('Delete this note?')) return;
+                try {
+                    await supabase.from('client_notes').delete().eq('id', id);
+                    setNotes(notes.filter(n => n.id !== id));
+                } catch (err) {
+                    console.error('Delete error:', err);
+                }
+            };
+
+            if (!c) return <div className="card rounded-xl p-12 text-center text-gray-500">Select a client to view details</div>;
+
             return (
                 <div className="space-y-6">
+                    {/* Strategy Section */}
                     <div className="card rounded-xl p-6">
-                        <h4 className="font-semibold text-white mb-3">Strategy Notes</h4>
-                        <textarea value={strategy} onChange={e=>setStrategy(e.target.value)} className="w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[150px] focus:outline-none focus:border-accent-cyan" placeholder="Document the current strategy..."/>
+                        <div className="flex justify-between items-center mb-3">
+                            <h4 className="font-semibold text-white">📝 Strategy Notes</h4>
+                            <span className="text-sm text-gray-500">{saveStatus}</span>
+                        </div>
+                        <textarea 
+                            value={strategy} 
+                            onChange={e => setStrategy(e.target.value)} 
+                            className={`w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[120px] focus:outline-none focus:border-accent-cyan ${saving ? 'saving' : ''}`}
+                            placeholder="Document the current strategy for this client..."
+                            disabled={loading}
+                        />
                     </div>
+
+                    {/* Action Items Section */}
                     <div className="card rounded-xl p-6">
-                        <h4 className="font-semibold text-white mb-3">Quick Notes</h4>
+                        <h4 className="font-semibold text-white mb-3">✅ Action Items</h4>
+                        <textarea 
+                            value={actionItems} 
+                            onChange={e => setActionItems(e.target.value)} 
+                            className={`w-full bg-dark-700 border border-dark-600 rounded-lg p-4 text-white min-h-[100px] focus:outline-none focus:border-accent-cyan ${saving ? 'saving' : ''}`}
+                            placeholder="List action items and next steps..."
+                            disabled={loading}
+                        />
+                    </div>
+
+                    {/* Quick Notes Section */}
+                    <div className="card rounded-xl p-6">
+                        <h4 className="font-semibold text-white mb-3">💬 Quick Notes</h4>
                         <div className="flex gap-4 mb-4">
-                            <input type="text" value={newNote} onChange={e=>setNewNote(e.target.value)} onKeyPress={e=>e.key==='Enter'&&addNote()} className="flex-1 bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" placeholder="Add a note..."/>
-                            <button onClick={addNote} className="px-6 py-3 bg-accent-cyan text-black font-semibold rounded-lg">Add</button>
+                            <input 
+                                type="text" 
+                                value={newNote} 
+                                onChange={e => setNewNote(e.target.value)} 
+                                onKeyPress={e => e.key === 'Enter' && addNote()} 
+                                className="flex-1 bg-dark-700 border border-dark-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent-cyan" 
+                                placeholder="Add a quick note..."
+                                disabled={loading || saving}
+                            />
+                            <button 
+                                onClick={addNote} 
+                                disabled={loading || saving || !newNote.trim()}
+                                className="px-6 py-3 bg-accent-cyan text-black font-semibold rounded-lg disabled:opacity-50 hover:bg-cyan-400"
+                            >
+                                {saving ? '...' : 'Add'}
+                            </button>
                         </div>
-                        <div className="space-y-2">
-                            {notes.length===0 && <div className="text-gray-500 text-center py-4">No notes yet</div>}
-                            {notes.map((n,i) => <div key={i} className="bg-dark-700 rounded-lg p-3"><span className="text-gray-500 text-sm">{n.time}</span><p className="text-white mt-1">{n.text}</p></div>)}
-                        </div>
+                        
+                        {loading ? (
+                            <div className="text-center py-8 text-gray-500">Loading notes...</div>
+                        ) : (
+                            <div className="space-y-2 max-h-96 overflow-y-auto scrollbar">
+                                {notes.length === 0 && (
+                                    <div className="text-gray-500 text-center py-4">No notes yet. Add your first note above!</div>
+                                )}
+                                {notes.map((n) => (
+                                    <div key={n.id} className="bg-dark-700 rounded-lg p-3 group">
+                                        <div className="flex justify-between items-start">
+                                            <span className="text-gray-500 text-sm">
+                                                {new Date(n.created_at).toLocaleString()}
+                                            </span>
+                                            <button 
+                                                onClick={() => deleteNote(n.id)}
+                                                className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        <p className="text-white mt-1">{n.note_text}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Supabase Status */}
+                    <div className="text-center text-xs text-gray-600">
+                        💾 Data synced with Supabase • Auto-saves as you type
                     </div>
                 </div>
             );
@@ -274,7 +457,6 @@
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
-                // Check for client parameter in URL
                 const params = new URLSearchParams(window.location.search);
                 const clientParam = params.get('client');
                 
@@ -292,7 +474,6 @@
                 ]).then(([c, s]) => { 
                     setClients(c); 
                     setSetupData(s);
-                    // Auto-select client from URL parameter
                     if(clientParam) {
                         const found = c.find(client => client.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase());
                         if(found) setSelected(found);
