@@ -53,7 +53,13 @@
         const fmt = v => '$'+(pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
         const fmtD = v => '$'+(pn(v)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
         const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
-        const getDisplayName = (email) => email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
+        const getDisplayName = (email, user) => {
+            // First try to get full_name from user metadata
+            if (user?.user_metadata?.full_name) return user.user_metadata.full_name;
+            if (user?.user_metadata?.name) return user.user_metadata.name;
+            // Fall back to email parsing
+            return email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
+        };
 
         const mapClient = r => ({
             client: r['Client']||'', state: r['State']||'', campaign: r['CAMPAIGN']||'',
@@ -75,19 +81,51 @@
 
         // ========== LOGIN ==========
         const LoginPage = ({ onLogin }) => {
+            const [isSignUp, setIsSignUp] = useState(false);
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
+            const [fullName, setFullName] = useState('');
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
+            const [success, setSuccess] = useState('');
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 setLoading(true);
+                setError('');
+                setSuccess('');
+                
                 try {
-                    const result = await supabase.auth.signInWithPassword({ email, password });
-                    if (result.error) throw result.error;
-                    onLogin(result.data.user);
-                } catch (err) { setError(err.message); }
+                    if (isSignUp) {
+                        // Sign up new user
+                        const result = await supabase.auth.signUp({ 
+                            email, 
+                            password,
+                            options: {
+                                data: {
+                                    full_name: fullName,
+                                    name: fullName
+                                }
+                            }
+                        });
+                        if (result.error) throw result.error;
+                        
+                        // Check if email confirmation is required
+                        if (result.data?.user?.identities?.length === 0) {
+                            setError('This email is already registered. Please sign in instead.');
+                        } else {
+                            setSuccess('Account created! Please check your email to confirm, then sign in.');
+                            setIsSignUp(false);
+                        }
+                    } else {
+                        // Sign in existing user
+                        const result = await supabase.auth.signInWithPassword({ email, password });
+                        if (result.error) throw result.error;
+                        onLogin(result.data.user);
+                    }
+                } catch (err) { 
+                    setError(err.message); 
+                }
                 setLoading(false);
             };
 
@@ -96,14 +134,35 @@
                     <div className="card p-8 w-full max-w-md">
                         <div className="text-center mb-8">
                             <h1 className="text-3xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Media Buyer Overview</h1>
-                            <p className="text-slate-500 mt-2">Sign in to continue</p>
+                            <p className="text-slate-500 mt-2">{isSignUp ? 'Create your account' : 'Sign in to continue'}</p>
                         </div>
                         <form onSubmit={handleSubmit} className="space-y-4">
+                            {isSignUp && (
+                                <input 
+                                    type="text" 
+                                    value={fullName} 
+                                    onChange={e => setFullName(e.target.value)} 
+                                    className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" 
+                                    placeholder="Full Name" 
+                                    required 
+                                />
+                            )}
                             <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Email" required />
-                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Password" required />
+                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Password" required minLength={6} />
                             {error && <div className="p-3 rounded-xl bg-red-500/10 text-red-400 text-sm">{error}</div>}
-                            <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl">{loading ? 'Signing in...' : 'Sign In'}</button>
+                            {success && <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 text-sm">{success}</div>}
+                            <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl">
+                                {loading ? (isSignUp ? 'Creating Account...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
+                            </button>
                         </form>
+                        <div className="mt-6 text-center">
+                            <button 
+                                onClick={() => { setIsSignUp(!isSignUp); setError(''); setSuccess(''); }} 
+                                className="text-brand-cyan hover:text-brand-purple text-sm transition-colors"
+                            >
+                                {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             );
@@ -355,7 +414,7 @@
                         <aside className="w-72 bg-dark-900 border-r border-dark-700 flex flex-col">
                             <div className="p-5 border-b border-dark-700">
                                 <h1 className="text-xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Media Buyer Overview</h1>
-                                <div className="flex items-center gap-2 mt-2"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span className="text-xs text-slate-400">{getDisplayName(user.email)}</span></div>
+                                <div className="flex items-center gap-2 mt-2"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span className="text-xs text-slate-400">{getDisplayName(user.email, user)}</span></div>
                             </div>
                             <nav className="flex-1 py-2 overflow-y-auto scrollbar">
                                 <button className="w-full flex items-start gap-3 px-5 py-3 text-left tab-active text-white">
