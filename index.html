@@ -727,8 +727,12 @@
                 return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn) || name.split(' ').filter(p => p.length > 2).some(p => sn.includes(p)); });
             };
 
-            if (authLoading || loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            // Show loading only while checking auth status
+            if (authLoading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            // Show login page if not authenticated
             if (!user) return <LoginPage onLogin={setUser} />;
+            // Show loading while fetching data (only for authenticated users)
+            if (loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
 
             const s = getSetupInfo(selected);
 
