@@ -65,75 +65,85 @@
         };
 
         // Map Client Ads Performance sheet - headers in row 2 (A2:BA2)
-        const mapClient = r => ({
-            client: r['Client']||'', 
-            adAccount: r['Ad Account Name']||'',
-            dailySetAdSpend: pn(r['Daily Set Ad Spend']),
-            state: r['State']||'', 
-            campaign: r['CAMPAIGN']||'',
-            callingStatus: r['Calling/Non-calling']||'',
-            startDate: r['CORRECT SETUP TIMING START DATE']||r['OLD Start Date']||'',
-            leadySync: r['Leady Sync']||'',
-            months: pn(r['Months Running']),
-            weeks: pn(r['Weeks Running']),
-            days: pn(r['Days Running']),
-            spend: pn(r['Total Ad Spend']), 
-            spendPerMonth: pn(r['Ad Spend Per Month']),
-            spendPerDay: pn(r['Ad Spend Per Day']),
-            // Last 3 Days - Seller
-            last3DaySellerLeads: pn(r['Last 3 Day Seller Leads']),
-            last3DaySellerSpend: pn(r['Last 3 Days Seller Ad Spend']),
-            last3DaySellerCPL: pn(r['Last 3 Days Seller CPL']),
-            // Last 7 Days - Seller
-            last7DaySellerLeads: pn(r['Last 7 Day Seller Leads']),
-            last7DaySellerSpend: pn(r['Last 7 Day Seller Spend']),
-            last7DaySellerCPL: pn(r['Last 7 Days Seller CPL']),
-            // Lifetime - Seller
-            sellerLeads: pn(r['Lifetime Seller Leads']),
-            sellerSpend: pn(r['Lifetime Seller Ad Spend']),
-            sellerCPL: pn(r['Lifetime Seller CPL']),
-            // Last 3 Days - Buyer
-            last3DayBuyerLeads: pn(r['Last 3 Day Buyer Leads']),
-            last3DayBuyerSpend: pn(r['Last 3 Days Buyer Ad Spend']),
-            last3DayBuyerCPL: pn(r['Last 3 Days Buyer CPL']),
-            // Last 7 Days - Buyer
-            last7DayBuyerLeads: pn(r['Last 7 Day Buyer Leads']),
-            last7DayBuyerSpend: pn(r['Last 7 Day Buyer Spend']),
-            last7DayBuyerCPL: pn(r['Last 7 Days Buyer CPL']),
-            // Lifetime - Buyer
-            buyerLeads: pn(r['Lifetime Buyer Leads']),
-            buyerSpend: pn(r['Lifetime Buyer Ad Spend']),
-            buyerCPL: pn(r['Lifetime Buyer CPL']),
-            // Other lead types
-            listingLeads: pn(r['Listing Leads']),
-            mortgageLeads: pn(r['Mortgage Leads']),
-            agentAttraction: pn(r['Agent Attraction']),
-            // Appointments
-            appts: pn(r['Total Appts (Seller + Buyers)']),
-            sellerAppts: pn(r['Total Seller Appts']),
-            sellerAppts7: pn(r['Seller Appts in the Last 7 Days']),
-            avgSellerApptsWeek: pn(r['Avg Seller Appts per Week']),
-            sellerLeadToAppt: pn(r['Seller Lead To Appt Ratio']),
-            costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appts']),
-            buyerAppts: pn(r['Total Buyer Appts']),
-            buyerAppts7: pn(r['Buyer Appts in the Last 7 Days']),
-            avgBuyerApptsWeek: pn(r['Avg Buyer Appts per Week']),
-            buyerLeadToAppt: pn(r['Buyer Lead To Appt Ratio']),
-            costPerBuyerAppt: pn(r['Ad Spend Cost Per Buyer Appts']),
-            // Deals
-            deals: pn(r['Potential Deals']),
-            listings: pn(r['Listing']),
-            buyerSigned: pn(r['Buyer Signed']),
-            leadsPerListing: pn(r['Leads/Listing']),
-            leadsPerDeal: pn(r['Leads/Potential Deal']),
-            leadsPerSignedBuyer: pn(r['Leads/Signed Buyer']),
-            // Computed
-            get leads() { return this.sellerLeads + this.buyerLeads + this.listingLeads; },
-            get cpl() { return this.leads > 0 ? this.spend / this.leads : 0; },
-            get appts7() { return this.sellerAppts7 + this.buyerAppts7; },
-            get last3DayLeads() { return this.last3DaySellerLeads + this.last3DayBuyerLeads; },
-            get last7DayLeads() { return this.last7DaySellerLeads + this.last7DayBuyerLeads; }
-        });
+        const mapClient = r => {
+            const sellerLeads = pn(r['Lifetime Seller Leads']);
+            const buyerLeads = pn(r['Lifetime Buyer Leads']);
+            const listingLeads = pn(r['Listing Leads']);
+            const totalLeads = sellerLeads + buyerLeads + listingLeads;
+            const spend = pn(r['Total Ad Spend']);
+            const sellerAppts7 = pn(r['Seller Appts in the Last 7 Days']);
+            const buyerAppts7 = pn(r['Buyer Appts in the Last 7 Days']);
+            
+            return {
+                client: r['Client']||'', 
+                adAccount: r['Ad Account Name']||'',
+                dailySetAdSpend: pn(r['Daily Set Ad Spend']),
+                state: r['State']||'', 
+                campaign: r['CAMPAIGN']||'',
+                callingStatus: r['Calling/Non-calling']||'',
+                startDate: r['CORRECT SETUP TIMING START DATE']||r['OLD Start Date']||'',
+                leadySync: r['Leady Sync']||'',
+                months: pn(r['Months Running']),
+                weeks: pn(r['Weeks Running']),
+                days: pn(r['Days Running']),
+                spend: spend, 
+                spendPerMonth: pn(r['Ad Spend Per Month']),
+                spendPerDay: pn(r['Ad Spend Per Day']),
+                // Last 3 Days - Seller
+                last3DaySellerLeads: pn(r['Last 3 Day Seller Leads']),
+                last3DaySellerSpend: pn(r['Last 3 Days Seller Ad Spend']),
+                last3DaySellerCPL: pn(r['Last 3 Days Seller CPL']),
+                // Last 7 Days - Seller
+                last7DaySellerLeads: pn(r['Last 7 Day Seller Leads']),
+                last7DaySellerSpend: pn(r['Last 7 Day Seller Spend']),
+                last7DaySellerCPL: pn(r['Last 7 Days Seller CPL']),
+                // Lifetime - Seller
+                sellerLeads: sellerLeads,
+                sellerSpend: pn(r['Lifetime Seller Ad Spend']),
+                sellerCPL: pn(r['Lifetime Seller CPL']),
+                // Last 3 Days - Buyer
+                last3DayBuyerLeads: pn(r['Last 3 Day Buyer Leads']),
+                last3DayBuyerSpend: pn(r['Last 3 Days Buyer Ad Spend']),
+                last3DayBuyerCPL: pn(r['Last 3 Days Buyer CPL']),
+                // Last 7 Days - Buyer
+                last7DayBuyerLeads: pn(r['Last 7 Day Buyer Leads']),
+                last7DayBuyerSpend: pn(r['Last 7 Day Buyer Spend']),
+                last7DayBuyerCPL: pn(r['Last 7 Days Buyer CPL']),
+                // Lifetime - Buyer
+                buyerLeads: buyerLeads,
+                buyerSpend: pn(r['Lifetime Buyer Ad Spend']),
+                buyerCPL: pn(r['Lifetime Buyer CPL']),
+                // Other lead types
+                listingLeads: listingLeads,
+                mortgageLeads: pn(r['Mortgage Leads']),
+                agentAttraction: pn(r['Agent Attraction']),
+                // Appointments
+                appts: pn(r['Total Appts (Seller + Buyers)']),
+                sellerAppts: pn(r['Total Seller Appts']),
+                sellerAppts7: sellerAppts7,
+                avgSellerApptsWeek: pn(r['Avg Seller Appts per Week']),
+                sellerLeadToAppt: pn(r['Seller Lead To Appt Ratio']),
+                costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appts']),
+                buyerAppts: pn(r['Total Buyer Appts']),
+                buyerAppts7: buyerAppts7,
+                avgBuyerApptsWeek: pn(r['Avg Buyer Appts per Week']),
+                buyerLeadToAppt: pn(r['Buyer Lead To Appt Ratio']),
+                costPerBuyerAppt: pn(r['Ad Spend Cost Per Buyer Appts']),
+                // Deals
+                deals: pn(r['Potential Deals']),
+                listings: pn(r['Listing']),
+                buyerSigned: pn(r['Buyer Signed']),
+                leadsPerListing: pn(r['Leads/Listing']),
+                leadsPerDeal: pn(r['Leads/Potential Deal']),
+                leadsPerSignedBuyer: pn(r['Leads/Signed Buyer']),
+                // Computed totals
+                leads: totalLeads,
+                cpl: totalLeads > 0 ? spend / totalLeads : 0,
+                appts7: sellerAppts7 + buyerAppts7,
+                last3DayLeads: pn(r['Last 3 Day Seller Leads']) + pn(r['Last 3 Day Buyer Leads']),
+                last7DayLeads: pn(r['Last 7 Day Seller Leads']) + pn(r['Last 7 Day Buyer Leads'])
+            };
+        };
 
         // Full setup timing mapping
         const mapSetupTiming = r => ({
