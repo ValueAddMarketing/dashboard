@@ -1126,6 +1126,33 @@
                 if (!user) return;
                 const params = new URLSearchParams(window.location.search);
                 const clientParam = params.get('client');
+                
+                // Try to load from cache first for instant display
+                const cachedClients = localStorage.getItem('vam_clients');
+                const cachedSetup = localStorage.getItem('vam_setup');
+                const cacheTime = localStorage.getItem('vam_cache_time');
+                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
+                
+                // Use cache if less than 5 minutes old
+                if (cachedClients && cachedSetup && cacheAge < 300000) {
+                    const c = JSON.parse(cachedClients);
+                    const s = JSON.parse(cachedSetup);
+                    setClients(c);
+                    setSetupData(s);
+                    if (clientParam) { 
+                        const found = c.find(x => x.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase()); 
+                        if (found) setSelected(found); 
+                    }
+                    setLoading(false);
+                    // Still fetch fresh data in background
+                    fetchFreshData(clientParam, false);
+                } else {
+                    // No cache or expired, fetch fresh
+                    fetchFreshData(clientParam, true);
+                }
+            }, [user]);
+
+            const fetchFreshData = (clientParam, updateLoading) => {
                 Promise.all([
                     // Client Ads Performance - headers in row 2, skip row 1
                     fetch(URLS.clientAdsPerformance).then(r => r.text()).then(csv => {
@@ -1139,11 +1166,20 @@
                         return Papa.parse([lines[0], ...lines.slice(2)].join('\n'), { header: true, skipEmptyLines: true }).data.map(mapSetupTiming).filter(r => r.client); 
                     })
                 ]).then(([c, s]) => {
-                    setClients(c); setSetupData(s);
-                    if (clientParam) { const found = c.find(x => x.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase()); if (found) setSelected(found); }
-                    setLoading(false);
+                    // Save to cache
+                    localStorage.setItem('vam_clients', JSON.stringify(c));
+                    localStorage.setItem('vam_setup', JSON.stringify(s));
+                    localStorage.setItem('vam_cache_time', Date.now().toString());
+                    
+                    setClients(c); 
+                    setSetupData(s);
+                    if (clientParam) { 
+                        const found = c.find(x => x.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase()); 
+                        if (found) setSelected(found); 
+                    }
+                    if (updateLoading) setLoading(false);
                 });
-            }, [user]);
+            };
 
             const getSetupInfo = (client) => {
                 if (!client) return null;
