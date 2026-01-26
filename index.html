@@ -507,13 +507,13 @@
 
         // ========== CALL SCRIPTS TAB ==========
         const CallScriptsTab = ({ c, s }) => {
-            const clientName = c?.client || '[Client]';
-            const totalLeads = c?.leads || 'X';
-            const cplValue = fmtD(c?.cpl || 0);
-            const sellerLeadsVal = c?.sellerLeads || 'X';
-            const buyerLeadsVal = c?.buyerLeads || 'X';
-            const apptsVal = c?.appts || 'X';
-            const convRate = fmtP(c?.sellerLeadToAppt || 0);
+            const clientName = (c && c.client) ? c.client : '[Client]';
+            const totalLeads = (c && c.leads) ? c.leads : 'X';
+            const cplValue = fmtD((c && c.cpl) ? c.cpl : 0);
+            const sellerLeadsVal = (c && c.sellerLeads) ? c.sellerLeads : 'X';
+            const buyerLeadsVal = (c && c.buyerLeads) ? c.buyerLeads : 'X';
+            const apptsVal = (c && c.appts) ? c.appts : 'X';
+            const convRate = fmtP((c && c.sellerLeadToAppt) ? c.sellerLeadToAppt : 0);
 
             const scripts = [
                 { 
