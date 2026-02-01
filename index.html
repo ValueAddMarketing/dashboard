@@ -314,28 +314,529 @@
         };
 
         // ========== DATA ROW & SECTION COMPONENTS ==========
-        const DataRow = ({label, value, highlight, color}) => {
+        const DataRow = ({label, value, highlight, color, trend, icon}) => {
             const displayVal = clean(value);
             const isEmpty = displayVal === '—';
+            const trendIcon = trend === 'up' ? '↗️' : trend === 'down' ? '↘️' : null;
+            const trendColor = trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : '';
             return (
-                <div className="flex justify-between items-center py-1.5">
-                    <span className="text-slate-400 text-sm">{label}</span>
-                    <span className={`text-sm font-medium ${isEmpty ? 'text-slate-600' : highlight ? (color || 'text-brand-cyan') : 'text-white'}`}>{displayVal}</span>
+                <div className="flex justify-between items-center py-2.5 border-b border-dark-700/50 last:border-0">
+                    <span className="text-slate-400 text-sm flex items-center gap-2">
+                        {icon && <span className="text-base">{icon}</span>}
+                        {label}
+                    </span>
+                    <span className={`text-sm font-medium flex items-center gap-2 ${isEmpty ? 'text-slate-600' : highlight ? (color || 'text-brand-cyan') : 'text-white'}`}>
+                        {displayVal}
+                        {trendIcon && <span className={`text-xs ${trendColor}`}>{trendIcon}</span>}
+                    </span>
                 </div>
             );
         };
 
         const Section = ({title, children, cols = 1}) => (
-            <div className="card p-5">
-                <div className="section-title">{title}</div>
-                <div className={cols === 2 ? 'grid md:grid-cols-2 gap-x-6' : ''}>{children}</div>
+            <div className="card p-6">
+                <div className="section-title mb-4">{title}</div>
+                <div className={cols === 2 ? 'grid md:grid-cols-2 gap-x-8 gap-y-1' : ''}>{children}</div>
             </div>
         );
+
+        // ========== COLLAPSIBLE SECTION COMPONENT ==========
+        const CollapsibleSection = ({title, summary, children, defaultOpen = false, icon}) => {
+            const [isOpen, setIsOpen] = useState(defaultOpen);
+            return (
+                <div className="card overflow-hidden">
+                    <button
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="w-full p-5 flex items-center justify-between hover:bg-dark-800/50 transition-colors"
+                    >
+                        <div className="flex items-center gap-3">
+                            {icon && <span className="text-xl">{icon}</span>}
+                            <div className="text-left">
+                                <div className="font-semibold text-white">{title}</div>
+                                {summary && <div className="text-sm text-slate-400 mt-1">{summary}</div>}
+                            </div>
+                        </div>
+                        <span className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▼</span>
+                    </button>
+                    {isOpen && (
+                        <div className="px-6 pb-6 pt-2 border-t border-dark-700">
+                            {children}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ========== PRIORITY ACTION BANNER ==========
+        const PriorityActionBanner = ({c, s}) => {
+            if (!c) return null;
+
+            // Determine the highest priority action
+            const actions = [];
+
+            // Payment overdue - highest priority
+            if (s?.duePayment?.includes('OVERDUE')) {
+                actions.push({
+                    priority: 1,
+                    icon: '💳',
+                    title: 'Payment Overdue',
+                    description: 'Reach out to discuss payment status and resolve billing issues.',
+                    action: 'Schedule Payment Call',
+                    color: 'red'
+                });
+            }
+
+            // No leads in 3 days
+            const last3DayLeads = (c.last3DaySellerLeads || 0) + (c.last3DayBuyerLeads || 0);
+            if (last3DayLeads === 0 && c.days >= 3) {
+                actions.push({
+                    priority: 2,
+                    icon: '📉',
+                    title: 'No Leads in 3 Days',
+                    description: 'Check ad account status, budget delivery, and campaign performance.',
+                    action: 'Review Ad Account',
+                    color: 'amber'
+                });
+            }
+
+            // High CPL
+            if (c.cpl > 50) {
+                actions.push({
+                    priority: 3,
+                    icon: '📊',
+                    title: 'High Cost Per Lead',
+                    description: `CPL is $${c.cpl.toFixed(2)} (target is under $50). Review ad creative and targeting.`,
+                    action: 'Optimize Campaigns',
+                    color: 'amber'
+                });
+            }
+
+            // No appointments
+            if (c.appts === 0 && c.leads >= 20) {
+                actions.push({
+                    priority: 4,
+                    icon: '📞',
+                    title: 'No Appointments Despite Leads',
+                    description: `${c.leads} leads but no appointments. Check lead quality and follow-up process.`,
+                    action: 'Schedule Quality Call',
+                    color: 'amber'
+                });
+            }
+
+            // Red flags from setup
+            if (s?.redFlags) {
+                actions.push({
+                    priority: 5,
+                    icon: '🚩',
+                    title: 'Red Flags Noted',
+                    description: s.redFlags,
+                    action: 'Address Concerns',
+                    color: 'red'
+                });
+            }
+
+            // If healthy, show positive action
+            if (actions.length === 0) {
+                const score = getHealthScore(c, s);
+                if (score >= 80) {
+                    actions.push({
+                        priority: 10,
+                        icon: '🌟',
+                        title: 'Client Performing Well',
+                        description: 'Great metrics! Consider asking for a testimonial or discussing expansion opportunities.',
+                        action: 'Request Testimonial',
+                        color: 'emerald'
+                    });
+                } else {
+                    actions.push({
+                        priority: 10,
+                        icon: '📋',
+                        title: 'Schedule Regular Check-In',
+                        description: 'No urgent issues. Maintain relationship with a routine check-in call.',
+                        action: 'Schedule Check-In',
+                        color: 'cyan'
+                    });
+                }
+            }
+
+            const topAction = actions.sort((a, b) => a.priority - b.priority)[0];
+            const colorMap = {
+                red: 'border-red-500 bg-red-500/10',
+                amber: 'border-amber-500 bg-amber-500/10',
+                emerald: 'border-emerald-500 bg-emerald-500/10',
+                cyan: 'border-brand-cyan bg-brand-cyan/10'
+            };
+            const textColorMap = {
+                red: 'text-red-400',
+                amber: 'text-amber-400',
+                emerald: 'text-emerald-400',
+                cyan: 'text-brand-cyan'
+            };
+
+            return (
+                <div className={`card p-6 border-l-4 ${colorMap[topAction.color]}`}>
+                    <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-4">
+                            <span className="text-3xl">{topAction.icon}</span>
+                            <div>
+                                <div className="text-xs font-semibold text-brand-purple uppercase tracking-wider mb-1">Priority Action</div>
+                                <h3 className={`text-lg font-bold ${textColorMap[topAction.color]}`}>{topAction.title}</h3>
+                                <p className="text-slate-400 mt-1">{topAction.description}</p>
+                            </div>
+                        </div>
+                        <button className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap ${colorMap[topAction.color]} ${textColorMap[topAction.color]} hover:opacity-80 transition-opacity`}>
+                            {topAction.action}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== HEALTH SCORE CARD ==========
+        const HealthScoreCard = ({c, s}) => {
+            if (!c) return null;
+
+            const score = getHealthScore(c, s);
+            const {text, bg, label} = getHealthColor(score);
+
+            // Calculate component scores
+            const cplScore = c.cpl <= 15 ? 25 : c.cpl <= 25 ? 20 : c.cpl <= 35 ? 10 : c.cpl <= 50 ? 5 : 0;
+            const apptScore = c.appts7 >= 5 ? 15 : c.appts7 >= 3 ? 10 : c.appts7 >= 1 ? 5 : 0;
+            const dealScore = (c.deals > 0 || c.listings > 0) ? 10 : 0;
+            const paymentPenalty = s?.duePayment?.includes('OVERDUE') ? -15 : 0;
+            const flagPenalty = s?.redFlags ? -10 : 0;
+
+            const components = [
+                { name: 'CPL', score: cplScore, max: 25, icon: '💰', status: cplScore >= 20 ? 'good' : cplScore >= 10 ? 'warning' : 'bad' },
+                { name: 'Appointments', score: apptScore, max: 15, icon: '📅', status: apptScore >= 10 ? 'good' : apptScore >= 5 ? 'warning' : 'bad' },
+                { name: 'Deals', score: dealScore, max: 10, icon: '🎯', status: dealScore > 0 ? 'good' : 'warning' },
+                { name: 'Payment', score: paymentPenalty === 0 ? 15 : 0, max: 15, icon: '💳', status: paymentPenalty === 0 ? 'good' : 'bad' },
+            ];
+
+            const statusColors = {
+                good: 'text-emerald-400 bg-emerald-500/20 border-emerald-500/30',
+                warning: 'text-amber-400 bg-amber-500/20 border-amber-500/30',
+                bad: 'text-red-400 bg-red-500/20 border-red-500/30'
+            };
+            const statusIcons = { good: '✓', warning: '⚠', bad: '✗' };
+
+            return (
+                <div className="card p-6">
+                    <div className="flex items-center justify-between mb-6">
+                        <div>
+                            <div className="text-xs font-semibold text-brand-purple uppercase tracking-wider mb-1">Health Score</div>
+                            <div className="flex items-center gap-3">
+                                <span className={`text-4xl font-bold ${text}`}>{score}</span>
+                                <span className="text-slate-500">/100</span>
+                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${text} ${bg}/20`}>{label}</span>
+                            </div>
+                        </div>
+                        <div className="w-24 h-24 relative">
+                            <svg className="w-full h-full transform -rotate-90">
+                                <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" className="text-dark-700" strokeWidth="8"/>
+                                <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" className={text} strokeWidth="8" strokeLinecap="round"
+                                    strokeDasharray={`${score * 2.51} 251`}/>
+                            </svg>
+                            <div className={`absolute inset-0 flex items-center justify-center text-2xl font-bold ${text}`}>{score}</div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {components.map((comp, i) => (
+                            <div key={i} className={`p-3 rounded-xl border ${statusColors[comp.status]} text-center`}>
+                                <div className="text-lg mb-1">{comp.icon}</div>
+                                <div className="text-xs font-medium mb-1">{comp.name}</div>
+                                <div className="flex items-center justify-center gap-1">
+                                    <span className="font-bold">{comp.score}</span>
+                                    <span className="text-xs opacity-60">/{comp.max}</span>
+                                    <span className="ml-1">{statusIcons[comp.status]}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== SMART INSIGHTS PANEL ==========
+        const SmartInsightsPanel = ({c, s}) => {
+            if (!c) return null;
+
+            const insights = [];
+            const last3DayLeads = (c.last3DaySellerLeads || 0) + (c.last3DayBuyerLeads || 0);
+            const last7DayLeads = (c.last7DaySellerLeads || 0) + (c.last7DayBuyerLeads || 0);
+
+            // Lead volume trends
+            if (last7DayLeads > 0 && c.leads > 0) {
+                const weeklyRate = last7DayLeads / 7;
+                const overallRate = c.leads / Math.max(c.days, 1);
+                if (weeklyRate > overallRate * 1.2) {
+                    insights.push({
+                        icon: '📈',
+                        type: 'positive',
+                        text: `Lead volume up ${Math.round((weeklyRate/overallRate - 1) * 100)}% compared to average - campaigns are improving`
+                    });
+                } else if (weeklyRate < overallRate * 0.8) {
+                    insights.push({
+                        icon: '📉',
+                        type: 'warning',
+                        text: `Lead volume down ${Math.round((1 - weeklyRate/overallRate) * 100)}% from average - may need campaign review`
+                    });
+                }
+            }
+
+            // Leads but no appointments
+            if (c.leads >= 30 && c.appts === 0) {
+                insights.push({
+                    icon: '🔍',
+                    type: 'warning',
+                    text: `${c.leads} leads but no appointments - investigate lead quality or follow-up process`
+                });
+            } else if (c.leads >= 50 && c.appts > 0 && c.leads / c.appts > 20) {
+                insights.push({
+                    icon: '📊',
+                    type: 'info',
+                    text: `Lead-to-appointment ratio is 1:${Math.round(c.leads / c.appts)} - below typical 1:10 benchmark`
+                });
+            }
+
+            // CPL trends
+            const last7CPL = c.last7DaySellerCPL || c.last7DayBuyerCPL || 0;
+            if (last7CPL > 0 && c.cpl > 0) {
+                if (last7CPL < c.cpl * 0.85) {
+                    insights.push({
+                        icon: '💰',
+                        type: 'positive',
+                        text: `Recent CPL ($${last7CPL.toFixed(2)}) is ${Math.round((1 - last7CPL/c.cpl) * 100)}% lower than lifetime average - campaigns optimizing well`
+                    });
+                } else if (last7CPL > c.cpl * 1.2) {
+                    insights.push({
+                        icon: '⚠️',
+                        type: 'warning',
+                        text: `Recent CPL ($${last7CPL.toFixed(2)}) is ${Math.round((last7CPL/c.cpl - 1) * 100)}% higher than average - review ad performance`
+                    });
+                }
+            }
+
+            // Good conversion rate
+            if (c.sellerLeadToAppt >= 15) {
+                insights.push({
+                    icon: '🌟',
+                    type: 'positive',
+                    text: `Seller lead-to-appointment rate of ${c.sellerLeadToAppt.toFixed(1)}% is excellent - client is converting well`
+                });
+            }
+
+            // Deals/Closings success
+            if (c.deals > 0) {
+                const costPerDeal = c.spend / c.deals;
+                insights.push({
+                    icon: '🎯',
+                    type: 'positive',
+                    text: `${c.deals} potential deals at $${Math.round(costPerDeal).toLocaleString()} cost per deal`
+                });
+            }
+
+            // Missing leady sync
+            if (!c.leadySync || c.leadySync === 'No') {
+                insights.push({
+                    icon: '🔗',
+                    type: 'info',
+                    text: 'Leady sync not configured - consider setting up for automated lead tracking'
+                });
+            }
+
+            // Long running without results
+            if (c.days > 30 && c.leads < 10) {
+                insights.push({
+                    icon: '⏰',
+                    type: 'warning',
+                    text: `${c.days} days running with only ${c.leads} leads - significant campaign issues`
+                });
+            }
+
+            if (insights.length === 0) {
+                insights.push({
+                    icon: '✅',
+                    type: 'positive',
+                    text: 'No significant issues detected - client metrics are within normal ranges'
+                });
+            }
+
+            const typeColors = {
+                positive: 'border-emerald-500/30 bg-emerald-500/5',
+                warning: 'border-amber-500/30 bg-amber-500/5',
+                info: 'border-brand-cyan/30 bg-brand-cyan/5'
+            };
+
+            return (
+                <div className="card p-6">
+                    <div className="section-title flex items-center gap-2">
+                        <span>💡</span> Smart Insights
+                    </div>
+                    <div className="space-y-3 mt-4">
+                        {insights.slice(0, 5).map((insight, i) => (
+                            <div key={i} className={`p-4 rounded-xl border ${typeColors[insight.type]}`}>
+                                <div className="flex items-start gap-3">
+                                    <span className="text-xl">{insight.icon}</span>
+                                    <p className="text-slate-300 text-sm leading-relaxed">{insight.text}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== QUICK ACTIONS ==========
+        const QuickActions = ({c, s, onAction}) => {
+            if (!c) return null;
+
+            const actions = [
+                { icon: '📞', label: 'Schedule Check-In', action: 'checkin' },
+                { icon: '📊', label: 'Request Report', action: 'report' },
+                { icon: '💬', label: 'Add Note', action: 'note' },
+                { icon: '🎯', label: 'Review Ads', action: 'ads' },
+                { icon: '📧', label: 'Send Resources', action: 'resources' },
+                { icon: '⚠️', label: 'Flag for Review', action: 'flag' },
+            ];
+
+            return (
+                <div className="card p-5">
+                    <div className="section-title">Quick Actions</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
+                        {actions.map((action, i) => (
+                            <button
+                                key={i}
+                                onClick={() => onAction && onAction(action.action)}
+                                className="p-3 rounded-xl bg-dark-800 hover:bg-dark-700 transition-colors text-center group"
+                            >
+                                <div className="text-xl mb-1 group-hover:scale-110 transition-transform">{action.icon}</div>
+                                <div className="text-xs text-slate-400 group-hover:text-white transition-colors">{action.label}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== PERFORMANCE TABS (Seller/Buyer) ==========
+        const PerformanceTabs = ({c}) => {
+            const [activeTab, setActiveTab] = useState('seller');
+            if (!c) return null;
+
+            const tabs = [
+                { id: 'seller', label: 'Seller', icon: '🏠' },
+                { id: 'buyer', label: 'Buyer', icon: '🛒' },
+                { id: 'other', label: 'Other Leads', icon: '📊' },
+                { id: 'deals', label: 'Deals', icon: '🎯' }
+            ];
+
+            const sellerContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Lifetime Leads" value={fmtN(c.sellerLeads)} highlight color="text-brand-cyan" icon="📊"/>
+                    <DataRow label="Lifetime CPL" value={fmtD(c.sellerCPL)} highlight icon="💰"/>
+                    <DataRow label="Last 7 Day Leads" value={fmtN(c.last7DaySellerLeads)} trend={c.last7DaySellerLeads > c.last3DaySellerLeads * 2 ? 'up' : null}/>
+                    <DataRow label="Last 7 Day CPL" value={fmtD(c.last7DaySellerCPL)}/>
+                    <DataRow label="Last 3 Day Leads" value={fmtN(c.last3DaySellerLeads)}/>
+                    <DataRow label="Last 3 Day CPL" value={fmtD(c.last3DaySellerCPL)}/>
+                    <DataRow label="Total Appointments" value={fmtN(c.sellerAppts)} highlight color="text-brand-purple" icon="📅"/>
+                    <DataRow label="Appts (Last 7 Days)" value={fmtN(c.sellerAppts7)}/>
+                    <DataRow label="Avg Appts/Week" value={c.avgSellerApptsWeek?.toFixed(1)}/>
+                    <DataRow label="Lead→Appt Rate" value={fmtP(c.sellerLeadToAppt)} highlight color={c.sellerLeadToAppt >= 15 ? 'text-emerald-400' : 'text-white'}/>
+                    <DataRow label="Cost Per Appt" value={fmtD(c.costPerSellerAppt)}/>
+                </div>
+            );
+
+            const buyerContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Lifetime Leads" value={fmtN(c.buyerLeads)} highlight color="text-brand-cyan" icon="📊"/>
+                    <DataRow label="Lifetime CPL" value={fmtD(c.buyerCPL)} highlight icon="💰"/>
+                    <DataRow label="Last 7 Day Leads" value={fmtN(c.last7DayBuyerLeads)}/>
+                    <DataRow label="Last 7 Day CPL" value={fmtD(c.last7DayBuyerCPL)}/>
+                    <DataRow label="Last 3 Day Leads" value={fmtN(c.last3DayBuyerLeads)}/>
+                    <DataRow label="Last 3 Day CPL" value={fmtD(c.last3DayBuyerCPL)}/>
+                    <DataRow label="Total Appointments" value={fmtN(c.buyerAppts)} highlight color="text-brand-purple" icon="📅"/>
+                    <DataRow label="Appts (Last 7 Days)" value={fmtN(c.buyerAppts7)}/>
+                    <DataRow label="Avg Appts/Week" value={c.avgBuyerApptsWeek?.toFixed(1)}/>
+                    <DataRow label="Lead→Appt Rate" value={fmtP(c.buyerLeadToAppt)} highlight color={c.buyerLeadToAppt >= 15 ? 'text-emerald-400' : 'text-white'}/>
+                    <DataRow label="Cost Per Appt" value={fmtD(c.costPerBuyerAppt)}/>
+                </div>
+            );
+
+            const otherContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Listing Leads" value={fmtN(c.listingLeads)} highlight icon="📋"/>
+                    <DataRow label="Mortgage Leads" value={fmtN(c.mortgageLeads)} icon="🏦"/>
+                    <DataRow label="Agent Attraction" value={fmtN(c.agentAttraction)} icon="👥"/>
+                </div>
+            );
+
+            const dealsContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Potential Deals" value={fmtN(c.deals)} highlight color="text-emerald-400" icon="🎯"/>
+                    <DataRow label="Listings" value={fmtN(c.listings)} highlight color="text-amber-400" icon="🏠"/>
+                    <DataRow label="Buyer Signed" value={fmtN(c.buyerSigned)} highlight color="text-emerald-400" icon="✍️"/>
+                    <DataRow label="Leads per Listing" value={c.leadsPerListing?.toFixed(1)}/>
+                    <DataRow label="Leads per Deal" value={c.leadsPerDeal?.toFixed(1)}/>
+                    <DataRow label="Leads per Signed Buyer" value={c.leadsPerSignedBuyer?.toFixed(1)}/>
+                </div>
+            );
+
+            return (
+                <div className="card overflow-hidden">
+                    <div className="flex border-b border-dark-700">
+                        {tabs.map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`flex-1 px-4 py-4 text-sm font-medium transition-colors flex items-center justify-center gap-2
+                                    ${activeTab === tab.id
+                                        ? 'bg-gradient-to-r from-brand-cyan/10 to-brand-purple/10 text-white border-b-2 border-brand-cyan'
+                                        : 'text-slate-400 hover:text-white hover:bg-dark-800'}`}
+                            >
+                                <span>{tab.icon}</span>
+                                <span className="hidden md:inline">{tab.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="p-6">
+                        {activeTab === 'seller' && sellerContent}
+                        {activeTab === 'buyer' && buyerContent}
+                        {activeTab === 'other' && otherContent}
+                        {activeTab === 'deals' && dealsContent}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== TREND METRIC CARD ==========
+        const TrendMetricCard = ({label, value, icon, trend, trendValue, color = 'brand-cyan'}) => {
+            const trendIcon = trend === 'up' ? '↗️' : trend === 'down' ? '↘️' : '→';
+            const trendColor = trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : 'text-slate-400';
+
+            return (
+                <div className={`card p-5 border-l-4 border-${color}`}>
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <div className="text-3xl font-bold text-white">{value}</div>
+                            <div className="text-sm text-slate-400 mt-1">{label}</div>
+                        </div>
+                        {icon && <span className="text-2xl">{icon}</span>}
+                    </div>
+                    {trendValue && (
+                        <div className={`mt-3 text-sm ${trendColor} flex items-center gap-1`}>
+                            <span>{trendIcon}</span>
+                            <span>{trendValue}</span>
+                        </div>
+                    )}
+                </div>
+            );
+        };
 
         // ========== CLIENT HEALTH TAB - FULL DETAILS ==========
         const ClientHealthTab = ({ c, s, isMissingFromAdsSheet }) => {
             if (!c && !isMissingFromAdsSheet) return <div className="card p-12 text-center text-slate-500">Select a client to view details</div>;
-            
+
             // If client is missing from Ads Performance sheet
             if (isMissingFromAdsSheet) {
                 return (
@@ -370,163 +871,232 @@
                 );
             }
 
-            const score = getHealthScore(c, s);
-            const color = getHealthColor(score);
+            // Calculate trend data
+            const last3DayLeads = (c.last3DaySellerLeads || 0) + (c.last3DayBuyerLeads || 0);
+            const last7DayLeads = (c.last7DaySellerLeads || 0) + (c.last7DayBuyerLeads || 0);
+            const avgDailyLeads = c.leads / Math.max(c.days, 1);
+            const recent7DayAvg = last7DayLeads / 7;
+            const leadTrend = recent7DayAvg > avgDailyLeads * 1.1 ? 'up' : recent7DayAvg < avgDailyLeads * 0.9 ? 'down' : null;
+
+            const last7CPL = c.last7DaySellerCPL || c.last7DayBuyerCPL || 0;
+            const cplTrend = last7CPL > 0 && c.cpl > 0 ? (last7CPL < c.cpl * 0.9 ? 'up' : last7CPL > c.cpl * 1.1 ? 'down' : null) : null;
 
             return (
                 <div className="space-y-6">
-                    {/* Quick Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="card p-4 border-l-4 border-brand-cyan"><div className="text-2xl font-bold text-white">{fmt(c.spend)}</div><div className="text-xs text-slate-400">Total Spend</div></div>
-                        <div className="card p-4 border-l-4 border-brand-cyan"><div className="text-2xl font-bold text-brand-cyan">{fmtN(c.leads)}</div><div className="text-xs text-slate-400">Total Leads</div></div>
-                        <div className="card p-4 border-l-4 border-brand-purple"><div className="text-2xl font-bold text-white">{fmtD(c.cpl)}</div><div className="text-xs text-slate-400">Cost Per Lead</div></div>
-                        <div className="card p-4 border-l-4 border-brand-purple"><div className="text-2xl font-bold text-brand-purple">{fmtN(c.appts)}</div><div className="text-xs text-slate-400">Appointments</div></div>
+                    {/* Priority Action Banner - Most Important */}
+                    <PriorityActionBanner c={c} s={s} />
+
+                    {/* Health Score + Quick Stats Row */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        <HealthScoreCard c={c} s={s} />
+
+                        {/* Quick Stats with Trends */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="card p-5 border-l-4 border-brand-cyan">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="text-3xl font-bold text-white">{fmt(c.spend)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Total Spend</div>
+                                    </div>
+                                    <span className="text-2xl">💰</span>
+                                </div>
+                            </div>
+                            <div className="card p-5 border-l-4 border-brand-cyan">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="text-3xl font-bold text-brand-cyan">{fmtN(c.leads)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Total Leads</div>
+                                    </div>
+                                    <span className="text-2xl">📊</span>
+                                </div>
+                                {leadTrend && (
+                                    <div className={`mt-2 text-sm flex items-center gap-1 ${leadTrend === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        <span>{leadTrend === 'up' ? '↗️' : '↘️'}</span>
+                                        <span>{leadTrend === 'up' ? 'Trending up' : 'Trending down'} vs avg</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="card p-5 border-l-4 border-brand-purple">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className={`text-3xl font-bold ${c.cpl > 50 ? 'text-red-400' : c.cpl > 35 ? 'text-amber-400' : 'text-white'}`}>{fmtD(c.cpl)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Cost Per Lead</div>
+                                    </div>
+                                    <span className="text-2xl">📈</span>
+                                </div>
+                                {cplTrend && (
+                                    <div className={`mt-2 text-sm flex items-center gap-1 ${cplTrend === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        <span>{cplTrend === 'up' ? '↘️' : '↗️'}</span>
+                                        <span>{cplTrend === 'up' ? 'Improving!' : 'Increasing'}</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="card p-5 border-l-4 border-brand-purple">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="text-3xl font-bold text-brand-purple">{fmtN(c.appts)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Appointments</div>
+                                    </div>
+                                    <span className="text-2xl">📅</span>
+                                </div>
+                                {c.leads > 0 && (
+                                    <div className="mt-2 text-sm text-slate-400">
+                                        {(c.appts / c.leads * 100).toFixed(1)}% conversion
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Last 3 Days / Last 7 Days Performance */}
+                    {/* Quick Actions */}
+                    <QuickActions c={c} s={s} />
+
+                    {/* Smart Insights */}
+                    <SmartInsightsPanel c={c} s={s} />
+
+                    {/* Recent Performance - Last 3/7 Days */}
                     <div className="grid md:grid-cols-2 gap-6">
-                        <div className="card p-5 border-l-4 border-amber-500">
-                            <div className="section-title">📊 Last 3 Days</div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><div className="text-2xl font-bold text-white">{fmtN(c.last3DaySellerLeads + c.last3DayBuyerLeads)}</div><div className="text-xs text-slate-400">Leads</div></div>
-                                <div><div className="text-2xl font-bold text-brand-cyan">{fmtD(c.last3DaySellerCPL || c.last3DayBuyerCPL || 0)}</div><div className="text-xs text-slate-400">CPL</div></div>
+                        <div className="card p-6 border-l-4 border-amber-500">
+                            <div className="section-title mb-4">📊 Last 3 Days</div>
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <div className="text-3xl font-bold text-white">{fmtN(last3DayLeads)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">Leads</div>
+                                    {last3DayLeads === 0 && c.days >= 3 && (
+                                        <div className="mt-2 text-xs text-amber-400">⚠️ No leads</div>
+                                    )}
+                                </div>
+                                <div>
+                                    <div className="text-3xl font-bold text-brand-cyan">{fmtD(c.last3DaySellerCPL || c.last3DayBuyerCPL || 0)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">CPL</div>
+                                </div>
                             </div>
                         </div>
-                        <div className="card p-5 border-l-4 border-brand-cyan">
-                            <div className="section-title">📈 Last 7 Days</div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><div className="text-2xl font-bold text-white">{fmtN(c.last7DaySellerLeads + c.last7DayBuyerLeads)}</div><div className="text-xs text-slate-400">Leads</div></div>
-                                <div><div className="text-2xl font-bold text-brand-cyan">{fmtD(c.last7DaySellerCPL || c.last7DayBuyerCPL || 0)}</div><div className="text-xs text-slate-400">CPL</div></div>
+                        <div className="card p-6 border-l-4 border-brand-cyan">
+                            <div className="section-title mb-4">📈 Last 7 Days</div>
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <div className="text-3xl font-bold text-white">{fmtN(last7DayLeads)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">Leads</div>
+                                </div>
+                                <div>
+                                    <div className="text-3xl font-bold text-brand-cyan">{fmtD(last7CPL)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">CPL</div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Alerts */}
-                    {(s?.duePayment?.includes('OVERDUE') || s?.redFlags || s?.unresolvedConcerns || (c.last3DaySellerLeads + c.last3DayBuyerLeads === 0 && c.days >= 3)) && (
-                        <div className="space-y-2">
-                            {(c.last3DaySellerLeads + c.last3DayBuyerLeads === 0 && c.days >= 3) && <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20"><span className="text-amber-400 font-semibold">⚠️ NO LEADS IN LAST 3 DAYS</span> <span className="text-slate-300 ml-2">Check ad account status</span></div>}
-                            {s?.duePayment?.includes('OVERDUE') && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20"><span className="text-red-400 font-semibold">💳 PAYMENT OVERDUE</span></div>}
-                            {s?.redFlags && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20"><span className="text-red-400 font-semibold">🚩 Red Flags:</span> <span className="text-slate-300 ml-2">{s.redFlags}</span></div>}
-                            {s?.unresolvedConcerns && <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20"><span className="text-amber-400 font-semibold">⚠️ Concerns:</span> <span className="text-slate-300 ml-2">{s.unresolvedConcerns}</span></div>}
+                    {/* Performance Tabs - Seller/Buyer/Other/Deals */}
+                    <PerformanceTabs c={c} />
+
+                    {/* Collapsible Sections for Additional Details */}
+                    <CollapsibleSection
+                        title="CSM & Client Status"
+                        icon="👤"
+                        summary={`${s?.csmRep || 'No CSM'} • ${s?.status || 'Status unknown'} • MRR: ${s?.mrr || '—'}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="CSM Rep" value={s?.csmRep} highlight color="text-brand-purple" icon="👤"/>
+                            <DataRow label="Status" value={s?.status} icon="📋"/>
+                            <DataRow label="Concern" value={s?.concern} icon="⚠️"/>
+                            <DataRow label="Referral" value={s?.referral} icon="🤝"/>
+                            <DataRow label="Testimonial" value={s?.testimonial} icon="⭐"/>
+                            <DataRow label="Lender" value={s?.lender} icon="🏦"/>
+                            <DataRow label="Last CSM Note" value={s?.lastCsmNote} icon="📝"/>
+                            <DataRow label="Upcoming CSM Date" value={s?.upcomingCsmDate} icon="📅"/>
                         </div>
-                    )}
+                    </CollapsibleSection>
 
-                    {/* CSM & Status */}
-                    <div className="grid lg:grid-cols-2 gap-6">
-                        <Section title="👤 CSM & Status">
-                            <DataRow label="CSM Rep" value={s?.csmRep} highlight color="text-brand-purple"/>
-                            <DataRow label="Status" value={s?.status}/>
-                            <DataRow label="Concern" value={s?.concern}/>
-                            <DataRow label="Referral" value={s?.referral}/>
-                            <DataRow label="Testimonial" value={s?.testimonial}/>
-                            <DataRow label="Lender" value={s?.lender}/>
-                            <DataRow label="Last CSM Note" value={s?.lastCsmNote}/>
-                            <DataRow label="Upcoming CSM Date" value={s?.upcomingCsmDate}/>
-                        </Section>
+                    <CollapsibleSection
+                        title="Client & Contract Details"
+                        icon="📋"
+                        summary={`${s?.state || c.state || 'No state'} • ${s?.contractCategory || 'No category'} • Days Left: ${s?.daysLeft || '—'}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="State" value={s?.state || c.state} icon="📍"/>
+                            <DataRow label="Campaign" value={s?.campaign || c.campaign} icon="🎯"/>
+                            <DataRow label="Contract Category" value={s?.contractCategory} highlight icon="📄"/>
+                            <DataRow label="MRR" value={s?.mrr} highlight color="text-emerald-400" icon="💰"/>
+                            <DataRow label="Fulfilled" value={s?.fulfilled} highlight color="text-emerald-400" icon="✅"/>
+                            <DataRow label="Days Left" value={s?.daysLeft} highlight color={pn(s?.daysLeft) < 0 ? 'text-red-400' : 'text-brand-cyan'} icon="⏳"/>
+                            <DataRow label="Due Payment" value={s?.duePayment} highlight color={s?.duePayment?.includes('OVERDUE') ? 'text-red-400' : 'text-emerald-400'} icon="💳"/>
+                            <DataRow label="Spanish" value={s?.spanish} icon="🌐"/>
+                        </div>
+                    </CollapsibleSection>
 
-                        <Section title="📋 Client Details">
-                            <DataRow label="State" value={s?.state || c.state}/>
-                            <DataRow label="Campaign" value={s?.campaign || c.campaign}/>
-                            <DataRow label="Contract Category" value={s?.contractCategory} highlight/>
-                            <DataRow label="MRR" value={s?.mrr} highlight color="text-emerald-400"/>
-                            <DataRow label="Fulfilled" value={s?.fulfilled} highlight color="text-emerald-400"/>
-                            <DataRow label="Days Left" value={s?.daysLeft} highlight color={pn(s?.daysLeft) < 0 ? 'text-red-400' : 'text-brand-cyan'}/>
-                            <DataRow label="Due Payment" value={s?.duePayment} highlight color={s?.duePayment?.includes('OVERDUE') ? 'text-red-400' : 'text-emerald-400'}/>
-                            <DataRow label="Spanish" value={s?.spanish}/>
-                        </Section>
-                    </div>
-
-                    {/* Key Dates */}
-                    <Section title="📅 Key Dates">
+                    <CollapsibleSection
+                        title="Key Dates"
+                        icon="📅"
+                        summary={`Paid: ${clean(s?.paidDate)} • Ads Live: ${clean(s?.adLiveDate)}`}
+                        defaultOpen={false}
+                    >
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">💰</div><div className="text-lg font-bold text-white">{clean(s?.paidDate)}</div><div className="text-xs text-slate-400">Paid</div></div>
-                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">🚀</div><div className="text-lg font-bold text-white">{clean(s?.onboardedDate)}</div><div className="text-xs text-slate-400">Onboarded</div></div>
-                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">📞</div><div className="text-lg font-bold text-white">{clean(s?.launchCallDate)}</div><div className="text-xs text-slate-400">Launch Call</div></div>
-                            <div className="bg-dark-800 rounded-xl p-4 text-center"><div className="text-2xl mb-1">📢</div><div className="text-lg font-bold text-white">{clean(s?.adLiveDate)}</div><div className="text-xs text-slate-400">Ads Live</div></div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">💰</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.paidDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Paid</div>
+                            </div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">🚀</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.onboardedDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Onboarded</div>
+                            </div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">📞</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.launchCallDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Launch Call</div>
+                            </div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">📢</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.adLiveDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Ads Live</div>
+                            </div>
                         </div>
-                    </Section>
+                    </CollapsibleSection>
 
-                    {/* Seller Performance */}
-                    <Section title="🏠 Seller Performance" cols={2}>
-                        <DataRow label="Lifetime Seller Leads" value={fmtN(c.sellerLeads)} highlight color="text-brand-cyan"/>
-                        <DataRow label="Lifetime Seller CPL" value={fmtD(c.sellerCPL)} highlight/>
-                        <DataRow label="Last 7 Day Seller Leads" value={fmtN(c.last7DaySellerLeads)}/>
-                        <DataRow label="Last 7 Day Seller CPL" value={fmtD(c.last7DaySellerCPL)}/>
-                        <DataRow label="Last 3 Day Seller Leads" value={fmtN(c.last3DaySellerLeads)}/>
-                        <DataRow label="Last 3 Day Seller CPL" value={fmtD(c.last3DaySellerCPL)}/>
-                        <DataRow label="Seller Appts (Total)" value={fmtN(c.sellerAppts)} highlight color="text-brand-purple"/>
-                        <DataRow label="Seller Appts (7 Days)" value={fmtN(c.sellerAppts7)}/>
-                        <DataRow label="Avg Seller Appts/Week" value={c.avgSellerApptsWeek?.toFixed(1)}/>
-                        <DataRow label="Seller Lead→Appt Ratio" value={fmtP(c.sellerLeadToAppt)}/>
-                        <DataRow label="Cost Per Seller Appt" value={fmtD(c.costPerSellerAppt)}/>
-                    </Section>
+                    <CollapsibleSection
+                        title="Ad Account & Spend"
+                        icon="📢"
+                        summary={`${c.adAccount || 'No account'} • ${fmt(c.spend)} total • ${c.days} days running`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="Ad Account" value={c.adAccount} highlight icon="📱"/>
+                            <DataRow label="Daily Set Ad Spend" value={fmtD(c.dailySetAdSpend)} icon="💵"/>
+                            <DataRow label="Total Ad Spend" value={fmt(c.spend)} highlight color="text-brand-cyan" icon="💰"/>
+                            <DataRow label="Ad Spend Per Month" value={fmt(c.spendPerMonth)} icon="📆"/>
+                            <DataRow label="Ad Spend Per Day" value={fmtD(c.spendPerDay)} icon="📅"/>
+                            <DataRow label="Days Running" value={c.days} icon="⏱️"/>
+                            <DataRow label="Weeks Running" value={c.weeks} icon="📊"/>
+                            <DataRow label="Months Running" value={c.months} icon="🗓️"/>
+                            <DataRow label="Calling Status" value={c.callingStatus} icon="📞"/>
+                            <DataRow label="Leady Sync" value={c.leadySync} icon="🔗"/>
+                        </div>
+                    </CollapsibleSection>
 
-                    {/* Buyer Performance */}
-                    <Section title="🛒 Buyer Performance" cols={2}>
-                        <DataRow label="Lifetime Buyer Leads" value={fmtN(c.buyerLeads)} highlight color="text-brand-cyan"/>
-                        <DataRow label="Lifetime Buyer CPL" value={fmtD(c.buyerCPL)} highlight/>
-                        <DataRow label="Last 7 Day Buyer Leads" value={fmtN(c.last7DayBuyerLeads)}/>
-                        <DataRow label="Last 7 Day Buyer CPL" value={fmtD(c.last7DayBuyerCPL)}/>
-                        <DataRow label="Last 3 Day Buyer Leads" value={fmtN(c.last3DayBuyerLeads)}/>
-                        <DataRow label="Last 3 Day Buyer CPL" value={fmtD(c.last3DayBuyerCPL)}/>
-                        <DataRow label="Buyer Appts (Total)" value={fmtN(c.buyerAppts)} highlight color="text-brand-purple"/>
-                        <DataRow label="Buyer Appts (7 Days)" value={fmtN(c.buyerAppts7)}/>
-                        <DataRow label="Avg Buyer Appts/Week" value={c.avgBuyerApptsWeek?.toFixed(1)}/>
-                        <DataRow label="Buyer Lead→Appt Ratio" value={fmtP(c.buyerLeadToAppt)}/>
-                        <DataRow label="Cost Per Buyer Appt" value={fmtD(c.costPerBuyerAppt)}/>
-                    </Section>
-
-                    {/* Other Leads & Deals */}
-                    <div className="grid lg:grid-cols-2 gap-6">
-                        <Section title="📊 Other Leads">
-                            <DataRow label="Listing Leads" value={fmtN(c.listingLeads)} highlight/>
-                            <DataRow label="Mortgage Leads" value={fmtN(c.mortgageLeads)}/>
-                            <DataRow label="Agent Attraction" value={fmtN(c.agentAttraction)}/>
-                        </Section>
-
-                        <Section title="🎯 Deals & Conversions">
-                            <DataRow label="Potential Deals" value={fmtN(c.deals)} highlight color="text-emerald-400"/>
-                            <DataRow label="Listings" value={fmtN(c.listings)} highlight color="text-amber-400"/>
-                            <DataRow label="Buyer Signed" value={fmtN(c.buyerSigned)} highlight color="text-emerald-400"/>
-                            <DataRow label="Leads/Listing" value={c.leadsPerListing?.toFixed(1)}/>
-                            <DataRow label="Leads/Potential Deal" value={c.leadsPerDeal?.toFixed(1)}/>
-                            <DataRow label="Leads/Signed Buyer" value={c.leadsPerSignedBuyer?.toFixed(1)}/>
-                        </Section>
-                    </div>
-
-                    {/* Ad Account Info */}
-                    <Section title="📢 Ad Account & Spend" cols={2}>
-                        <DataRow label="Ad Account" value={c.adAccount} highlight/>
-                        <DataRow label="Daily Set Ad Spend" value={fmtD(c.dailySetAdSpend)}/>
-                        <DataRow label="Total Ad Spend" value={fmt(c.spend)} highlight color="text-brand-cyan"/>
-                        <DataRow label="Ad Spend Per Month" value={fmt(c.spendPerMonth)}/>
-                        <DataRow label="Ad Spend Per Day" value={fmtD(c.spendPerDay)}/>
-                        <DataRow label="Days Running" value={c.days}/>
-                        <DataRow label="Weeks Running" value={c.weeks}/>
-                        <DataRow label="Months Running" value={c.months}/>
-                        <DataRow label="Calling Status" value={c.callingStatus}/>
-                        <DataRow label="Leady Sync" value={c.leadySync}/>
-                    </Section>
-
-                    {/* Performance from Setup Timing */}
-                    <div className="grid lg:grid-cols-2 gap-6">
-                        <Section title="📊 Performance (Setup Timing)">
-                            <DataRow label="Closings" value={s?.closings} highlight color="text-emerald-400"/>
-                            <DataRow label="Signed" value={s?.signed} highlight color="text-emerald-400"/>
-                            <DataRow label="SHU%" value={s?.shuPercent}/>
-                            <DataRow label="Behind Schedule" value={s?.behindSchedule}/>
-                            <DataRow label="Missing" value={s?.missing}/>
-                        </Section>
-
-                        <Section title="📞 Calling & Leads (Setup Timing)">
-                            <DataRow label="Calling" value={s?.calling}/>
-                            <DataRow label="Dialer" value={s?.dialer}/>
-                            <DataRow label="S Leads" value={s?.sLeads} highlight color="text-brand-cyan"/>
-                            <DataRow label="B Leads" value={s?.bLeads} highlight color="text-brand-cyan"/>
-                            <DataRow label="CPL" value={s?.cpl}/>
-                            <DataRow label="CPA" value={s?.cpa}/>
-                        </Section>
-                    </div>
+                    <CollapsibleSection
+                        title="Setup Timing Performance"
+                        icon="📊"
+                        summary={`Closings: ${s?.closings || '—'} • Signed: ${s?.signed || '—'}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="Closings" value={s?.closings} highlight color="text-emerald-400" icon="🏆"/>
+                            <DataRow label="Signed" value={s?.signed} highlight color="text-emerald-400" icon="✍️"/>
+                            <DataRow label="SHU%" value={s?.shuPercent} icon="📈"/>
+                            <DataRow label="Behind Schedule" value={s?.behindSchedule} icon="⏰"/>
+                            <DataRow label="Missing" value={s?.missing} icon="❓"/>
+                            <DataRow label="Calling" value={s?.calling} icon="📞"/>
+                            <DataRow label="Dialer" value={s?.dialer} icon="📱"/>
+                            <DataRow label="S Leads" value={s?.sLeads} highlight color="text-brand-cyan" icon="🏠"/>
+                            <DataRow label="B Leads" value={s?.bLeads} highlight color="text-brand-cyan" icon="🛒"/>
+                            <DataRow label="CPL" value={s?.cpl} icon="💲"/>
+                            <DataRow label="CPA" value={s?.cpa} icon="💰"/>
+                        </div>
+                    </CollapsibleSection>
                 </div>
             );
         };
