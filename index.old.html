@@ -1,0 +1,2365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VAM Client Success Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { 950: '#000000', 900: '#0a0a0a', 800: '#171717', 700: '#262626', 600: '#404040' },
+                        light: { 50: '#fafafa', 100: '#f5f5f5', 200: '#e5e5e5', 300: '#d4d4d4', 400: '#a3a3a3' },
+                        brand: { cyan: '#06b6d4', purple: '#8b5cf6', blue: '#3b82f6' }
+                    },
+                    fontFamily: { sans: ['Inter', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Dark Mode (default) */
+        body.dark { background: #000000; color: #f5f5f5; }
+        body.dark .card { background: #0a0a0a; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; }
+        body.dark .sidebar { background: #0a0a0a; border-color: #262626; }
+        body.dark .header-bar { background: rgba(10,10,10,0.9); border-color: #262626; }
+        body.dark .input-field { background: #171717; border-color: #262626; color: #f5f5f5; }
+        body.dark .text-primary { color: #f5f5f5; }
+        body.dark .text-secondary { color: #a3a3a3; }
+        body.dark .text-muted { color: #525252; }
+        body.dark .hover-bg:hover { background: #171717; }
+        body.dark .divider { border-color: #262626; }
+        
+        /* Light Mode */
+        body.light { background: #ffffff; color: #171717; }
+        body.light .card { background: #fafafa; border: 1px solid #e5e5e5; border-radius: 12px; }
+        body.light .sidebar { background: #fafafa; border-color: #e5e5e5; }
+        body.light .header-bar { background: rgba(250,250,250,0.9); border-color: #e5e5e5; }
+        body.light .input-field { background: #ffffff; border-color: #d4d4d4; color: #171717; }
+        body.light .text-primary { color: #171717; }
+        body.light .text-secondary { color: #525252; }
+        body.light .text-muted { color: #a3a3a3; }
+        body.light .hover-bg:hover { background: #f5f5f5; }
+        body.light .divider { border-color: #e5e5e5; }
+        body.light .tab-active { background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(139,92,246,0.1)); }
+        
+        .tab-active { background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(139,92,246,0.15)); border-left: 3px solid #06b6d4; }
+        .scrollbar::-webkit-scrollbar { width: 4px; }
+        .scrollbar::-webkit-scrollbar-thumb { background: #404040; border-radius: 2px; }
+        .section-title { font-size: 0.75rem; font-weight: 600; color: #8b5cf6; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+    </style>
+</head>
+<body class="min-h-screen dark">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, createContext, useContext } = React;
+
+        const SUPABASE_URL = 'https://ecmhhonjazfbletyvncw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbWhob25qYXpmYmxldHl2bmN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5NDMwMjYsImV4cCI6MjA4MTUxOTAyNn0.3LZ8dAOX_ZpoUNkgY_jSeC10SaCknfPfBaZsDRjFt7c';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const AuthContext = createContext(null);
+        const ThemeContext = createContext(null);
+        const useAuth = () => useContext(AuthContext);
+
+        const URLS = {
+            clientAdsPerformance: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=964722332&single=true&output=csv',
+            setupTiming: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv'
+        };
+
+        const pn = v => parseFloat(String(v||'0').replace(/[$,%]/g,'').replace(/,/g,''))||0;
+        const fmt = v => '$'+(pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+        const fmtD = v => '$'+(pn(v)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+        const fmtP = v => (pn(v)).toFixed(1)+'%';
+        const clean = v => (v && v.toString().trim()) ? v.toString().trim() : '—';
+        const getDisplayName = (email, user) => {
+            // First try to get full_name from user metadata
+            if (user?.user_metadata?.full_name) return user.user_metadata.full_name;
+            if (user?.user_metadata?.name) return user.user_metadata.name;
+            // Fall back to email parsing
+            return email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
+        };
+
+        // Map Client Ads Performance sheet - headers in row 2 (A2:BA2)
+        const mapClient = r => {
+            const sellerLeads = pn(r['Lifetime Seller Leads']);
+            const buyerLeads = pn(r['Lifetime Buyer Leads']);
+            const listingLeads = pn(r['Listing Leads']);
+            const totalLeads = sellerLeads + buyerLeads + listingLeads;
+            const spend = pn(r['Total Ad Spend']);
+            const sellerAppts7 = pn(r['Seller Appts in the Last 7 Days']);
+            const buyerAppts7 = pn(r['Buyer Appts in the Last 7 Days']);
+            
+            return {
+                client: r['Client']||'', 
+                adAccount: r['Ad Account Name']||'',
+                dailySetAdSpend: pn(r['Daily Set Ad Spend']),
+                state: r['State']||'', 
+                campaign: r['CAMPAIGN']||'',
+                callingStatus: r['Calling/Non-calling']||'',
+                startDate: r['CORRECT SETUP TIMING START DATE']||r['OLD Start Date']||'',
+                leadySync: r['Leady Sync']||'',
+                months: pn(r['Months Running']),
+                weeks: pn(r['Weeks Running']),
+                days: pn(r['Days Running']),
+                spend: spend, 
+                spendPerMonth: pn(r['Ad Spend Per Month']),
+                spendPerDay: pn(r['Ad Spend Per Day']),
+                // Last 3 Days - Seller
+                last3DaySellerLeads: pn(r['Last 3 Day Seller Leads']),
+                last3DaySellerSpend: pn(r['Last 3 Days Seller Ad Spend']),
+                last3DaySellerCPL: pn(r['Last 3 Days Seller CPL']),
+                // Last 7 Days - Seller
+                last7DaySellerLeads: pn(r['Last 7 Day Seller Leads']),
+                last7DaySellerSpend: pn(r['Last 7 Day Seller Spend']),
+                last7DaySellerCPL: pn(r['Last 7 Days Seller CPL']),
+                // Lifetime - Seller
+                sellerLeads: sellerLeads,
+                sellerSpend: pn(r['Lifetime Seller Ad Spend']),
+                sellerCPL: pn(r['Lifetime Seller CPL']),
+                // Last 3 Days - Buyer
+                last3DayBuyerLeads: pn(r['Last 3 Day Buyer Leads']),
+                last3DayBuyerSpend: pn(r['Last 3 Days Buyer Ad Spend']),
+                last3DayBuyerCPL: pn(r['Last 3 Days Buyer CPL']),
+                // Last 7 Days - Buyer
+                last7DayBuyerLeads: pn(r['Last 7 Day Buyer Leads']),
+                last7DayBuyerSpend: pn(r['Last 7 Day Buyer Spend']),
+                last7DayBuyerCPL: pn(r['Last 7 Days Buyer CPL']),
+                // Lifetime - Buyer
+                buyerLeads: buyerLeads,
+                buyerSpend: pn(r['Lifetime Buyer Ad Spend']),
+                buyerCPL: pn(r['Lifetime Buyer CPL']),
+                // Other lead types
+                listingLeads: listingLeads,
+                mortgageLeads: pn(r['Mortgage Leads']),
+                agentAttraction: pn(r['Agent Attraction']),
+                // Appointments
+                appts: pn(r['Total Appts (Seller + Buyers)']),
+                sellerAppts: pn(r['Total Seller Appts']),
+                sellerAppts7: sellerAppts7,
+                avgSellerApptsWeek: pn(r['Avg Seller Appts per Week']),
+                sellerLeadToAppt: pn(r['Seller Lead To Appt Ratio']),
+                costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appts']),
+                buyerAppts: pn(r['Total Buyer Appts']),
+                buyerAppts7: buyerAppts7,
+                avgBuyerApptsWeek: pn(r['Avg Buyer Appts per Week']),
+                buyerLeadToAppt: pn(r['Buyer Lead To Appt Ratio']),
+                costPerBuyerAppt: pn(r['Ad Spend Cost Per Buyer Appts']),
+                // Deals
+                deals: pn(r['Potential Deals']),
+                listings: pn(r['Listing']),
+                buyerSigned: pn(r['Buyer Signed']),
+                leadsPerListing: pn(r['Leads/Listing']),
+                leadsPerDeal: pn(r['Leads/Potential Deal']),
+                leadsPerSignedBuyer: pn(r['Leads/Signed Buyer']),
+                // Computed totals
+                leads: totalLeads,
+                cpl: totalLeads > 0 ? spend / totalLeads : 0,
+                appts7: sellerAppts7 + buyerAppts7,
+                last3DayLeads: pn(r['Last 3 Day Seller Leads']) + pn(r['Last 3 Day Buyer Leads']),
+                last7DayLeads: pn(r['Last 7 Day Seller Leads']) + pn(r['Last 7 Day Buyer Leads'])
+            };
+        };
+
+        // Full setup timing mapping
+        const mapSetupTiming = r => ({
+            client: r['VAM'] || '', csmRep: r['CSM'] || '', lastForm: r['Last Form'] || '', lastFormDate: r['Date'] || '',
+            status: r['Status'] || '', concern: r['Concern'] || '', referral: r['Referral'] || '', testimonial: r['Testmonial'] || '',
+            lender: r['Status_1'] || '', state: r['State'] || '', campaign: r['Campaign'] || '', contractCategory: r['Contract Category'] || '',
+            spanish: r['Spanish'] || '', mrr: r['MRR'] || '', fulfilled: r['Fullfilled'] || '', info: r['Info'] || '',
+            daysLeft: r['Days left'] || '', duePayment: r['Due Payment'] || '', lastCsmNote: r['Last CSM Rep - Note - date'] || '',
+            upcomingCsmDate: r['upcoming CSM rep - date'] || '', paidDate: r['Paid date'] || '', onboardedDate: r['Onboarded date'] || '',
+            launchCallDate: r['Launch call date'] || '', adLiveDate: r[' Ad Live date'] || r['Ad Live date'] || '',
+            billingCycle: r['Billing cycle'] || '', freeTrialDays: r['Free trial Days'] || '', adsOnPauseDays: r['ADs on pause total days'] || '',
+            closings: r['Closings'] || '', signed: r['Signed'] || '', appts: r[' Appts '] || r['Appts'] || '',
+            behindSchedule: r['Behind schedule'] || '', missing: r['Missing'] || '', shuPercent: r['SHU%'] || '',
+            calling: r['Calling'] || '', dialer: r['Dialer'] || '', sLeads: r['S Leads'] || '', bLeads: r['B Leads'] || '',
+            cpl: r['CPL'] || '', cpa: r['CPA'] || '', sAppts: r['(S)appts'] || '', bAppts: r['(B)appts'] || '',
+            shu: r['SHU'] || '', ns: r['NS'] || '', stageOnCrm: r['Stage on CRM'] || '', timezone: r['Timezone'] || '',
+            onboardingRep: r['Rep'] || '', redFlags: r['Red flags'] || '', crmFees: r['CRM Fees'] || '',
+            adSpendFees: r['ad spend fees'] || '', responsiveness: r['Responsivness'] || '', leadGenExp: r['Lead gen exp'] || '',
+            callingExpectations: r['Calling expectaions'] || '', fathom1: r['Fathom'] || '', adsOnPauseDaysDetail: r['ads on pause days'] || '',
+            adAccountName: r['Ad Account name'] || '', adSpend: r['Ad Spend'] || '', radius: r['radius'] || '',
+            city: r['City'] || '', target: r['Target'] || '', launch: r['Launch'] || '', adsRep: r['Rep'] || '',
+            readiness: r['Readiness'] || '', personality: r['Personality'] || '', expectations: r['Expectations'] || '',
+            unresolvedConcerns: r['Unresolved Concerns'] || '', firstCheckin: r['1st Check-in'] || '', firstCsm: r['1st CSM'] || '',
+            revenueContracted: r['Revenue Contracted'] || '', contractLength: r['Contract length'] || '',
+            moPaymentsCollected: r['mo payments collected'] || '', billingAdjust: r['Billing adjust'] || '',
+            platform: r['Platform'] || '', nameEmail: r['Name/email'] || '', contractNotes: r['contract notes'] || '',
+            paymentNotes: r['Payment notes'] || '', amountCollected: r['Amount collected'] || '', b2b: r['B2B'] || '',
+            closedOn: r['Closed on'] || '', commission: r['commision'] || '', setterCloser: r['Setter & Closer'] || '',
+        });
+
+        const getHealthScore = (c, s) => {
+            if (!c) return 0;
+            let score = 50;
+            if (c.cpl <= 15) score += 25; else if (c.cpl <= 25) score += 20; else if (c.cpl <= 35) score += 10; else if (c.cpl <= 50) score += 5;
+            if (c.appts7 >= 5) score += 15; else if (c.appts7 >= 3) score += 10; else if (c.appts7 >= 1) score += 5;
+            if (c.deals > 0 || c.listings > 0) score += 10;
+            if (s?.duePayment?.includes('OVERDUE')) score -= 15;
+            if (s?.redFlags) score -= 10;
+            return Math.max(0, Math.min(100, score));
+        };
+
+        const getHealthColor = (score) => {
+            if (score >= 80) return { text: 'text-emerald-400', bg: 'bg-emerald-500', label: 'Healthy' };
+            if (score >= 60) return { text: 'text-amber-400', bg: 'bg-amber-500', label: 'Needs Attention' };
+            return { text: 'text-red-400', bg: 'bg-red-500', label: 'At Risk' };
+        };
+
+        // UPDATED TABS - Removed "Weekly Updates" and "GHL Help"
+        const tabs = [
+            { id: 'redflags', name: 'Red Flags', icon: '🚩', desc: 'Clients needing attention' },
+            { id: 'health', name: 'Client Health', icon: '❤️', desc: 'Overview of client status and metrics' },
+            { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
+        ];
+
+        // ========== LOGIN ==========
+        const LoginPage = ({ onLogin }) => {
+            const [isSignUp, setIsSignUp] = useState(false);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [fullName, setFullName] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [success, setSuccess] = useState('');
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                setSuccess('');
+                
+                try {
+                    if (isSignUp) {
+                        // Sign up new user
+                        const result = await supabase.auth.signUp({ 
+                            email, 
+                            password,
+                            options: {
+                                data: {
+                                    full_name: fullName,
+                                    name: fullName
+                                }
+                            }
+                        });
+                        if (result.error) throw result.error;
+                        
+                        // Check if email confirmation is required
+                        if (result.data?.user?.identities?.length === 0) {
+                            setError('This email is already registered. Please sign in instead.');
+                        } else {
+                            setSuccess('Account created! Please check your email to confirm, then sign in.');
+                            setIsSignUp(false);
+                        }
+                    } else {
+                        // Sign in existing user
+                        const result = await supabase.auth.signInWithPassword({ email, password });
+                        if (result.error) throw result.error;
+                        onLogin(result.data.user);
+                    }
+                } catch (err) { 
+                    setError(err.message); 
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="card p-8 w-full max-w-md">
+                        <div className="text-center mb-8">
+                            <h1 className="text-3xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Client Success Hub</h1>
+                            <p className="text-slate-500 mt-2">{isSignUp ? 'Create your account' : 'Sign in to continue'}</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {isSignUp && (
+                                <input 
+                                    type="text" 
+                                    value={fullName} 
+                                    onChange={e => setFullName(e.target.value)} 
+                                    className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" 
+                                    placeholder="Full Name" 
+                                    required 
+                                />
+                            )}
+                            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Email" required />
+                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" placeholder="Password" required minLength={6} />
+                            {error && <div className="p-3 rounded-xl bg-red-500/10 text-red-400 text-sm">{error}</div>}
+                            {success && <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 text-sm">{success}</div>}
+                            <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl">
+                                {loading ? (isSignUp ? 'Creating Account...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
+                            </button>
+                        </form>
+                        <div className="mt-6 text-center">
+                            <button 
+                                onClick={() => { setIsSignUp(!isSignUp); setError(''); setSuccess(''); }} 
+                                className="text-brand-cyan hover:text-brand-purple text-sm transition-colors"
+                            >
+                                {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== DATA ROW & SECTION COMPONENTS ==========
+        const DataRow = ({label, value, highlight, color, trend, icon}) => {
+            const displayVal = clean(value);
+            const isEmpty = displayVal === '—';
+            const trendIcon = trend === 'up' ? '↗️' : trend === 'down' ? '↘️' : null;
+            const trendColor = trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : '';
+            return (
+                <div className="flex justify-between items-center py-2.5 border-b border-dark-700/50 last:border-0">
+                    <span className="text-slate-400 text-sm flex items-center gap-2">
+                        {icon && <span className="text-base">{icon}</span>}
+                        {label}
+                    </span>
+                    <span className={`text-sm font-medium flex items-center gap-2 ${isEmpty ? 'text-slate-600' : highlight ? (color || 'text-brand-cyan') : 'text-white'}`}>
+                        {displayVal}
+                        {trendIcon && <span className={`text-xs ${trendColor}`}>{trendIcon}</span>}
+                    </span>
+                </div>
+            );
+        };
+
+        const Section = ({title, children, cols = 1}) => (
+            <div className="card p-6">
+                <div className="section-title mb-4">{title}</div>
+                <div className={cols === 2 ? 'grid md:grid-cols-2 gap-x-8 gap-y-1' : ''}>{children}</div>
+            </div>
+        );
+
+        // ========== COLLAPSIBLE SECTION COMPONENT ==========
+        const CollapsibleSection = ({title, summary, children, defaultOpen = false, icon}) => {
+            const [isOpen, setIsOpen] = useState(defaultOpen);
+            return (
+                <div className="card overflow-hidden">
+                    <button
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="w-full p-5 flex items-center justify-between hover:bg-dark-800/50 transition-colors"
+                    >
+                        <div className="flex items-center gap-3">
+                            {icon && <span className="text-xl">{icon}</span>}
+                            <div className="text-left">
+                                <div className="font-semibold text-white">{title}</div>
+                                {summary && <div className="text-sm text-slate-400 mt-1">{summary}</div>}
+                            </div>
+                        </div>
+                        <span className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▼</span>
+                    </button>
+                    {isOpen && (
+                        <div className="px-6 pb-6 pt-2 border-t border-dark-700">
+                            {children}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ========== PRIORITY ACTION BANNER ==========
+        const PriorityActionBanner = ({c, s}) => {
+            if (!c) return null;
+
+            // Determine the highest priority action
+            const actions = [];
+
+            // Payment overdue - highest priority
+            if (s?.duePayment?.includes('OVERDUE')) {
+                actions.push({
+                    priority: 1,
+                    icon: '💳',
+                    title: 'Payment Overdue',
+                    description: 'Reach out to discuss payment status and resolve billing issues.',
+                    action: 'Schedule Payment Call',
+                    color: 'red'
+                });
+            }
+
+            // No leads in 3 days
+            const last3DayLeads = (c.last3DaySellerLeads || 0) + (c.last3DayBuyerLeads || 0);
+            if (last3DayLeads === 0 && c.days >= 3) {
+                actions.push({
+                    priority: 2,
+                    icon: '📉',
+                    title: 'No Leads in 3 Days',
+                    description: 'Check ad account status, budget delivery, and campaign performance.',
+                    action: 'Review Ad Account',
+                    color: 'amber'
+                });
+            }
+
+            // High CPL
+            if (c.cpl > 50) {
+                actions.push({
+                    priority: 3,
+                    icon: '📊',
+                    title: 'High Cost Per Lead',
+                    description: `CPL is $${c.cpl.toFixed(2)} (target is under $50). Review ad creative and targeting.`,
+                    action: 'Optimize Campaigns',
+                    color: 'amber'
+                });
+            }
+
+            // No appointments
+            if (c.appts === 0 && c.leads >= 20) {
+                actions.push({
+                    priority: 4,
+                    icon: '📞',
+                    title: 'No Appointments Despite Leads',
+                    description: `${c.leads} leads but no appointments. Check lead quality and follow-up process.`,
+                    action: 'Schedule Quality Call',
+                    color: 'amber'
+                });
+            }
+
+            // Red flags from setup
+            if (s?.redFlags) {
+                actions.push({
+                    priority: 5,
+                    icon: '🚩',
+                    title: 'Red Flags Noted',
+                    description: s.redFlags,
+                    action: 'Address Concerns',
+                    color: 'red'
+                });
+            }
+
+            // If healthy, show positive action
+            if (actions.length === 0) {
+                const score = getHealthScore(c, s);
+                if (score >= 80) {
+                    actions.push({
+                        priority: 10,
+                        icon: '🌟',
+                        title: 'Client Performing Well',
+                        description: 'Great metrics! Consider asking for a testimonial or discussing expansion opportunities.',
+                        action: 'Request Testimonial',
+                        color: 'emerald'
+                    });
+                } else {
+                    actions.push({
+                        priority: 10,
+                        icon: '📋',
+                        title: 'Schedule Regular Check-In',
+                        description: 'No urgent issues. Maintain relationship with a routine check-in call.',
+                        action: 'Schedule Check-In',
+                        color: 'cyan'
+                    });
+                }
+            }
+
+            const topAction = actions.sort((a, b) => a.priority - b.priority)[0];
+            const colorMap = {
+                red: 'border-red-500 bg-red-500/10',
+                amber: 'border-amber-500 bg-amber-500/10',
+                emerald: 'border-emerald-500 bg-emerald-500/10',
+                cyan: 'border-brand-cyan bg-brand-cyan/10'
+            };
+            const textColorMap = {
+                red: 'text-red-400',
+                amber: 'text-amber-400',
+                emerald: 'text-emerald-400',
+                cyan: 'text-brand-cyan'
+            };
+
+            return (
+                <div className={`card p-6 border-l-4 ${colorMap[topAction.color]}`}>
+                    <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-4">
+                            <span className="text-3xl">{topAction.icon}</span>
+                            <div>
+                                <div className="text-xs font-semibold text-brand-purple uppercase tracking-wider mb-1">Priority Action</div>
+                                <h3 className={`text-lg font-bold ${textColorMap[topAction.color]}`}>{topAction.title}</h3>
+                                <p className="text-slate-400 mt-1">{topAction.description}</p>
+                            </div>
+                        </div>
+                        <button className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap ${colorMap[topAction.color]} ${textColorMap[topAction.color]} hover:opacity-80 transition-opacity`}>
+                            {topAction.action}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== HEALTH SCORE CARD ==========
+        const HealthScoreCard = ({c, s}) => {
+            if (!c) return null;
+
+            const score = getHealthScore(c, s);
+            const {text, bg, label} = getHealthColor(score);
+
+            // Calculate component scores
+            const cplScore = c.cpl <= 15 ? 25 : c.cpl <= 25 ? 20 : c.cpl <= 35 ? 10 : c.cpl <= 50 ? 5 : 0;
+            const apptScore = c.appts7 >= 5 ? 15 : c.appts7 >= 3 ? 10 : c.appts7 >= 1 ? 5 : 0;
+            const dealScore = (c.deals > 0 || c.listings > 0) ? 10 : 0;
+            const paymentPenalty = s?.duePayment?.includes('OVERDUE') ? -15 : 0;
+            const flagPenalty = s?.redFlags ? -10 : 0;
+
+            const components = [
+                { name: 'CPL', score: cplScore, max: 25, icon: '💰', status: cplScore >= 20 ? 'good' : cplScore >= 10 ? 'warning' : 'bad' },
+                { name: 'Appointments', score: apptScore, max: 15, icon: '📅', status: apptScore >= 10 ? 'good' : apptScore >= 5 ? 'warning' : 'bad' },
+                { name: 'Deals', score: dealScore, max: 10, icon: '🎯', status: dealScore > 0 ? 'good' : 'warning' },
+                { name: 'Payment', score: paymentPenalty === 0 ? 15 : 0, max: 15, icon: '💳', status: paymentPenalty === 0 ? 'good' : 'bad' },
+            ];
+
+            const statusColors = {
+                good: 'text-emerald-400 bg-emerald-500/20 border-emerald-500/30',
+                warning: 'text-amber-400 bg-amber-500/20 border-amber-500/30',
+                bad: 'text-red-400 bg-red-500/20 border-red-500/30'
+            };
+            const statusIcons = { good: '✓', warning: '⚠', bad: '✗' };
+
+            return (
+                <div className="card p-6">
+                    <div className="flex items-center justify-between mb-6">
+                        <div>
+                            <div className="text-xs font-semibold text-brand-purple uppercase tracking-wider mb-1">Health Score</div>
+                            <div className="flex items-center gap-3">
+                                <span className={`text-4xl font-bold ${text}`}>{score}</span>
+                                <span className="text-slate-500">/100</span>
+                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${text} ${bg}/20`}>{label}</span>
+                            </div>
+                        </div>
+                        <div className="w-24 h-24 relative">
+                            <svg className="w-full h-full transform -rotate-90">
+                                <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" className="text-dark-700" strokeWidth="8"/>
+                                <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" className={text} strokeWidth="8" strokeLinecap="round"
+                                    strokeDasharray={`${score * 2.51} 251`}/>
+                            </svg>
+                            <div className={`absolute inset-0 flex items-center justify-center text-2xl font-bold ${text}`}>{score}</div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {components.map((comp, i) => (
+                            <div key={i} className={`p-3 rounded-xl border ${statusColors[comp.status]} text-center`}>
+                                <div className="text-lg mb-1">{comp.icon}</div>
+                                <div className="text-xs font-medium mb-1">{comp.name}</div>
+                                <div className="flex items-center justify-center gap-1">
+                                    <span className="font-bold">{comp.score}</span>
+                                    <span className="text-xs opacity-60">/{comp.max}</span>
+                                    <span className="ml-1">{statusIcons[comp.status]}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== SMART INSIGHTS PANEL ==========
+        const SmartInsightsPanel = ({c, s}) => {
+            if (!c) return null;
+
+            const insights = [];
+            const last3DayLeads = (c.last3DaySellerLeads || 0) + (c.last3DayBuyerLeads || 0);
+            const last7DayLeads = (c.last7DaySellerLeads || 0) + (c.last7DayBuyerLeads || 0);
+
+            // Lead volume trends
+            if (last7DayLeads > 0 && c.leads > 0) {
+                const weeklyRate = last7DayLeads / 7;
+                const overallRate = c.leads / Math.max(c.days, 1);
+                if (weeklyRate > overallRate * 1.2) {
+                    insights.push({
+                        icon: '📈',
+                        type: 'positive',
+                        text: `Lead volume up ${Math.round((weeklyRate/overallRate - 1) * 100)}% compared to average - campaigns are improving`
+                    });
+                } else if (weeklyRate < overallRate * 0.8) {
+                    insights.push({
+                        icon: '📉',
+                        type: 'warning',
+                        text: `Lead volume down ${Math.round((1 - weeklyRate/overallRate) * 100)}% from average - may need campaign review`
+                    });
+                }
+            }
+
+            // Leads but no appointments
+            if (c.leads >= 30 && c.appts === 0) {
+                insights.push({
+                    icon: '🔍',
+                    type: 'warning',
+                    text: `${c.leads} leads but no appointments - investigate lead quality or follow-up process`
+                });
+            } else if (c.leads >= 50 && c.appts > 0 && c.leads / c.appts > 20) {
+                insights.push({
+                    icon: '📊',
+                    type: 'info',
+                    text: `Lead-to-appointment ratio is 1:${Math.round(c.leads / c.appts)} - below typical 1:10 benchmark`
+                });
+            }
+
+            // CPL trends
+            const last7CPL = c.last7DaySellerCPL || c.last7DayBuyerCPL || 0;
+            if (last7CPL > 0 && c.cpl > 0) {
+                if (last7CPL < c.cpl * 0.85) {
+                    insights.push({
+                        icon: '💰',
+                        type: 'positive',
+                        text: `Recent CPL ($${last7CPL.toFixed(2)}) is ${Math.round((1 - last7CPL/c.cpl) * 100)}% lower than lifetime average - campaigns optimizing well`
+                    });
+                } else if (last7CPL > c.cpl * 1.2) {
+                    insights.push({
+                        icon: '⚠️',
+                        type: 'warning',
+                        text: `Recent CPL ($${last7CPL.toFixed(2)}) is ${Math.round((last7CPL/c.cpl - 1) * 100)}% higher than average - review ad performance`
+                    });
+                }
+            }
+
+            // Good conversion rate
+            if (c.sellerLeadToAppt >= 15) {
+                insights.push({
+                    icon: '🌟',
+                    type: 'positive',
+                    text: `Seller lead-to-appointment rate of ${c.sellerLeadToAppt.toFixed(1)}% is excellent - client is converting well`
+                });
+            }
+
+            // Deals/Closings success
+            if (c.deals > 0) {
+                const costPerDeal = c.spend / c.deals;
+                insights.push({
+                    icon: '🎯',
+                    type: 'positive',
+                    text: `${c.deals} potential deals at $${Math.round(costPerDeal).toLocaleString()} cost per deal`
+                });
+            }
+
+            // Missing leady sync
+            if (!c.leadySync || c.leadySync === 'No') {
+                insights.push({
+                    icon: '🔗',
+                    type: 'info',
+                    text: 'Leady sync not configured - consider setting up for automated lead tracking'
+                });
+            }
+
+            // Long running without results
+            if (c.days > 30 && c.leads < 10) {
+                insights.push({
+                    icon: '⏰',
+                    type: 'warning',
+                    text: `${c.days} days running with only ${c.leads} leads - significant campaign issues`
+                });
+            }
+
+            if (insights.length === 0) {
+                insights.push({
+                    icon: '✅',
+                    type: 'positive',
+                    text: 'No significant issues detected - client metrics are within normal ranges'
+                });
+            }
+
+            const typeColors = {
+                positive: 'border-emerald-500/30 bg-emerald-500/5',
+                warning: 'border-amber-500/30 bg-amber-500/5',
+                info: 'border-brand-cyan/30 bg-brand-cyan/5'
+            };
+
+            return (
+                <div className="card p-6">
+                    <div className="section-title flex items-center gap-2">
+                        <span>💡</span> Smart Insights
+                    </div>
+                    <div className="space-y-3 mt-4">
+                        {insights.slice(0, 5).map((insight, i) => (
+                            <div key={i} className={`p-4 rounded-xl border ${typeColors[insight.type]}`}>
+                                <div className="flex items-start gap-3">
+                                    <span className="text-xl">{insight.icon}</span>
+                                    <p className="text-slate-300 text-sm leading-relaxed">{insight.text}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== QUICK ACTIONS ==========
+        const QuickActions = ({c, s, onAction}) => {
+            if (!c) return null;
+
+            const actions = [
+                { icon: '📞', label: 'Schedule Check-In', action: 'checkin' },
+                { icon: '📊', label: 'Request Report', action: 'report' },
+                { icon: '💬', label: 'Add Note', action: 'note' },
+                { icon: '🎯', label: 'Review Ads', action: 'ads' },
+                { icon: '📧', label: 'Send Resources', action: 'resources' },
+                { icon: '⚠️', label: 'Flag for Review', action: 'flag' },
+            ];
+
+            return (
+                <div className="card p-5">
+                    <div className="section-title">Quick Actions</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
+                        {actions.map((action, i) => (
+                            <button
+                                key={i}
+                                onClick={() => onAction && onAction(action.action)}
+                                className="p-3 rounded-xl bg-dark-800 hover:bg-dark-700 transition-colors text-center group"
+                            >
+                                <div className="text-xl mb-1 group-hover:scale-110 transition-transform">{action.icon}</div>
+                                <div className="text-xs text-slate-400 group-hover:text-white transition-colors">{action.label}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== PERFORMANCE TABS (Seller/Buyer) ==========
+        const PerformanceTabs = ({c}) => {
+            const [activeTab, setActiveTab] = useState('seller');
+            if (!c) return null;
+
+            const tabs = [
+                { id: 'seller', label: 'Seller', icon: '🏠' },
+                { id: 'buyer', label: 'Buyer', icon: '🛒' },
+                { id: 'other', label: 'Other Leads', icon: '📊' },
+                { id: 'deals', label: 'Deals', icon: '🎯' }
+            ];
+
+            const sellerContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Lifetime Leads" value={fmtN(c.sellerLeads)} highlight color="text-brand-cyan" icon="📊"/>
+                    <DataRow label="Lifetime CPL" value={fmtD(c.sellerCPL)} highlight icon="💰"/>
+                    <DataRow label="Last 7 Day Leads" value={fmtN(c.last7DaySellerLeads)} trend={c.last7DaySellerLeads > c.last3DaySellerLeads * 2 ? 'up' : null}/>
+                    <DataRow label="Last 7 Day CPL" value={fmtD(c.last7DaySellerCPL)}/>
+                    <DataRow label="Last 3 Day Leads" value={fmtN(c.last3DaySellerLeads)}/>
+                    <DataRow label="Last 3 Day CPL" value={fmtD(c.last3DaySellerCPL)}/>
+                    <DataRow label="Total Appointments" value={fmtN(c.sellerAppts)} highlight color="text-brand-purple" icon="📅"/>
+                    <DataRow label="Appts (Last 7 Days)" value={fmtN(c.sellerAppts7)}/>
+                    <DataRow label="Avg Appts/Week" value={c.avgSellerApptsWeek?.toFixed(1)}/>
+                    <DataRow label="Lead→Appt Rate" value={fmtP(c.sellerLeadToAppt)} highlight color={c.sellerLeadToAppt >= 15 ? 'text-emerald-400' : 'text-white'}/>
+                    <DataRow label="Cost Per Appt" value={fmtD(c.costPerSellerAppt)}/>
+                </div>
+            );
+
+            const buyerContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Lifetime Leads" value={fmtN(c.buyerLeads)} highlight color="text-brand-cyan" icon="📊"/>
+                    <DataRow label="Lifetime CPL" value={fmtD(c.buyerCPL)} highlight icon="💰"/>
+                    <DataRow label="Last 7 Day Leads" value={fmtN(c.last7DayBuyerLeads)}/>
+                    <DataRow label="Last 7 Day CPL" value={fmtD(c.last7DayBuyerCPL)}/>
+                    <DataRow label="Last 3 Day Leads" value={fmtN(c.last3DayBuyerLeads)}/>
+                    <DataRow label="Last 3 Day CPL" value={fmtD(c.last3DayBuyerCPL)}/>
+                    <DataRow label="Total Appointments" value={fmtN(c.buyerAppts)} highlight color="text-brand-purple" icon="📅"/>
+                    <DataRow label="Appts (Last 7 Days)" value={fmtN(c.buyerAppts7)}/>
+                    <DataRow label="Avg Appts/Week" value={c.avgBuyerApptsWeek?.toFixed(1)}/>
+                    <DataRow label="Lead→Appt Rate" value={fmtP(c.buyerLeadToAppt)} highlight color={c.buyerLeadToAppt >= 15 ? 'text-emerald-400' : 'text-white'}/>
+                    <DataRow label="Cost Per Appt" value={fmtD(c.costPerBuyerAppt)}/>
+                </div>
+            );
+
+            const otherContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Listing Leads" value={fmtN(c.listingLeads)} highlight icon="📋"/>
+                    <DataRow label="Mortgage Leads" value={fmtN(c.mortgageLeads)} icon="🏦"/>
+                    <DataRow label="Agent Attraction" value={fmtN(c.agentAttraction)} icon="👥"/>
+                </div>
+            );
+
+            const dealsContent = (
+                <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                    <DataRow label="Potential Deals" value={fmtN(c.deals)} highlight color="text-emerald-400" icon="🎯"/>
+                    <DataRow label="Listings" value={fmtN(c.listings)} highlight color="text-amber-400" icon="🏠"/>
+                    <DataRow label="Buyer Signed" value={fmtN(c.buyerSigned)} highlight color="text-emerald-400" icon="✍️"/>
+                    <DataRow label="Leads per Listing" value={c.leadsPerListing?.toFixed(1)}/>
+                    <DataRow label="Leads per Deal" value={c.leadsPerDeal?.toFixed(1)}/>
+                    <DataRow label="Leads per Signed Buyer" value={c.leadsPerSignedBuyer?.toFixed(1)}/>
+                </div>
+            );
+
+            return (
+                <div className="card overflow-hidden">
+                    <div className="flex border-b border-dark-700">
+                        {tabs.map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`flex-1 px-4 py-4 text-sm font-medium transition-colors flex items-center justify-center gap-2
+                                    ${activeTab === tab.id
+                                        ? 'bg-gradient-to-r from-brand-cyan/10 to-brand-purple/10 text-white border-b-2 border-brand-cyan'
+                                        : 'text-slate-400 hover:text-white hover:bg-dark-800'}`}
+                            >
+                                <span>{tab.icon}</span>
+                                <span className="hidden md:inline">{tab.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="p-6">
+                        {activeTab === 'seller' && sellerContent}
+                        {activeTab === 'buyer' && buyerContent}
+                        {activeTab === 'other' && otherContent}
+                        {activeTab === 'deals' && dealsContent}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== TREND METRIC CARD ==========
+        const TrendMetricCard = ({label, value, icon, trend, trendValue, color = 'brand-cyan'}) => {
+            const trendIcon = trend === 'up' ? '↗️' : trend === 'down' ? '↘️' : '→';
+            const trendColor = trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : 'text-slate-400';
+
+            return (
+                <div className={`card p-5 border-l-4 border-${color}`}>
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <div className="text-3xl font-bold text-white">{value}</div>
+                            <div className="text-sm text-slate-400 mt-1">{label}</div>
+                        </div>
+                        {icon && <span className="text-2xl">{icon}</span>}
+                    </div>
+                    {trendValue && (
+                        <div className={`mt-3 text-sm ${trendColor} flex items-center gap-1`}>
+                            <span>{trendIcon}</span>
+                            <span>{trendValue}</span>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ========== CLIENT HEALTH TAB - FULL DETAILS ==========
+        const ClientHealthTab = ({ c, s, isMissingFromAdsSheet }) => {
+            if (!c && !isMissingFromAdsSheet) return <div className="card p-12 text-center text-slate-500">Select a client to view details</div>;
+
+            // If client is missing from Ads Performance sheet
+            if (isMissingFromAdsSheet) {
+                return (
+                    <div className="space-y-6">
+                        <div className="card p-8 border-l-4 border-purple-500">
+                            <div className="flex items-center gap-4 mb-4">
+                                <span className="text-4xl">📋</span>
+                                <div>
+                                    <h3 className="text-xl font-bold text-purple-400">Missing from Client Ads Performance Sheet</h3>
+                                    <p className="text-slate-400">This client needs to be added to the Client Ads Performance tracking sheet.</p>
+                                </div>
+                            </div>
+                            <div className="bg-purple-500/10 rounded-xl p-4 mt-4">
+                                <p className="text-white font-medium mb-2">Action Required:</p>
+                                <ol className="text-slate-300 space-y-1 text-sm">
+                                    <li>1. Open the Client Ads Performance Google Sheet</li>
+                                    <li>2. Add a new row for this client</li>
+                                    <li>3. Fill in their ad account details and metrics</li>
+                                    <li>4. Refresh this dashboard to see their data</li>
+                                </ol>
+                            </div>
+                        </div>
+                        {s && (
+                            <Section title="📋 Available Info from Setup Timing">
+                                <DataRow label="CSM Rep" value={s?.csmRep} highlight color="text-brand-purple"/>
+                                <DataRow label="Status" value={s?.status}/>
+                                <DataRow label="MRR" value={s?.mrr} highlight color="text-emerald-400"/>
+                                <DataRow label="Due Payment" value={s?.duePayment}/>
+                            </Section>
+                        )}
+                    </div>
+                );
+            }
+
+            // Calculate trend data
+            const last3DayLeads = (c.last3DaySellerLeads || 0) + (c.last3DayBuyerLeads || 0);
+            const last7DayLeads = (c.last7DaySellerLeads || 0) + (c.last7DayBuyerLeads || 0);
+            const avgDailyLeads = c.leads / Math.max(c.days, 1);
+            const recent7DayAvg = last7DayLeads / 7;
+            const leadTrend = recent7DayAvg > avgDailyLeads * 1.1 ? 'up' : recent7DayAvg < avgDailyLeads * 0.9 ? 'down' : null;
+
+            const last7CPL = c.last7DaySellerCPL || c.last7DayBuyerCPL || 0;
+            const cplTrend = last7CPL > 0 && c.cpl > 0 ? (last7CPL < c.cpl * 0.9 ? 'up' : last7CPL > c.cpl * 1.1 ? 'down' : null) : null;
+
+            return (
+                <div className="space-y-6">
+                    {/* Priority Action Banner - Most Important */}
+                    <PriorityActionBanner c={c} s={s} />
+
+                    {/* Health Score + Quick Stats Row */}
+                    <div className="grid lg:grid-cols-2 gap-6">
+                        <HealthScoreCard c={c} s={s} />
+
+                        {/* Quick Stats with Trends */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="card p-5 border-l-4 border-brand-cyan">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="text-3xl font-bold text-white">{fmt(c.spend)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Total Spend</div>
+                                    </div>
+                                    <span className="text-2xl">💰</span>
+                                </div>
+                            </div>
+                            <div className="card p-5 border-l-4 border-brand-cyan">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="text-3xl font-bold text-brand-cyan">{fmtN(c.leads)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Total Leads</div>
+                                    </div>
+                                    <span className="text-2xl">📊</span>
+                                </div>
+                                {leadTrend && (
+                                    <div className={`mt-2 text-sm flex items-center gap-1 ${leadTrend === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        <span>{leadTrend === 'up' ? '↗️' : '↘️'}</span>
+                                        <span>{leadTrend === 'up' ? 'Trending up' : 'Trending down'} vs avg</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="card p-5 border-l-4 border-brand-purple">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className={`text-3xl font-bold ${c.cpl > 50 ? 'text-red-400' : c.cpl > 35 ? 'text-amber-400' : 'text-white'}`}>{fmtD(c.cpl)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Cost Per Lead</div>
+                                    </div>
+                                    <span className="text-2xl">📈</span>
+                                </div>
+                                {cplTrend && (
+                                    <div className={`mt-2 text-sm flex items-center gap-1 ${cplTrend === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        <span>{cplTrend === 'up' ? '↘️' : '↗️'}</span>
+                                        <span>{cplTrend === 'up' ? 'Improving!' : 'Increasing'}</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="card p-5 border-l-4 border-brand-purple">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="text-3xl font-bold text-brand-purple">{fmtN(c.appts)}</div>
+                                        <div className="text-sm text-slate-400 mt-1">Appointments</div>
+                                    </div>
+                                    <span className="text-2xl">📅</span>
+                                </div>
+                                {c.leads > 0 && (
+                                    <div className="mt-2 text-sm text-slate-400">
+                                        {(c.appts / c.leads * 100).toFixed(1)}% conversion
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Actions */}
+                    <QuickActions c={c} s={s} />
+
+                    {/* Smart Insights */}
+                    <SmartInsightsPanel c={c} s={s} />
+
+                    {/* Recent Performance - Last 3/7 Days */}
+                    <div className="grid md:grid-cols-2 gap-6">
+                        <div className="card p-6 border-l-4 border-amber-500">
+                            <div className="section-title mb-4">📊 Last 3 Days</div>
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <div className="text-3xl font-bold text-white">{fmtN(last3DayLeads)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">Leads</div>
+                                    {last3DayLeads === 0 && c.days >= 3 && (
+                                        <div className="mt-2 text-xs text-amber-400">⚠️ No leads</div>
+                                    )}
+                                </div>
+                                <div>
+                                    <div className="text-3xl font-bold text-brand-cyan">{fmtD(c.last3DaySellerCPL || c.last3DayBuyerCPL || 0)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">CPL</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="card p-6 border-l-4 border-brand-cyan">
+                            <div className="section-title mb-4">📈 Last 7 Days</div>
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <div className="text-3xl font-bold text-white">{fmtN(last7DayLeads)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">Leads</div>
+                                </div>
+                                <div>
+                                    <div className="text-3xl font-bold text-brand-cyan">{fmtD(last7CPL)}</div>
+                                    <div className="text-sm text-slate-400 mt-1">CPL</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Performance Tabs - Seller/Buyer/Other/Deals */}
+                    <PerformanceTabs c={c} />
+
+                    {/* Collapsible Sections for Additional Details */}
+                    <CollapsibleSection
+                        title="CSM & Client Status"
+                        icon="👤"
+                        summary={`${s?.csmRep || 'No CSM'} • ${s?.status || 'Status unknown'} • MRR: ${s?.mrr || '—'}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="CSM Rep" value={s?.csmRep} highlight color="text-brand-purple" icon="👤"/>
+                            <DataRow label="Status" value={s?.status} icon="📋"/>
+                            <DataRow label="Concern" value={s?.concern} icon="⚠️"/>
+                            <DataRow label="Referral" value={s?.referral} icon="🤝"/>
+                            <DataRow label="Testimonial" value={s?.testimonial} icon="⭐"/>
+                            <DataRow label="Lender" value={s?.lender} icon="🏦"/>
+                            <DataRow label="Last CSM Note" value={s?.lastCsmNote} icon="📝"/>
+                            <DataRow label="Upcoming CSM Date" value={s?.upcomingCsmDate} icon="📅"/>
+                        </div>
+                    </CollapsibleSection>
+
+                    <CollapsibleSection
+                        title="Client & Contract Details"
+                        icon="📋"
+                        summary={`${s?.state || c.state || 'No state'} • ${s?.contractCategory || 'No category'} • Days Left: ${s?.daysLeft || '—'}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="State" value={s?.state || c.state} icon="📍"/>
+                            <DataRow label="Campaign" value={s?.campaign || c.campaign} icon="🎯"/>
+                            <DataRow label="Contract Category" value={s?.contractCategory} highlight icon="📄"/>
+                            <DataRow label="MRR" value={s?.mrr} highlight color="text-emerald-400" icon="💰"/>
+                            <DataRow label="Fulfilled" value={s?.fulfilled} highlight color="text-emerald-400" icon="✅"/>
+                            <DataRow label="Days Left" value={s?.daysLeft} highlight color={pn(s?.daysLeft) < 0 ? 'text-red-400' : 'text-brand-cyan'} icon="⏳"/>
+                            <DataRow label="Due Payment" value={s?.duePayment} highlight color={s?.duePayment?.includes('OVERDUE') ? 'text-red-400' : 'text-emerald-400'} icon="💳"/>
+                            <DataRow label="Spanish" value={s?.spanish} icon="🌐"/>
+                        </div>
+                    </CollapsibleSection>
+
+                    <CollapsibleSection
+                        title="Key Dates"
+                        icon="📅"
+                        summary={`Paid: ${clean(s?.paidDate)} • Ads Live: ${clean(s?.adLiveDate)}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">💰</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.paidDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Paid</div>
+                            </div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">🚀</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.onboardedDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Onboarded</div>
+                            </div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">📞</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.launchCallDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Launch Call</div>
+                            </div>
+                            <div className="bg-dark-800 rounded-xl p-5 text-center">
+                                <div className="text-2xl mb-2">📢</div>
+                                <div className="text-lg font-bold text-white">{clean(s?.adLiveDate)}</div>
+                                <div className="text-sm text-slate-400 mt-1">Ads Live</div>
+                            </div>
+                        </div>
+                    </CollapsibleSection>
+
+                    <CollapsibleSection
+                        title="Ad Account & Spend"
+                        icon="📢"
+                        summary={`${c.adAccount || 'No account'} • ${fmt(c.spend)} total • ${c.days} days running`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="Ad Account" value={c.adAccount} highlight icon="📱"/>
+                            <DataRow label="Daily Set Ad Spend" value={fmtD(c.dailySetAdSpend)} icon="💵"/>
+                            <DataRow label="Total Ad Spend" value={fmt(c.spend)} highlight color="text-brand-cyan" icon="💰"/>
+                            <DataRow label="Ad Spend Per Month" value={fmt(c.spendPerMonth)} icon="📆"/>
+                            <DataRow label="Ad Spend Per Day" value={fmtD(c.spendPerDay)} icon="📅"/>
+                            <DataRow label="Days Running" value={c.days} icon="⏱️"/>
+                            <DataRow label="Weeks Running" value={c.weeks} icon="📊"/>
+                            <DataRow label="Months Running" value={c.months} icon="🗓️"/>
+                            <DataRow label="Calling Status" value={c.callingStatus} icon="📞"/>
+                            <DataRow label="Leady Sync" value={c.leadySync} icon="🔗"/>
+                        </div>
+                    </CollapsibleSection>
+
+                    <CollapsibleSection
+                        title="Setup Timing Performance"
+                        icon="📊"
+                        summary={`Closings: ${s?.closings || '—'} • Signed: ${s?.signed || '—'}`}
+                        defaultOpen={false}
+                    >
+                        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+                            <DataRow label="Closings" value={s?.closings} highlight color="text-emerald-400" icon="🏆"/>
+                            <DataRow label="Signed" value={s?.signed} highlight color="text-emerald-400" icon="✍️"/>
+                            <DataRow label="SHU%" value={s?.shuPercent} icon="📈"/>
+                            <DataRow label="Behind Schedule" value={s?.behindSchedule} icon="⏰"/>
+                            <DataRow label="Missing" value={s?.missing} icon="❓"/>
+                            <DataRow label="Calling" value={s?.calling} icon="📞"/>
+                            <DataRow label="Dialer" value={s?.dialer} icon="📱"/>
+                            <DataRow label="S Leads" value={s?.sLeads} highlight color="text-brand-cyan" icon="🏠"/>
+                            <DataRow label="B Leads" value={s?.bLeads} highlight color="text-brand-cyan" icon="🛒"/>
+                            <DataRow label="CPL" value={s?.cpl} icon="💲"/>
+                            <DataRow label="CPA" value={s?.cpa} icon="💰"/>
+                        </div>
+                    </CollapsibleSection>
+                </div>
+            );
+        };
+
+        // ========== CALL SCRIPTS TAB ==========
+        const CallScriptsTab = ({ c, s }) => {
+            const clientName = (c && c.client) ? c.client : '[Client]';
+            const totalLeads = (c && c.leads) ? c.leads : 'X';
+            const cplValue = fmtD((c && c.cpl) ? c.cpl : 0);
+            const sellerLeadsVal = (c && c.sellerLeads) ? c.sellerLeads : 'X';
+            const buyerLeadsVal = (c && c.buyerLeads) ? c.buyerLeads : 'X';
+            const apptsVal = (c && c.appts) ? c.appts : 'X';
+            const convRate = fmtP((c && c.sellerLeadToAppt) ? c.sellerLeadToAppt : 0);
+
+            const scripts = [
+                { 
+                    name: 'Check-In Call', 
+                    icon: '📞', 
+                    content: 'Hi ' + clientName + ', this is [Your Name] from Veriad Marketing! How are you doing today?\n\n[Wait for response]\n\nGreat! I wanted to check in and see how things are going with your leads. Have you been able to connect with any of them this week?\n\n[Listen and take notes]\n\nThat\'s great to hear! Let me pull up your account... I can see you\'ve gotten ' + totalLeads + ' leads so far with a CPL of ' + cplValue + '.\n\n[If good CPL]: Your cost per lead is looking really solid!\n[If high CPL]: I noticed your CPL is a bit higher than we\'d like. Let me look into optimizing your campaigns.\n\nAny questions for me?' 
+                },
+                { 
+                    name: 'Concern/Complaint Call', 
+                    icon: '😟', 
+                    content: 'Hi ' + clientName + ', thank you for reaching out. I understand you have some concerns and I want to make sure we address them properly.\n\nCan you tell me more about what\'s been happening?\n\n[Listen carefully, don\'t interrupt]\n\nI really appreciate you sharing that with me. I can understand how that would be frustrating.\n\nHere\'s what I\'d like to do:\n1. [Immediate action you can take]\n2. [Follow-up action]\n3. [Timeline for resolution]\n\nDoes that sound like a good plan?' 
+                },
+                { 
+                    name: 'Lead Quality Issue', 
+                    icon: '🎯', 
+                    content: 'Hi ' + clientName + ', I wanted to follow up on the lead quality feedback you shared.\n\nI\'ve reviewed your recent leads and here\'s what I found:\n- Total leads: ' + totalLeads + '\n- Seller leads: ' + sellerLeadsVal + '\n- Buyer leads: ' + buyerLeadsVal + '\n\nA few questions to help me optimize:\n1. What percentage of leads are answering when you call?\n2. Are they motivated sellers/buyers?\n3. What\'s your typical follow-up process?\n\n[Based on answers, suggest optimization]' 
+                },
+                { 
+                    name: 'Upsell/Expansion', 
+                    icon: '📈', 
+                    content: 'Hi ' + clientName + ', I\'ve been looking at your results and I\'m really impressed!\n\nYou\'ve generated ' + totalLeads + ' leads and ' + apptsVal + ' appointments. That\'s a ' + convRate + ' conversion rate!\n\nI wanted to discuss an opportunity to scale your success. Have you considered:\n- Adding buyer leads to your campaign?\n- Expanding to additional zip codes?\n- Increasing your daily budget?\n\nWhat do you think would help you close more deals?' 
+                },
+            ];
+
+            return (
+                <div className="space-y-4">
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-2">📞 Call Scripts</h3>
+                        <p className="text-slate-400 text-sm">Phone scripts customized for {clientName}. Click to expand.</p>
+                    </div>
+                    {scripts.map((script, i) => (
+                        <details key={i} className="card">
+                            <summary className="p-4 cursor-pointer flex items-center gap-3 hover:bg-dark-800 rounded-xl">
+                                <span className="text-xl">{script.icon}</span>
+                                <span className="font-medium text-white">{script.name}</span>
+                            </summary>
+                            <div className="p-4 pt-0 border-t border-dark-700">
+                                <pre className="whitespace-pre-wrap text-sm text-slate-300 font-sans leading-relaxed">{script.content}</pre>
+                                <button onClick={() => navigator.clipboard.writeText(script.content)} className="mt-4 px-4 py-2 bg-brand-cyan/20 text-brand-cyan rounded-lg text-sm">📋 Copy Script</button>
+                            </div>
+                        </details>
+                    ))}
+                </div>
+            );
+        };
+
+        // ========== LIVE CALL HELP TAB ==========
+        const LiveCallHelpTab = ({ c, s }) => {
+            const [situation, setSituation] = useState('');
+            const [response, setResponse] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const cplText = 'Your CPL is ' + fmtD(c?.cpl || 0) + '. We can: 1) Review targeting, 2) Test new creative, 3) Adjust budget, 4) Check landing page.';
+
+            const quickResponses = [
+                { q: 'Client says leads are bad', a: 'I understand your concern. Let me ask: How quickly are you calling these leads? Studies show calling within 5 minutes increases contact rate by 400%. Also, are you using the scripts we provided?' },
+                { q: 'Client wants to cancel', a: 'I hear you, and I want to make sure we find the right solution. Before we discuss cancellation, can you help me understand what specific results you were hoping for?' },
+                { q: 'Client not answering leads', a: 'Try: 1) Call within 5 minutes, 2) Try different times of day, 3) Send a text first, 4) Follow up at least 6-8 times.' },
+                { q: 'CPL is too high', a: cplText },
+            ];
+
+            const getAIHelp = async () => {
+                if (!situation.trim()) return;
+                setLoading(true);
+                try {
+                    const { data, error } = await supabase.functions.invoke('live-call-help', {
+                        body: {
+                            situation: situation,
+                            clientName: c?.client || 'Unknown',
+                            leads: c?.leads || 0,
+                            cpl: fmtD(c?.cpl || 0),
+                            appts: c?.appts || 0
+                        }
+                    });
+                    if (error) throw new Error(error.message);
+                    if (data.error) throw new Error(data.error);
+                    setResponse(data.response || 'Could not generate response.');
+                } catch (err) { setResponse('AI unavailable: ' + err.message + '. Try quick responses below.'); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🎧 Live Call Help</h3>
+                        <textarea value={situation} onChange={e => setSituation(e.target.value)} placeholder="Describe the situation..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
+                        <button onClick={getAIHelp} disabled={loading || !situation.trim()} className="mt-3 px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50">
+                            {loading ? '🤖 Thinking...' : '🤖 Get AI Help'}
+                        </button>
+                        {response && <div className="mt-4 p-4 bg-dark-800 rounded-xl text-sm text-slate-300">{response}</div>}
+                    </div>
+                    <div className="card p-6">
+                        <h4 className="font-semibold text-white mb-4">⚡ Quick Responses</h4>
+                        <div className="space-y-3">
+                            {quickResponses.map((qr, i) => (
+                                <details key={i} className="bg-dark-800 rounded-xl">
+                                    <summary className="p-3 cursor-pointer text-brand-cyan text-sm">{qr.q}</summary>
+                                    <div className="p-3 pt-0 text-sm text-slate-300">{qr.a}</div>
+                                </details>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== STRATEGY TAB ==========
+        const StrategyTab = ({ c, s }) => {
+            const { user } = useAuth();
+            const [strategy, setStrategy] = useState('');
+            const [bottlenecks, setBottlenecks] = useState('');
+            const [actions, setActions] = useState('');
+            const [saving, setSaving] = useState(false);
+
+            useEffect(() => { if (c?.client) loadStrategy(); }, [c?.client]);
+
+            const loadStrategy = async () => {
+                const { data } = await supabase.from('client_strategy').select('*').eq('client_name', c.client).single();
+                if (data) { setStrategy(data.strategy_text || ''); setBottlenecks(data.bottlenecks || ''); setActions(data.action_items || ''); }
+            };
+
+            useEffect(() => {
+                if (!c?.client) return;
+                const timer = setTimeout(saveStrategy, 1500);
+                return () => clearTimeout(timer);
+            }, [strategy, bottlenecks, actions]);
+
+            const saveStrategy = async () => {
+                if (!c?.client || !user) return;
+                setSaving(true);
+                await supabase.from('client_strategy').upsert({ client_name: c.client, strategy_text: strategy, bottlenecks, action_items: actions, user_email: user.email, last_edited_by: user.email, updated_at: new Date().toISOString() }, { onConflict: 'client_name' });
+                setSaving(false);
+            };
+
+            const detectedIssues = [];
+            if (c?.cpl > 40) detectedIssues.push({ icon: '📈', text: 'High CPL (' + fmtD(c.cpl) + ')' });
+            if (c?.appts7 === 0 && c?.days > 14) detectedIssues.push({ icon: '📅', text: 'No appointments this week' });
+            if (c?.leads > 20 && c?.appts === 0) detectedIssues.push({ icon: '📞', text: c.leads + ' leads but 0 appts' });
+
+            if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
+
+            return (
+                <div className="space-y-6">
+                    {detectedIssues.length > 0 && (
+                        <div className="card p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">🔍 Detected Issues</h3>
+                            <div className="space-y-2">
+                                {detectedIssues.map((issue, i) => (
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-amber-500/10 rounded-xl text-amber-400 text-sm"><span>{issue.icon}</span><span>{issue.text}</span></div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    <div className="card p-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold text-white">🎯 Current Strategy</h3>
+                            <span className="text-xs text-slate-500">{saving ? 'Saving...' : 'Auto-saved'}</span>
+                        </div>
+                        <textarea value={strategy} onChange={e => setStrategy(e.target.value)} placeholder="What's the current strategy?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[120px]" />
+                    </div>
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🚧 Bottlenecks</h3>
+                        <textarea value={bottlenecks} onChange={e => setBottlenecks(e.target.value)} placeholder="What's blocking success?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
+                    </div>
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">✅ Action Plan</h3>
+                        <textarea value={actions} onChange={e => setActions(e.target.value)} placeholder="What actions need to be taken?" className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[100px]" />
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== SAVE THE CLIENT TAB ==========
+        const SaveClientTab = ({ c, s }) => {
+            const score = getHealthScore(c, s);
+            const playbooks = [
+                { name: 'Payment Overdue', trigger: s?.duePayment?.includes('OVERDUE'), steps: ['Call immediately', 'Ask about service issues', 'Offer payment plan', 'Set deadline', 'Escalate if needed'] },
+                { name: 'High CPL', trigger: c?.cpl > 50, steps: ['Review targeting', 'Check ad creative', 'Review landing page', 'Consider rebuild', 'Offer refresh'] },
+                { name: 'No Appointments', trigger: c?.leads > 15 && c?.appts === 0, steps: ['Review lead quality', 'Check calling speed', 'Review scripts', 'Listen to recordings', 'Recommend ISA'] },
+                { name: 'Client Wants to Cancel', trigger: false, steps: ['LISTEN first', 'Acknowledge frustration', 'Review wins', 'Propose solutions', 'Offer pause', 'Get manager'] },
+            ];
+            if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
+            return (
+                <div className="space-y-6">
+                    <div className={`card p-6 ${score < 60 ? 'border-red-500/30' : ''}`}>
+                        <div className="flex items-center gap-4">
+                            <span className="text-4xl">{score < 60 ? '🚨' : '⚠️'}</span>
+                            <div><h3 className="text-lg font-bold text-white">Risk Assessment</h3><p className={score < 60 ? 'text-red-400' : 'text-amber-400'}>Score: {score}/100</p></div>
+                        </div>
+                    </div>
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🛟 Playbooks</h3>
+                        <div className="space-y-4">
+                            {playbooks.map((pb, i) => (
+                                <div key={i} className={`p-4 rounded-xl ${pb.trigger ? 'bg-red-500/10 border border-red-500/30' : 'bg-dark-800'}`}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        {pb.trigger && <span className="px-2 py-1 bg-red-500 text-white text-xs rounded">ACTIVE</span>}
+                                        <h4 className="font-semibold text-white">{pb.name}</h4>
+                                    </div>
+                                    <ul className="space-y-1 text-sm text-slate-300">{pb.steps.map((step, j) => <li key={j}>{j+1}. {step}</li>)}</ul>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== COMBINED NOTES, MEETINGS & ACTIVITY TAB (ALL ON ONE PAGE) ==========
+        const NotesActivityTab = ({ c }) => {
+            const { user } = useAuth();
+            const [notes, setNotes] = useState([]);
+            const [meetings, setMeetings] = useState([]);
+            const [activities, setActivities] = useState([]);
+            const [newNote, setNewNote] = useState('');
+            const [transcript, setTranscript] = useState('');
+            const [meetingDate, setMeetingDate] = useState(new Date().toISOString().split('T')[0]);
+            const [meetingTitle, setMeetingTitle] = useState('');
+            const [processing, setProcessing] = useState(false);
+            const [summary, setSummary] = useState(null);
+            const [expandedMeeting, setExpandedMeeting] = useState(null);
+            const [editingNote, setEditingNote] = useState(null);
+            const [editNoteText, setEditNoteText] = useState('');
+
+            useEffect(() => { if (c?.client) { loadNotes(); loadMeetings(); loadActivities(); } }, [c?.client]);
+
+            const loadNotes = async () => { const { data } = await supabase.from('client_notes').select('*').eq('client_name', c.client).order('created_at', { ascending: false }); if (data) setNotes(data); };
+            const loadMeetings = async () => { const { data } = await supabase.from('meeting_notes').select('*').eq('client_name', c.client).order('meeting_date', { ascending: false }); if (data) setMeetings(data); };
+            const loadActivities = async () => { const { data } = await supabase.from('activity_log').select('*').eq('client_name', c.client).order('created_at', { ascending: false }).limit(50); if (data) setActivities(data); };
+
+            const addNote = async (noteText, source = 'manual') => {
+                const text = noteText || newNote;
+                if (!text.trim()) return;
+                const { data } = await supabase.from('client_notes').insert({
+                    client_name: c.client,
+                    note_text: text,
+                    user_email: user?.email,
+                    user_id: user?.id,
+                    source: source,
+                    is_important: source === 'ai_extracted'
+                }).select().single();
+                if (data) { setNotes([data, ...notes]); if (!noteText) setNewNote(''); }
+                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: source === 'ai_extracted' ? 'AI extracted important note' : 'Added note', details: text.substring(0, 50) });
+                return data;
+            };
+
+            const deleteNote = async (id) => {
+                await supabase.from('client_notes').delete().eq('id', id);
+                setNotes(notes.filter(n => n.id !== id));
+                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: 'Deleted note', details: '' });
+            };
+
+            const startEditNote = (note) => {
+                setEditingNote(note.id);
+                setEditNoteText(note.note_text);
+            };
+
+            const saveEditNote = async (id) => {
+                if (!editNoteText.trim()) return;
+                const { data } = await supabase.from('client_notes').update({
+                    note_text: editNoteText,
+                    edited_at: new Date().toISOString(),
+                    edited_by: user?.email
+                }).eq('id', id).select().single();
+                if (data) {
+                    setNotes(notes.map(n => n.id === id ? data : n));
+                    setEditingNote(null);
+                    setEditNoteText('');
+                }
+                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: 'Edited note', details: editNoteText.substring(0, 50) });
+            };
+
+            const cancelEditNote = () => {
+                setEditingNote(null);
+                setEditNoteText('');
+            };
+
+            const processTranscript = async () => {
+                setProcessing(true);
+                try {
+                    // Call Supabase Edge Function to analyze transcript
+                    const { data, error } = await supabase.functions.invoke('analyze-transcript', {
+                        body: {
+                            transcript: transcript,
+                            clientName: c?.client || 'Unknown'
+                        }
+                    });
+
+                    if (error) {
+                        throw new Error(error.message || 'Edge function error');
+                    }
+
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    setSummary(data);
+                    // Auto-set meeting title if extracted
+                    if (data.title && !meetingTitle) {
+                        setMeetingTitle(data.title);
+                    }
+                } catch (err) {
+                    console.error('AI Analysis error:', err);
+                    setSummary({
+                        summary: 'Transcript saved (AI analysis failed: ' + err.message + '). Please ensure the Supabase Edge Function is deployed with ANTHROPIC_API_KEY.',
+                        keyPoints: [],
+                        actionItems: [],
+                        riskLevel: 'medium',
+                        importantNotes: [],
+                        participants: [],
+                        topics: []
+                    });
+                }
+                setProcessing(false);
+            };
+
+            const saveMeeting = async () => {
+                if (!summary && !transcript.trim()) return;
+
+                // Prepare comprehensive meeting data
+                const meetingData = {
+                    client_name: c.client,
+                    meeting_date: meetingDate,
+                    meeting_title: meetingTitle || summary?.title || 'Meeting Notes',
+                    transcript,
+                    summary: summary?.summary || 'Manual entry',
+                    duration: summary?.duration || null,
+                    participants: summary?.participants || [],
+                    topics: summary?.topics || [],
+                    client_sentiment: summary?.clientSentiment || 'neutral',
+                    sentiment_explanation: summary?.sentimentExplanation || null,
+                    key_points: summary?.keyPoints || [],
+                    action_items: summary?.actionItems || [],
+                    decisions: summary?.decisions || [],
+                    concerns: summary?.concerns || [],
+                    follow_up_needed: summary?.followUpNeeded || false,
+                    follow_up_items: summary?.followUpItems || [],
+                    risk_level: summary?.riskLevel || 'medium',
+                    risk_factors: summary?.riskFactors || [],
+                    next_steps: summary?.nextSteps || [],
+                    client_requests: summary?.clientRequests || [],
+                    positive_signals: summary?.positiveSignals || [],
+                    warning_signals: summary?.warningSignals || [],
+                    user_email: user?.email,
+                    created_by_name: getDisplayName(user?.email, user)
+                };
+
+                const { data } = await supabase.from('meeting_notes').insert(meetingData).select().single();
+
+                if (data) {
+                    setMeetings([data, ...meetings]);
+
+                    // Automatically add important notes to Notes History
+                    if (summary?.importantNotes && summary.importantNotes.length > 0) {
+                        for (const importantNote of summary.importantNotes) {
+                            await addNote(`📌 [From ${meetingTitle || summary?.title || 'Meeting'} on ${meetingDate}] ${importantNote}`, 'ai_extracted');
+                        }
+                    }
+
+                    // Add high-priority action items as notes
+                    const highPriorityActions = (summary?.actionItems || []).filter(a => a.priority === 'high');
+                    for (const action of highPriorityActions) {
+                        await addNote(`⚠️ HIGH PRIORITY ACTION [${meetingDate}]: ${action.task} (Owner: ${action.owner})`, 'ai_extracted');
+                    }
+
+                    // Add concerns as notes if risk level is high
+                    if (summary?.riskLevel === 'high' && summary?.concerns?.length > 0) {
+                        await addNote(`🚨 CLIENT CONCERNS [${meetingDate}]: ${summary.concerns.join('; ')}`, 'ai_extracted');
+                    }
+
+                    setTranscript('');
+                    setSummary(null);
+                    setMeetingTitle('');
+
+                    // Reload notes to show newly added ones
+                    loadNotes();
+                }
+
+                await supabase.from('activity_log').insert({
+                    user_email: user?.email,
+                    client_name: c.client,
+                    action: 'Added meeting notes',
+                    details: `${meetingTitle || summary?.title || 'Meeting'}: ${(summary?.summary || 'Manual entry').substring(0, 100)}`
+                });
+            };
+
+            const deleteMeeting = async (id) => {
+                await supabase.from('meeting_notes').delete().eq('id', id);
+                setMeetings(meetings.filter(m => m.id !== id));
+                await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: 'Deleted meeting record', details: '' });
+            };
+
+            if (!c) return <div className="card p-12 text-center text-slate-500">Select a client</div>;
+
+            return (
+                <div className="space-y-6">
+                    {/* ===== QUICK NOTES SECTION ===== */}
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">📝 Quick Notes</h3>
+                        <div className="flex gap-3">
+                            <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyPress={e => e.key === 'Enter' && addNote()} placeholder="Add a note..." className="flex-1 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" />
+                            <button onClick={addNote} className="px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Add</button>
+                        </div>
+                    </div>
+
+                    {/* ===== NOTES HISTORY ===== */}
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">📚 Notes History</h3>
+                        {notes.length === 0 ? <div className="text-slate-500 text-center py-4">No notes yet</div> : (
+                            <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar">
+                                {notes.map(n => (
+                                    <div key={n.id} className={`p-4 bg-dark-800 rounded-xl group ${n.is_important ? 'border-l-4 border-amber-500' : ''} ${n.source === 'ai_extracted' ? 'bg-gradient-to-r from-dark-800 to-purple-900/20' : ''}`}>
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="text-brand-purple text-sm font-medium">{getDisplayName(n.user_email)}</span>
+                                                <span className="text-slate-600 text-sm">{new Date(n.created_at).toLocaleString()}</span>
+                                                {n.source === 'ai_extracted' && <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">AI Extracted</span>}
+                                                {n.is_important && <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">Important</span>}
+                                                {n.edited_at && <span className="text-slate-500 text-xs">(edited by {getDisplayName(n.edited_by)} on {new Date(n.edited_at).toLocaleString()})</span>}
+                                            </div>
+                                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button onClick={() => startEditNote(n)} className="text-slate-500 hover:text-brand-cyan text-sm">✏️</button>
+                                                <button onClick={() => deleteNote(n.id)} className="text-slate-500 hover:text-red-400 text-sm">✕</button>
+                                            </div>
+                                        </div>
+                                        {editingNote === n.id ? (
+                                            <div className="mt-3">
+                                                <textarea
+                                                    value={editNoteText}
+                                                    onChange={e => setEditNoteText(e.target.value)}
+                                                    className="w-full bg-dark-700 border border-dark-600 rounded-lg p-3 text-white min-h-[80px]"
+                                                />
+                                                <div className="flex gap-2 mt-2">
+                                                    <button onClick={() => saveEditNote(n.id)} className="px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg text-sm">Save</button>
+                                                    <button onClick={cancelEditNote} className="px-4 py-2 bg-slate-500/20 text-slate-400 rounded-lg text-sm">Cancel</button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <p className="text-white mt-2 whitespace-pre-wrap">{n.note_text}</p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ===== MEETING TRANSCRIPT SECTION ===== */}
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🎙️ Meeting Transcript Summary</h3>
+                        <div className="flex flex-wrap gap-4 mb-4">
+                            <input type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white" />
+                            <input
+                                type="text"
+                                value={meetingTitle}
+                                onChange={e => setMeetingTitle(e.target.value)}
+                                placeholder="Meeting title (optional - AI will suggest)"
+                                className="flex-1 min-w-[200px] bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white"
+                            />
+                        </div>
+                        <textarea value={transcript} onChange={e => setTranscript(e.target.value)} placeholder="Paste transcript from Fathom, Otter, Zoom, etc..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[150px]" />
+                        <div className="flex flex-wrap gap-3 mt-3">
+                            <button onClick={processTranscript} disabled={!transcript.trim() || processing} className="px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50 flex items-center gap-2">
+                                {processing ? (<><span className="animate-spin">⚙️</span> Analyzing...</>) : '🤖 Analyze with AI'}
+                            </button>
+                            <button onClick={saveMeeting} disabled={!transcript.trim()} className="px-6 py-3 bg-emerald-500/20 text-emerald-400 rounded-xl disabled:opacity-50">💾 Save Meeting</button>
+                        </div>
+
+                        {/* Enhanced AI Analysis Display */}
+                        {summary && (
+                            <div className="mt-4 p-5 bg-dark-800 rounded-xl space-y-4">
+                                {/* Header with title and sentiment */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-dark-700">
+                                    <div>
+                                        <h4 className="text-lg font-semibold text-white">{summary.title || 'Meeting Analysis'}</h4>
+                                        {summary.duration && <span className="text-slate-400 text-sm">Duration: {summary.duration}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {summary.clientSentiment && (
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                                ['positive', 'excited'].includes(summary.clientSentiment) ? 'bg-emerald-500/20 text-emerald-400' :
+                                                ['negative', 'frustrated'].includes(summary.clientSentiment) ? 'bg-red-500/20 text-red-400' :
+                                                summary.clientSentiment === 'concerned' ? 'bg-amber-500/20 text-amber-400' :
+                                                'bg-slate-500/20 text-slate-400'
+                                            }`}>
+                                                {summary.clientSentiment === 'positive' ? '😊' : summary.clientSentiment === 'negative' ? '😟' : summary.clientSentiment === 'excited' ? '🎉' : summary.clientSentiment === 'frustrated' ? '😤' : summary.clientSentiment === 'concerned' ? '😟' : '😐'} {summary.clientSentiment}
+                                            </span>
+                                        )}
+                                        {summary.riskLevel && (
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${summary.riskLevel === 'high' ? 'bg-red-500/20 text-red-400' : summary.riskLevel === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                                                Risk: {summary.riskLevel}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Summary */}
+                                <div>
+                                    <span className="text-brand-cyan text-sm font-medium">Summary</span>
+                                    <p className="text-white mt-1">{summary.summary}</p>
+                                </div>
+
+                                {/* Participants & Topics Row */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {summary.participants?.length > 0 && (
+                                        <div>
+                                            <span className="text-brand-cyan text-sm font-medium">👥 Participants</span>
+                                            <div className="flex flex-wrap gap-2 mt-1">
+                                                {summary.participants.map((p, i) => (
+                                                    <span key={i} className="px-2 py-1 bg-dark-700 text-slate-300 text-sm rounded">{p}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {summary.topics?.length > 0 && (
+                                        <div>
+                                            <span className="text-brand-cyan text-sm font-medium">📋 Topics Discussed</span>
+                                            <div className="flex flex-wrap gap-2 mt-1">
+                                                {summary.topics.map((t, i) => (
+                                                    <span key={i} className="px-2 py-1 bg-brand-purple/20 text-brand-purple text-sm rounded">{t}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Key Points */}
+                                {summary.keyPoints?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">🔑 Key Points</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.keyPoints.map((kp, i) => <li key={i} className="text-slate-300 text-sm flex items-start gap-2"><span className="text-brand-cyan">•</span> {kp}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Action Items */}
+                                {summary.actionItems?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">✅ Action Items</span>
+                                        <div className="mt-2 space-y-2">
+                                            {summary.actionItems.map((ai, i) => (
+                                                <div key={i} className={`p-3 rounded-lg ${ai.priority === 'high' ? 'bg-red-500/10 border border-red-500/30' : ai.priority === 'medium' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-dark-700'}`}>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-white text-sm">{ai.task}</span>
+                                                        {ai.priority && <span className={`px-2 py-0.5 text-xs rounded ${ai.priority === 'high' ? 'bg-red-500/20 text-red-400' : ai.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>{ai.priority}</span>}
+                                                    </div>
+                                                    <div className="flex gap-4 mt-1 text-xs text-slate-400">
+                                                        <span>👤 {ai.owner}</span>
+                                                        {ai.dueDate && <span>📅 {ai.dueDate}</span>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Decisions */}
+                                {summary.decisions?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">🎯 Decisions Made</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.decisions.map((d, i) => <li key={i} className="text-slate-300 text-sm flex items-start gap-2"><span className="text-emerald-400">✓</span> {d}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Concerns & Warning Signals */}
+                                {(summary.concerns?.length > 0 || summary.warningSignals?.length > 0) && (
+                                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                                        <span className="text-red-400 text-sm font-medium">⚠️ Concerns & Warning Signals</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-sm">• {c}</li>)}
+                                            {summary.warningSignals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-sm">• {w}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Positive Signals */}
+                                {summary.positiveSignals?.length > 0 && (
+                                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                                        <span className="text-emerald-400 text-sm font-medium">✨ Positive Signals</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-sm">• {p}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Next Steps */}
+                                {summary.nextSteps?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">➡️ Next Steps</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-sm">{i + 1}. {ns}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Important Notes Alert */}
+                                {summary.importantNotes?.length > 0 && (
+                                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                                        <span className="text-amber-400 text-sm font-medium">📌 Important Notes (will be added to Notes History)</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.importantNotes.map((n, i) => <li key={i} className="text-amber-200 text-sm">• {n}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Follow-up indicator */}
+                                {summary.followUpNeeded && (
+                                    <div className="flex items-center gap-2 p-2 bg-brand-purple/20 rounded-lg">
+                                        <span className="text-brand-purple">📞</span>
+                                        <span className="text-brand-purple text-sm font-medium">Follow-up Required</span>
+                                        {summary.followUpItems?.length > 0 && (
+                                            <span className="text-slate-400 text-sm">({summary.followUpItems.join(', ')})</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ===== MEETING HISTORY ===== */}
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">📅 Meeting History</h3>
+                        {meetings.length === 0 ? <div className="text-slate-500 text-center py-4">No meetings recorded</div> : (
+                            <div className="space-y-4 max-h-[600px] overflow-y-auto scrollbar">
+                                {meetings.map(m => (
+                                    <div key={m.id} className={`bg-dark-800 rounded-xl overflow-hidden ${m.risk_level === 'high' ? 'border-l-4 border-red-500' : m.risk_level === 'medium' ? 'border-l-4 border-amber-500' : 'border-l-4 border-emerald-500'}`}>
+                                        {/* Meeting Header - Always Visible */}
+                                        <div
+                                            className="p-4 cursor-pointer hover:bg-dark-700/50 transition-colors"
+                                            onClick={() => setExpandedMeeting(expandedMeeting === m.id ? null : m.id)}
+                                        >
+                                            <div className="flex flex-wrap justify-between items-start gap-2">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-white font-semibold">{m.meeting_title || 'Meeting'}</span>
+                                                        <span className="text-slate-400 text-sm">{new Date(m.meeting_date).toLocaleDateString()}</span>
+                                                    </div>
+                                                    <p className="text-slate-400 text-sm mt-1 line-clamp-2">{m.summary}</p>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    {m.client_sentiment && (
+                                                        <span className={`px-2 py-1 rounded text-xs ${
+                                                            ['positive', 'excited'].includes(m.client_sentiment) ? 'bg-emerald-500/20 text-emerald-400' :
+                                                            ['negative', 'frustrated'].includes(m.client_sentiment) ? 'bg-red-500/20 text-red-400' :
+                                                            m.client_sentiment === 'concerned' ? 'bg-amber-500/20 text-amber-400' :
+                                                            'bg-slate-500/20 text-slate-400'
+                                                        }`}>{m.client_sentiment}</span>
+                                                    )}
+                                                    <span className={`px-2 py-1 rounded text-xs ${m.risk_level === 'high' ? 'bg-red-500/20 text-red-400' : m.risk_level === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{m.risk_level}</span>
+                                                    <span className="text-slate-600 text-xs">▼</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500">
+                                                <span>📝 Added by: <span className="text-brand-purple">{m.created_by_name || getDisplayName(m.user_email)}</span></span>
+                                                {m.duration && <span>⏱️ {m.duration}</span>}
+                                                {m.participants?.length > 0 && <span>👥 {m.participants.length} participants</span>}
+                                                {m.action_items?.length > 0 && <span>✅ {m.action_items.length} action items</span>}
+                                                {m.follow_up_needed && <span className="text-amber-400">📞 Follow-up needed</span>}
+                                            </div>
+                                        </div>
+
+                                        {/* Expanded Meeting Details */}
+                                        {expandedMeeting === m.id && (
+                                            <div className="p-4 pt-0 border-t border-dark-700 space-y-4">
+                                                {/* Participants & Topics */}
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    {m.participants?.length > 0 && (
+                                                        <div>
+                                                            <span className="text-brand-cyan text-xs font-medium">👥 Participants</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {m.participants.map((p, i) => (
+                                                                    <span key={i} className="px-2 py-0.5 bg-dark-700 text-slate-300 text-xs rounded">{p}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {m.topics?.length > 0 && (
+                                                        <div>
+                                                            <span className="text-brand-cyan text-xs font-medium">📋 Topics</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {m.topics.map((t, i) => (
+                                                                    <span key={i} className="px-2 py-0.5 bg-brand-purple/20 text-brand-purple text-xs rounded">{t}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Key Points */}
+                                                {m.key_points?.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-cyan text-xs font-medium">🔑 Key Points</span>
+                                                        <ul className="mt-1 space-y-1">
+                                                            {m.key_points.map((kp, i) => <li key={i} className="text-slate-300 text-xs">• {kp}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Action Items */}
+                                                {m.action_items?.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-cyan text-xs font-medium">✅ Action Items</span>
+                                                        <div className="mt-1 space-y-1">
+                                                            {m.action_items.map((ai, i) => (
+                                                                <div key={i} className={`p-2 rounded ${ai.priority === 'high' ? 'bg-red-500/10' : ai.priority === 'medium' ? 'bg-amber-500/10' : 'bg-dark-700'}`}>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-slate-300 text-xs">{ai.task}</span>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-slate-500 text-xs">👤 {ai.owner}</span>
+                                                                            {ai.priority && <span className={`px-1.5 py-0.5 text-[10px] rounded ${ai.priority === 'high' ? 'bg-red-500/20 text-red-400' : ai.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>{ai.priority}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Decisions */}
+                                                {m.decisions?.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-cyan text-xs font-medium">🎯 Decisions Made</span>
+                                                        <ul className="mt-1 space-y-1">
+                                                            {m.decisions.map((d, i) => <li key={i} className="text-slate-300 text-xs">✓ {d}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Concerns & Risk Factors */}
+                                                {(m.concerns?.length > 0 || m.risk_factors?.length > 0 || m.warning_signals?.length > 0) && (
+                                                    <div className="p-2 bg-red-500/10 rounded">
+                                                        <span className="text-red-400 text-xs font-medium">⚠️ Concerns & Risks</span>
+                                                        <ul className="mt-1 space-y-0.5">
+                                                            {m.concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {c}</li>)}
+                                                            {m.risk_factors?.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {r}</li>)}
+                                                            {m.warning_signals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {w}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Positive Signals */}
+                                                {m.positive_signals?.length > 0 && (
+                                                    <div className="p-2 bg-emerald-500/10 rounded">
+                                                        <span className="text-emerald-400 text-xs font-medium">✨ Positive Signals</span>
+                                                        <ul className="mt-1 space-y-0.5">
+                                                            {m.positive_signals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {p}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Client Requests */}
+                                                {m.client_requests?.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-cyan text-xs font-medium">🙋 Client Requests</span>
+                                                        <ul className="mt-1 space-y-0.5">
+                                                            {m.client_requests.map((r, i) => <li key={i} className="text-slate-300 text-xs">• {r}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Next Steps */}
+                                                {m.next_steps?.length > 0 && (
+                                                    <div>
+                                                        <span className="text-brand-cyan text-xs font-medium">➡️ Next Steps</span>
+                                                        <ul className="mt-1 space-y-0.5">
+                                                            {m.next_steps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Follow-up Items */}
+                                                {m.follow_up_needed && m.follow_up_items?.length > 0 && (
+                                                    <div className="p-2 bg-brand-purple/10 rounded">
+                                                        <span className="text-brand-purple text-xs font-medium">📞 Follow-up Items</span>
+                                                        <ul className="mt-1 space-y-0.5">
+                                                            {m.follow_up_items.map((f, i) => <li key={i} className="text-slate-300 text-xs">• {f}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {/* Full Transcript (Collapsible) */}
+                                                {m.transcript && (
+                                                    <details className="mt-2">
+                                                        <summary className="text-brand-cyan text-xs font-medium cursor-pointer hover:text-brand-purple">📜 View Full Transcript</summary>
+                                                        <div className="mt-2 p-3 bg-dark-700 rounded-lg max-h-[200px] overflow-y-auto scrollbar">
+                                                            <pre className="text-slate-400 text-xs whitespace-pre-wrap font-sans">{m.transcript}</pre>
+                                                        </div>
+                                                    </details>
+                                                )}
+
+                                                {/* Sentiment Explanation */}
+                                                {m.sentiment_explanation && (
+                                                    <div className="text-xs text-slate-500 italic">
+                                                        💭 Sentiment note: {m.sentiment_explanation}
+                                                    </div>
+                                                )}
+
+                                                {/* Delete Button */}
+                                                <div className="flex justify-end pt-2 border-t border-dark-700">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); if (confirm('Delete this meeting record?')) deleteMeeting(m.id); }}
+                                                        className="text-xs text-slate-500 hover:text-red-400 transition-colors"
+                                                    >
+                                                        🗑️ Delete Meeting
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ===== ACTIVITY LOG ===== */}
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">📋 Activity Log</h3>
+                        {activities.length === 0 ? <div className="text-slate-500 text-center py-4">No activity yet</div> : (
+                            <div className="space-y-2 max-h-[250px] overflow-y-auto scrollbar">
+                                {activities.map(a => (
+                                    <div key={a.id} className="p-3 bg-dark-800 rounded-lg flex items-center gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-brand-purple font-medium text-sm">{getDisplayName(a.user_email)}</span>
+                                                <span className="text-slate-600 text-xs">{new Date(a.created_at).toLocaleString()}</span>
+                                            </div>
+                                            <div className="text-slate-400 text-sm">{a.action}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== RED FLAGS DASHBOARD ==========
+        const RedFlagsTab = ({ clients, setupData, onSelectClient }) => {
+            // Helper to get setup info for a client
+            const getSetupInfo = (client) => {
+                const name = client.client.toLowerCase().trim();
+                return setupData.find(s => { 
+                    const sn = (s.client || '').toLowerCase().trim(); 
+                    return sn === name || sn.includes(name) || name.includes(sn); 
+                });
+            };
+
+            // Analyze all clients for red flags
+            const analyzeClient = (c) => {
+                const s = getSetupInfo(c);
+                const flags = [];
+                
+                // Payment Issues
+                if (s && s.duePayment && s.duePayment.toUpperCase().includes('OVERDUE')) {
+                    flags.push({ type: 'payment', severity: 'high', icon: '💳', text: 'Payment Overdue', detail: s.duePayment });
+                }
+                
+                // No Leads Recently (0 leads in last 3 days for clients running 3+ days)
+                if (c.days >= 3 && c.last3DayLeads === 0) {
+                    flags.push({ type: 'leads', severity: 'high', icon: '📉', text: 'No Leads (3 Days)', detail: '0 leads in the last 3 days' });
+                }
+                
+                // No Leads in Last 7 Days
+                if (c.days >= 7 && c.last7DayLeads === 0) {
+                    flags.push({ type: 'leads', severity: 'high', icon: '🚨', text: 'No Leads (7 Days)', detail: '0 leads in the last 7 days' });
+                }
+                
+                // High CPL (over $50)
+                if (c.cpl > 50) {
+                    flags.push({ type: 'performance', severity: 'medium', icon: '📈', text: 'High CPL', detail: fmtD(c.cpl) + ' (above $50 threshold)' });
+                }
+                
+                // Missing Lead Sync
+                if (!c.leadySync || c.leadySync.trim() === '') {
+                    flags.push({ type: 'setup', severity: 'medium', icon: '🔄', text: 'Missing Leady Sync', detail: 'Lead sync not configured' });
+                }
+                
+                // Missing Campaign Type
+                if (!c.campaign || c.campaign.trim() === '') {
+                    flags.push({ type: 'setup', severity: 'low', icon: '🎯', text: 'Missing Campaign Type', detail: 'Campaign type not specified' });
+                }
+                
+                // Missing Start Date
+                if (!c.startDate || c.startDate.trim() === '') {
+                    flags.push({ type: 'setup', severity: 'low', icon: '📅', text: 'Missing Start Date', detail: 'No start date recorded' });
+                }
+                
+                // Missing State
+                if (!c.state || c.state.trim() === '') {
+                    flags.push({ type: 'setup', severity: 'low', icon: '📍', text: 'Missing State', detail: 'State not specified' });
+                }
+                
+                // No Appointments (for clients with 20+ leads)
+                if (c.leads >= 20 && c.appts === 0) {
+                    flags.push({ type: 'performance', severity: 'medium', icon: '📞', text: 'No Appointments', detail: c.leads + ' leads but 0 appointments' });
+                }
+                
+                // Red Flags from Setup Timing
+                if (s && s.redFlags && s.redFlags.trim() !== '') {
+                    flags.push({ type: 'manual', severity: 'high', icon: '🚩', text: 'Manual Red Flag', detail: s.redFlags });
+                }
+                
+                // Missing from Setup Timing
+                if (!s) {
+                    flags.push({ type: 'setup', severity: 'low', icon: '📋', text: 'Not in Setup Timing', detail: 'Client not found in Setup Timing sheet' });
+                }
+                
+                return flags;
+            };
+
+            // Get all clients with their flags
+            const clientsWithFlags = clients.map(c => ({
+                client: c,
+                setup: getSetupInfo(c),
+                flags: analyzeClient(c)
+            })).filter(c => c.flags.length > 0);
+
+            // Sort by severity (high first, then by number of flags)
+            clientsWithFlags.sort((a, b) => {
+                const aHigh = a.flags.filter(f => f.severity === 'high').length;
+                const bHigh = b.flags.filter(f => f.severity === 'high').length;
+                if (aHigh !== bHigh) return bHigh - aHigh;
+                return b.flags.length - a.flags.length;
+            });
+
+            // Count by severity
+            const highCount = clientsWithFlags.filter(c => c.flags.some(f => f.severity === 'high')).length;
+            const mediumCount = clientsWithFlags.filter(c => c.flags.some(f => f.severity === 'medium') && !c.flags.some(f => f.severity === 'high')).length;
+            const lowCount = clientsWithFlags.filter(c => !c.flags.some(f => f.severity === 'high') && !c.flags.some(f => f.severity === 'medium')).length;
+
+            // Count by type
+            const paymentIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'payment')).length;
+            const leadIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'leads')).length;
+            const setupIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'setup')).length;
+            const perfIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'performance')).length;
+
+            const severityColors = {
+                high: 'bg-red-500/20 border-red-500/50 text-red-400',
+                medium: 'bg-amber-500/20 border-amber-500/50 text-amber-400',
+                low: 'bg-slate-500/20 border-slate-500/50 text-slate-400'
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="card p-4 border-l-4 border-red-500">
+                            <div className="text-3xl font-bold text-red-400">{highCount}</div>
+                            <div className="text-xs text-slate-400">Critical Issues</div>
+                        </div>
+                        <div className="card p-4 border-l-4 border-amber-500">
+                            <div className="text-3xl font-bold text-amber-400">{mediumCount}</div>
+                            <div className="text-xs text-slate-400">Warnings</div>
+                        </div>
+                        <div className="card p-4 border-l-4 border-slate-500">
+                            <div className="text-3xl font-bold text-slate-400">{lowCount}</div>
+                            <div className="text-xs text-slate-400">Minor Issues</div>
+                        </div>
+                        <div className="card p-4 border-l-4 border-emerald-500">
+                            <div className="text-3xl font-bold text-emerald-400">{clients.length - clientsWithFlags.length}</div>
+                            <div className="text-xs text-slate-400">Healthy Clients</div>
+                        </div>
+                    </div>
+
+                    {/* Issue Type Breakdown */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="card p-4 flex items-center gap-3">
+                            <span className="text-2xl">💳</span>
+                            <div><div className="text-xl font-bold text-white">{paymentIssues}</div><div className="text-xs text-slate-400">Payment Issues</div></div>
+                        </div>
+                        <div className="card p-4 flex items-center gap-3">
+                            <span className="text-2xl">📉</span>
+                            <div><div className="text-xl font-bold text-white">{leadIssues}</div><div className="text-xs text-slate-400">Lead Issues</div></div>
+                        </div>
+                        <div className="card p-4 flex items-center gap-3">
+                            <span className="text-2xl">⚙️</span>
+                            <div><div className="text-xl font-bold text-white">{setupIssues}</div><div className="text-xs text-slate-400">Setup Issues</div></div>
+                        </div>
+                        <div className="card p-4 flex items-center gap-3">
+                            <span className="text-2xl">📊</span>
+                            <div><div className="text-xl font-bold text-white">{perfIssues}</div><div className="text-xs text-slate-400">Performance Issues</div></div>
+                        </div>
+                    </div>
+
+                    {/* Client List with Flags */}
+                    <div className="card">
+                        <div className="p-4 border-b border-dark-700">
+                            <h3 className="text-lg font-semibold text-white">🚩 Clients Needing Attention ({clientsWithFlags.length})</h3>
+                        </div>
+                        <div className="divide-y divide-dark-700">
+                            {clientsWithFlags.length === 0 ? (
+                                <div className="p-8 text-center text-slate-500">
+                                    <span className="text-4xl">✅</span>
+                                    <p className="mt-2">No red flags detected! All clients look healthy.</p>
+                                </div>
+                            ) : (
+                                clientsWithFlags.map(({ client, setup, flags }) => (
+                                    <div 
+                                        key={client.client} 
+                                        className="p-4 hover:bg-dark-800 cursor-pointer transition-colors"
+                                        onClick={() => onSelectClient(client)}
+                                    >
+                                        <div className="flex items-start justify-between mb-2">
+                                            <div>
+                                                <div className="font-semibold text-white">{client.client}</div>
+                                                <div className="text-xs text-slate-500">
+                                                    {client.state || 'No state'} • Day {client.days} • {fmtN(client.leads)} leads • {fmtD(client.cpl)} CPL
+                                                    {setup && setup.csmRep && ' • CSM: ' + setup.csmRep}
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {flags.some(f => f.severity === 'high') && <span className="px-2 py-1 text-xs rounded bg-red-500/20 text-red-400">Critical</span>}
+                                                {flags.some(f => f.severity === 'medium') && !flags.some(f => f.severity === 'high') && <span className="px-2 py-1 text-xs rounded bg-amber-500/20 text-amber-400">Warning</span>}
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {flags.map((flag, i) => (
+                                                <div 
+                                                    key={i} 
+                                                    className={'px-2 py-1 rounded border text-xs ' + severityColors[flag.severity]}
+                                                    title={flag.detail}
+                                                >
+                                                    {flag.icon} {flag.text}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== MAIN APP ==========
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+            const [clients, setClients] = useState([]);
+            const [setupData, setSetupData] = useState([]);
+            const [selected, setSelected] = useState(null);
+            const [tab, setTab] = useState('redflags');
+            const [loading, setLoading] = useState(true);
+            const [theme, setTheme] = useState('dark');
+
+            // Theme toggle function
+            const toggleTheme = () => {
+                const newTheme = theme === 'dark' ? 'light' : 'dark';
+                setTheme(newTheme);
+                document.body.className = 'min-h-screen ' + newTheme;
+            };
+
+            useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => { setUser(session?.user || null); setAuthLoading(false); });
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user || null));
+                return () => subscription.unsubscribe();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const params = new URLSearchParams(window.location.search);
+                const clientParam = params.get('client');
+                
+                // Try to load from cache first for instant display
+                const cachedClients = localStorage.getItem('vam_clients');
+                const cachedSetup = localStorage.getItem('vam_setup');
+                const cacheTime = localStorage.getItem('vam_cache_time');
+                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
+                
+                // Use cache if less than 5 minutes old
+                if (cachedClients && cachedSetup && cacheAge < 300000) {
+                    const c = JSON.parse(cachedClients);
+                    const s = JSON.parse(cachedSetup);
+                    setClients(c);
+                    setSetupData(s);
+                    if (clientParam) { 
+                        const found = c.find(x => x.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase()); 
+                        if (found) setSelected(found); 
+                    }
+                    setLoading(false);
+                    // Still fetch fresh data in background
+                    fetchFreshData(clientParam, false);
+                } else {
+                    // No cache or expired, fetch fresh
+                    fetchFreshData(clientParam, true);
+                }
+            }, [user]);
+
+            const fetchFreshData = (clientParam, updateLoading) => {
+                Promise.all([
+                    // Client Ads Performance - headers in row 2, skip row 1
+                    fetch(URLS.clientAdsPerformance).then(r => r.text()).then(csv => {
+                        const lines = csv.split('\n');
+                        const newCsv = [lines[1], ...lines.slice(2)].join('\n');
+                        return Papa.parse(newCsv, { header: true, skipEmptyLines: true }).data.map(mapClient).filter(r => r.client);
+                    }),
+                    // Setup Timing - headers in row 1, skip row 2
+                    fetch(URLS.setupTiming).then(r => r.text()).then(csv => { 
+                        const lines = csv.split('\n'); 
+                        return Papa.parse([lines[0], ...lines.slice(2)].join('\n'), { header: true, skipEmptyLines: true }).data.map(mapSetupTiming).filter(r => r.client); 
+                    })
+                ]).then(([c, s]) => {
+                    // Save to cache
+                    localStorage.setItem('vam_clients', JSON.stringify(c));
+                    localStorage.setItem('vam_setup', JSON.stringify(s));
+                    localStorage.setItem('vam_cache_time', Date.now().toString());
+                    
+                    setClients(c); 
+                    setSetupData(s);
+                    if (clientParam) { 
+                        const found = c.find(x => x.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase()); 
+                        if (found) setSelected(found); 
+                    }
+                    if (updateLoading) setLoading(false);
+                });
+            };
+
+            const getSetupInfo = (client) => {
+                if (!client) return null;
+                const name = client.client.toLowerCase().trim();
+                return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn) || name.split(' ').filter(p => p.length > 2).some(p => sn.includes(p)); });
+            };
+
+            // Show loading only while checking auth status
+            if (authLoading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+            // Show login page if not authenticated
+            if (!user) return <LoginPage onLogin={setUser} />;
+            // Show loading while fetching data (only for authenticated users)
+            if (loading) return <div className="min-h-screen flex items-center justify-center text-4xl">⏳</div>;
+
+            const s = getSetupInfo(selected);
+
+            // Check if selected client exists in ads performance data
+            const isMissingFromAdsSheet = selected ? false : false; // Will be set properly below
+
+            const renderTab = () => {
+                switch (tab) {
+                    case 'redflags': return <RedFlagsTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
+                    case 'health': return <ClientHealthTab c={selected} s={s} isMissingFromAdsSheet={false} />;
+                    case 'notes': return <NotesActivityTab c={selected} />;
+                    default: return <RedFlagsTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
+                }
+            };
+
+            return (
+                <AuthContext.Provider value={{ user }}>
+                    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+                        <div className="flex min-h-screen">
+                            <aside className="w-72 sidebar border-r flex flex-col divider">
+                                <div className="p-5 border-b divider">
+                                    <h1 className="text-xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">VAM Client Success Hub</h1>
+                                    <div className="flex items-center gap-2 mt-2"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span className="text-xs text-secondary">{getDisplayName(user.email, user)}</span></div>
+                                </div>
+                                <div className="p-4">
+                                    <select value={selected ? selected.client : ''} onChange={e => setSelected(clients.find(c => c.client === e.target.value))} className="w-full input-field border rounded-xl px-4 py-3 text-sm">
+                                        <option value="">Select a client...</option>
+                                        {clients.map(c => <option key={c.client} value={c.client}>{c.client}</option>)}
+                                    </select>
+                                </div>
+                                <nav className="py-2">
+                                    {tabs.map(t => (
+                                        <button key={t.id} onClick={() => setTab(t.id)} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === t.id ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
+                                            <span className="text-lg">{t.icon}</span>
+                                            <div><div className="text-sm font-medium">{t.name}</div><div className="text-xs text-muted">{t.desc}</div></div>
+                                        </button>
+                                    ))}
+                                </nav>
+                            
+                            {/* Client Comparison Section */}
+                            <div className="flex-1 overflow-y-auto border-t border-dark-700">
+                                <div className="p-4">
+                                    <h3 className="text-xs font-semibold text-slate-500 uppercase mb-3">All Clients</h3>
+                                    <div className="space-y-1 max-h-[400px] overflow-y-auto scrollbar">
+                                        {setupData.map(setup => {
+                                            const inAdsPerf = clients.some(c => {
+                                                const cn = c.client.toLowerCase().trim();
+                                                const sn = setup.client.toLowerCase().trim();
+                                                return cn === sn || cn.includes(sn) || sn.includes(cn);
+                                            });
+                                            const adsClient = clients.find(c => {
+                                                const cn = c.client.toLowerCase().trim();
+                                                const sn = setup.client.toLowerCase().trim();
+                                                return cn === sn || cn.includes(sn) || sn.includes(cn);
+                                            });
+                                            return (
+                                                <div 
+                                                    key={setup.client}
+                                                    onClick={() => { if (adsClient) setSelected(adsClient); }}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
+                                                        selected && adsClient && selected.client === adsClient.client 
+                                                            ? 'bg-brand-cyan/20 text-white' 
+                                                            : inAdsPerf 
+                                                                ? 'hover:bg-dark-800 text-slate-300' 
+                                                                : 'hover:bg-dark-800 text-slate-500'
+                                                    }`}
+                                                >
+                                                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${inAdsPerf ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                                    <span className="truncate flex-1">{setup.client}</span>
+                                                    {!inAdsPerf && <span className="text-xs text-red-400">Missing</span>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="mt-3 pt-3 border-t border-dark-700 text-xs text-slate-500">
+                                        <div className="flex items-center gap-2 mb-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> In Ads Performance</div>
+                                        <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-red-500"></span> Missing from Ads</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="p-4 border-t border-dark-700 space-y-2">
+                                <a href="dashboard.html" className="block w-full text-center py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm">→ Media Buyer Overview</a>
+                                <button onClick={() => supabase.auth.signOut()} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">Logout</button>
+                            </div>
+                        </aside>
+                        <main className="flex-1 flex flex-col">
+                            <header className="header-bar backdrop-blur border-b px-8 py-4 flex items-center justify-between divider">
+                                <div>
+                                    {selected ? (
+                                        <div className="flex items-center gap-4">
+                                            <h2 className="text-xl font-bold text-primary">{selected.client}</h2>
+                                            <span className={'px-3 py-1 rounded-full text-sm ' + getHealthColor(getHealthScore(selected, s)).text + ' bg-dark-800'}>{getHealthColor(getHealthScore(selected, s)).label}</span>
+                                            <span className="text-secondary">Day {selected.days}</span>
+                                            {s && s.csmRep && <span className="text-brand-purple text-sm">CSM: {s.csmRep}</span>}
+                                            {s && s.mrr && <span className="text-emerald-400 text-sm">MRR: {s.mrr}</span>}
+                                        </div>
+                                    ) : (
+                                        <h2 className="text-xl text-secondary">{tab === 'redflags' ? '🚩 Red Flags Dashboard' : 'Select a client to get started'}</h2>
+                                    )}
+                                </div>
+                                <button 
+                                    onClick={toggleTheme}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 transition-colors text-sm"
+                                >
+                                    {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+                                </button>
+                            </header>
+                            <div className="flex-1 overflow-y-auto p-8 scrollbar">{renderTab()}</div>
+                        </main>
+                    </div>
+                </ThemeContext.Provider>
+                </AuthContext.Provider>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
