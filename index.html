@@ -90,6 +90,19 @@
             return email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
         };
 
+        // API Key Management - stored in browser localStorage for security
+        const API_KEY_STORAGE_KEY = 'anthropic_api_key';
+        const getAnthropicApiKey = () => localStorage.getItem(API_KEY_STORAGE_KEY);
+        const setAnthropicApiKey = (key) => localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        const promptForApiKey = () => {
+            const key = window.prompt('Enter your Anthropic API key:\n(Get one from https://console.anthropic.com/settings/keys)');
+            if (key && key.trim().startsWith('sk-ant-')) {
+                setAnthropicApiKey(key.trim());
+                return key.trim();
+            }
+            return null;
+        };
+
         // Map Client Ads Performance sheet - headers in row 2 (A2:BA2)
         const mapClient = r => {
             const sellerLeads = pn(r['Lifetime Seller Leads']);
@@ -1175,16 +1188,37 @@
                 if (!situation.trim()) return;
                 setLoading(true);
                 try {
-                    const promptText = 'You are a CSM helping on a live call. Client: ' + (c?.client || 'Unknown') + ', ' + (c?.leads || 0) + ' leads, ' + fmtD(c?.cpl || 0) + ' CPL, ' + (c?.appts || 0) + ' appts. Help with: "' + situation + '". Brief, practical response.';
+                    const ANTHROPIC_API_KEY = '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';
+
+                    const promptText = `You are a CSM (Customer Success Manager) helping on a live call with a real estate lead generation client.
+
+Client: ${c?.client || 'Unknown'}
+Leads: ${c?.leads || 0}
+CPL: ${fmtD(c?.cpl || 0)}
+Appointments: ${c?.appts || 0}
+
+The CSM needs help with this situation: "${situation}"
+
+Provide a brief, practical response that the CSM can use immediately on the call. Be direct and actionable. Keep it under 200 words.`;
+
                     const res = await fetch('https://api.anthropic.com/v1/messages', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 500,
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': ANTHROPIC_API_KEY,
+                            'anthropic-version': '2023-06-01',
+                            'anthropic-dangerous-direct-browser-access': 'true'
+                        },
+                        body: JSON.stringify({
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 500,
                             messages: [{ role: 'user', content: promptText }]
                         })
                     });
                     const data = await res.json();
+                    if (data.error) throw new Error(data.error.message);
                     setResponse(data.content?.[0]?.text || 'Could not generate response.');
-                } catch (err) { setResponse('AI unavailable. Try quick responses below.'); }
+                } catch (err) { setResponse('AI unavailable: ' + err.message + '. Try quick responses below.'); }
                 setLoading(false);
             };
 
@@ -1387,6 +1421,8 @@
             const processTranscript = async () => {
                 setProcessing(true);
                 try {
+                    const ANTHROPIC_API_KEY = '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';
+
                     const promptContent = `Analyze this meeting transcript for client "${c?.client || 'Unknown'}".
 
 Extract ALL details and return a comprehensive JSON object with this exact structure:
@@ -1402,7 +1438,7 @@ Extract ALL details and return a comprehensive JSON object with this exact struc
     "actionItems": [{"task": "Specific task", "owner": "Person responsible", "dueDate": "If mentioned, otherwise null", "priority": "high/medium/low"}],
     "decisions": ["Any decisions made during the meeting"],
     "concerns": ["Any concerns or issues raised by the client"],
-    "followUpNeeded": true/false,
+    "followUpNeeded": true,
     "followUpItems": ["Specific follow-up items needed"],
     "riskLevel": "low/medium/high",
     "riskFactors": ["Reasons for the risk level"],
@@ -1414,20 +1450,32 @@ Extract ALL details and return a comprehensive JSON object with this exact struc
 }
 
 Be thorough and extract as much information as possible. If something isn't mentioned, use null or empty array.
+Return ONLY the JSON object, no markdown formatting.
 
 TRANSCRIPT:
 ${transcript}`;
 
                     const res = await fetch('https://api.anthropic.com/v1/messages', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': ANTHROPIC_API_KEY,
+                            'anthropic-version': '2023-06-01',
+                            'anthropic-dangerous-direct-browser-access': 'true'
+                        },
                         body: JSON.stringify({
                             model: 'claude-sonnet-4-20250514',
                             max_tokens: 2000,
                             messages: [{ role: 'user', content: promptContent }]
                         })
                     });
+
                     const data = await res.json();
+
+                    if (data.error) {
+                        throw new Error(data.error.message || 'API error');
+                    }
+
                     const responseText = data.content?.[0]?.text || '{}';
                     // Extract JSON from response (handle markdown code blocks)
                     const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/) || [null, responseText];
@@ -1440,7 +1488,7 @@ ${transcript}`;
                 } catch (err) {
                     console.error('AI Analysis error:', err);
                     setSummary({
-                        summary: 'Transcript saved (AI analysis failed).',
+                        summary: 'Transcript saved (AI analysis failed: ' + err.message + ')',
                         keyPoints: [],
                         actionItems: [],
                         riskLevel: 'medium',
