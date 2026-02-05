@@ -1465,9 +1465,20 @@ ${transcript}`;
                     }
 
                     const responseText = data.content?.[0]?.text || '{}';
-                    // Extract JSON from response (handle markdown code blocks)
-                    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/) || [null, responseText];
-                    const parsedSummary = JSON.parse(jsonMatch[1] || responseText);
+                    // Extract JSON from response (handle markdown code blocks or text before JSON)
+                    let jsonStr = responseText;
+                    // Try markdown code blocks first
+                    const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+                    if (codeBlockMatch) {
+                        jsonStr = codeBlockMatch[1];
+                    } else {
+                        // Find JSON object in text (starts with { ends with })
+                        const jsonObjMatch = responseText.match(/\{[\s\S]*\}/);
+                        if (jsonObjMatch) {
+                            jsonStr = jsonObjMatch[0];
+                        }
+                    }
+                    const parsedSummary = JSON.parse(jsonStr);
                     setSummary(parsedSummary);
                     // Auto-set meeting title if extracted
                     if (parsedSummary.title && !meetingTitle) {
