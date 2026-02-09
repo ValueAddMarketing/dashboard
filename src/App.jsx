@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { useClients } from './hooks/useClients';
 import { Sidebar, Header, LoginPage } from './components';
-import { RedFlagsPage, ClientHealthPage, NotesActivityPage } from './pages';
+import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage } from './pages';
 import { CLIENT_HUB_TABS } from './utils/constants';
 
 /**
@@ -31,8 +31,8 @@ const AppLayout = () => {
 
   const handleSelectClient = (client) => {
     setSelectedClient(client);
-    // Navigate to health tab when selecting a client
-    if (location.pathname.includes('redflags')) {
+    // Navigate to health tab when selecting a client from overview or redflags
+    if (location.pathname.includes('redflags') || location.pathname.includes('overview')) {
       navigate('/client/health');
     }
   };
@@ -62,7 +62,7 @@ const AppLayout = () => {
 
   const setup = getSetupInfo(selectedClient);
   const currentTab = location.pathname.split('/').pop() || 'redflags';
-  const headerTitle = currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : undefined;
+  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : undefined;
 
   return (
     <div className="flex min-h-screen">
@@ -81,6 +81,16 @@ const AppLayout = () => {
         />
         <div className="flex-1 overflow-y-auto p-8 scrollbar">
           <Routes>
+            <Route
+              path="overview"
+              element={
+                <OverviewPage
+                  clients={clients}
+                  setupData={setupData}
+                  onSelectClient={handleSelectClient}
+                />
+              }
+            />
             <Route
               path="redflags"
               element={
@@ -108,7 +118,7 @@ const AppLayout = () => {
                 />
               }
             />
-            <Route path="*" element={<Navigate to="redflags" replace />} />
+            <Route path="*" element={<Navigate to="overview" replace />} />
           </Routes>
         </div>
       </main>
@@ -126,7 +136,7 @@ const App = () => {
         <ThemeProvider>
           <Routes>
             <Route path="/client/*" element={<AppLayout />} />
-            <Route path="*" element={<Navigate to="/client/redflags" replace />} />
+            <Route path="*" element={<Navigate to="/client/overview" replace />} />
           </Routes>
         </ThemeProvider>
       </AuthProvider>
