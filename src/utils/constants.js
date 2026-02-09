@@ -26,6 +26,7 @@ export const HEALTH_COLORS = {
 
 // Tab definitions for Client Success Hub
 export const CLIENT_HUB_TABS = [
+  { id: 'overview', name: 'Overview', icon: '📊', desc: 'General overview of all clients' },
   { id: 'redflags', name: 'Red Flags', icon: '🚩', desc: 'Clients needing attention' },
   { id: 'health', name: 'Client Health', icon: '❤️', desc: 'Overview of client status and metrics' },
   { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
