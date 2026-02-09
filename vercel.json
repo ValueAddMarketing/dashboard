@@ -1,0 +1,5 @@
+{
+  "buildCommand": "mkdir -p dist && cp index.html dashboard.html dist/",
+  "outputDirectory": "dist",
+  "cleanUrls": true
+}
