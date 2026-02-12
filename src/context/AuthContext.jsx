@@ -9,10 +9,17 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     // Check current session on mount
-    getSession().then(({ session }) => {
-      setUser(session?.user || null);
-      setLoading(false);
-    });
+    getSession()
+      .then(({ session }) => {
+        setUser(session?.user || null);
+      })
+      .catch((err) => {
+        console.error('Auth session check failed:', err);
+        setUser(null);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
 
     // Listen for auth changes
     const { data: { subscription } } = onAuthStateChange((user) => {
