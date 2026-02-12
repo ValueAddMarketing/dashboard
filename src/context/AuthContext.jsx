@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
     // Check current session on mount
@@ -39,10 +40,21 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async () => {
-    const { error } = await signInWithGoogle();
-    if (error) {
-      console.error('Login error:', error);
-      throw error;
+    setAuthError(null);
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) {
+        console.error('Login error:', error);
+        throw error;
+      }
+    } catch (err) {
+      if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+        const friendlyError = new Error('Unable to reach the authentication server. The Supabase project may be paused or your internet connection may be down.');
+        setAuthError(friendlyError.message);
+        throw friendlyError;
+      }
+      setAuthError(err.message);
+      throw err;
     }
   };
 
@@ -58,6 +70,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     loading,
+    authError,
     login,
     logout,
     isAuthenticated: !!user

@@ -16,7 +16,11 @@ export const LoginPage = () => {
       const { error } = await signInWithGoogle();
       if (error) throw error;
     } catch (err) {
-      setError(err.message);
+      if (err.message === 'Failed to fetch' || err.message?.includes('NetworkError') || err.name === 'TypeError') {
+        setError('Unable to reach the authentication server. The Supabase project may be paused or your internet connection may be down. Please check your connection and try again.');
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -34,7 +38,15 @@ export const LoginPage = () => {
 
         {error && (
           <div className="p-4 mb-6 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
-            {error}
+            <p>{error}</p>
+            {error.includes('authentication server') && (
+              <button
+                onClick={handleGoogleLogin}
+                className="mt-3 text-brand-cyan hover:underline text-xs"
+              >
+                Try again
+              </button>
+            )}
           </div>
         )}
 
