@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { supabase, getSession, onAuthStateChange, signInWithGoogle, signOut, signOutLocal } from '../services/supabase';
+import { supabase, getSession, onAuthStateChange, signInWithGoogle, signOut, signOutLocal, clearLocalAuthTokens } from '../services/supabase';
 
 const AuthContext = createContext(null);
 
@@ -14,8 +14,9 @@ export const AuthProvider = ({ children }) => {
       .then(async ({ session, error }) => {
         if (error) {
           console.error('Auth session error:', error);
-          // Clear stale local session so Supabase stops retrying token refresh
-          await signOutLocal().catch(() => {});
+          // Clear stale local tokens — use direct localStorage clear as fallback
+          // since signOutLocal itself will fail if Supabase is unreachable
+          await signOutLocal().catch(() => clearLocalAuthTokens());
           setUser(null);
           return;
         }
@@ -23,8 +24,9 @@ export const AuthProvider = ({ children }) => {
       })
       .catch(async (err) => {
         console.error('Auth session check failed:', err);
-        // Clear stale local session so Supabase stops retrying token refresh
-        await signOutLocal().catch(() => {});
+        // Supabase is unreachable — clear tokens directly from localStorage
+        // to stop the client from endlessly retrying token refresh
+        clearLocalAuthTokens();
         setUser(null);
       })
       .finally(() => {

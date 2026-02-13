@@ -1,8 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/constants';
 
+// Extract project ref from URL for localStorage key
+const supabaseRef = SUPABASE_URL.match(/https:\/\/([^.]+)\./)?.[1] || '';
+
 // Create Supabase client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Manually clear Supabase auth tokens from localStorage.
+// Used when the project is unreachable and signOutLocal() itself would fail.
+export const clearLocalAuthTokens = () => {
+  try {
+    localStorage.removeItem(`sb-${supabaseRef}-auth-token`);
+  } catch {}
+};
 
 // ============ AUTH FUNCTIONS ============
 
