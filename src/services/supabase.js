@@ -17,6 +17,22 @@ export const clearLocalAuthTokens = () => {
 
 // ============ AUTH FUNCTIONS ============
 
+export const signUpWithEmail = async (email, password) => {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+  });
+  return { data, error };
+};
+
+export const signInWithEmail = async (email, password) => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  return { data, error };
+};
+
 export const signInWithGoogle = async () => {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',

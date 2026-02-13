@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { supabase, getSession, onAuthStateChange, signInWithGoogle, signOut, signOutLocal, clearLocalAuthTokens } from '../services/supabase';
+import { supabase, getSession, onAuthStateChange, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, signOutLocal, clearLocalAuthTokens } from '../services/supabase';
 
 const AuthContext = createContext(null);
 
@@ -60,6 +60,27 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const loginWithEmail = async (email, password) => {
+    setAuthError(null);
+    const { data, error } = await signInWithEmail(email, password);
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
+    setUser(data.user);
+    return data;
+  };
+
+  const signup = async (email, password) => {
+    setAuthError(null);
+    const { data, error } = await signUpWithEmail(email, password);
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
+    return data;
+  };
+
   const logout = async () => {
     const { error } = await signOut();
     if (error) {
@@ -74,6 +95,8 @@ export const AuthProvider = ({ children }) => {
     loading,
     authError,
     login,
+    loginWithEmail,
+    signup,
     logout,
     isAuthenticated: !!user
   };
