@@ -98,6 +98,7 @@ export const useMeetings = (clientName) => {
         positive_signals: analysis?.positiveSignals || [],
         warning_signals: analysis?.warningSignals || [],
         user_email: user?.email,
+        user_id: user?.id,
         created_by_name: getDisplayName(user?.email, user)
       };
 
