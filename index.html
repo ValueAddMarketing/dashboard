@@ -1658,7 +1658,7 @@ ${transcript}`;
                         <h3 className="text-lg font-semibold text-white mb-4">📝 Quick Notes</h3>
                         <div className="flex gap-3">
                             <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyPress={e => e.key === 'Enter' && addNote()} placeholder="Add a note..." className="flex-1 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" />
-                            <button onClick={addNote} className="px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Add</button>
+                            <button onClick={() => addNote()} className="px-6 py-3 bg-brand-cyan text-dark-900 font-semibold rounded-xl">Add</button>
                         </div>
                     </div>
 
