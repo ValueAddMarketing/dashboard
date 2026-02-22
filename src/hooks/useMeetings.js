@@ -78,32 +78,41 @@ export const useMeetings = (clientName) => {
     setError(null);
 
     try {
+      const meetingTitle = meetingData.title || analysis?.title || 'Meeting Notes';
+
+      // Extra analysis fields stored as JSON in ad_performance_notes
+      const extraAnalysis = analysis ? {
+        title: meetingTitle,
+        duration: analysis.duration || null,
+        participants: analysis.participants || [],
+        topics: analysis.topics || [],
+        sentimentExplanation: analysis.sentimentExplanation || null,
+        decisions: analysis.decisions || [],
+        followUpNeeded: analysis.followUpNeeded || false,
+        followUpItems: analysis.followUpItems || [],
+        riskFactors: analysis.riskFactors || [],
+        clientRequests: analysis.clientRequests || [],
+        positiveSignals: analysis.positiveSignals || [],
+        warningSignals: analysis.warningSignals || [],
+        createdByName: getDisplayName(user?.email, user)
+      } : null;
+
+      // Only insert columns that exist in the meeting_notes table
       const fullMeetingData = {
         client_name: clientName,
         meeting_date: meetingData.date,
-        meeting_title: meetingData.title || analysis?.title || 'Meeting Notes',
+        meeting_type: meetingTitle,
         transcript: meetingData.transcript,
         summary: analysis?.summary || 'Manual entry',
-        duration: analysis?.duration || null,
-        participants: analysis?.participants || [],
-        topics: analysis?.topics || [],
         client_sentiment: analysis?.clientSentiment || 'neutral',
-        sentiment_explanation: analysis?.sentimentExplanation || null,
         key_points: analysis?.keyPoints || [],
         action_items: analysis?.actionItems || [],
-        decisions: analysis?.decisions || [],
-        concerns: analysis?.concerns || [],
-        follow_up_needed: analysis?.followUpNeeded || false,
-        follow_up_items: analysis?.followUpItems || [],
+        client_concerns: analysis?.concerns || [],
         risk_level: analysis?.riskLevel || 'medium',
-        risk_factors: analysis?.riskFactors || [],
-        next_steps: analysis?.nextSteps || [],
-        client_requests: analysis?.clientRequests || [],
-        positive_signals: analysis?.positiveSignals || [],
-        warning_signals: analysis?.warningSignals || [],
+        next_steps: JSON.stringify(analysis?.nextSteps || []),
+        ad_performance_notes: extraAnalysis ? JSON.stringify(extraAnalysis) : null,
         user_email: user?.email,
-        user_id: user?.id,
-        created_by_name: getDisplayName(user?.email, user)
+        user_id: user?.id
       };
 
       const { data, error: err } = await addMeetingService(fullMeetingData);
@@ -118,7 +127,7 @@ export const useMeetings = (clientName) => {
         if (analysis.importantNotes?.length > 0) {
           for (const note of analysis.importantNotes) {
             await addNoteCallback(
-              `📌 [From ${fullMeetingData.meeting_title} on ${meetingData.date}] ${note}`,
+              `📌 [From ${meetingTitle} on ${meetingData.date}] ${note}`,
               'ai_extracted'
             );
           }
@@ -146,7 +155,7 @@ export const useMeetings = (clientName) => {
         user_email: user?.email,
         client_name: clientName,
         action: 'Added meeting notes',
-        details: `${fullMeetingData.meeting_title}: ${(analysis?.summary || 'Manual entry').substring(0, 100)}`
+        details: `${meetingTitle}: ${(analysis?.summary || 'Manual entry').substring(0, 100)}`
       });
 
       setAnalysis(null);

@@ -1,6 +1,31 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, Badge } from '../../components';
 import { getDisplayName } from '../../utils/formatters';
+
+/**
+ * Parse extra analysis data stored in ad_performance_notes JSON
+ */
+const getExtra = (meeting) => {
+  if (!meeting.ad_performance_notes) return {};
+  try {
+    return typeof meeting.ad_performance_notes === 'string'
+      ? JSON.parse(meeting.ad_performance_notes)
+      : meeting.ad_performance_notes;
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Parse a field that may be a JSON string or an array
+ */
+const parseJsonField = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try { return JSON.parse(value); } catch { return []; }
+  }
+  return [];
+};
 
 /**
  * Meeting history with expandable details
@@ -28,7 +53,22 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
         <div className="text-slate-500 text-center py-4">No meetings recorded</div>
       ) : (
         <div className="space-y-4 max-h-[600px] overflow-y-auto scrollbar">
-          {meetings.map(m => (
+          {meetings.map(m => {
+            const extra = getExtra(m);
+            const title = m.meeting_title || extra.title || m.meeting_type || 'Meeting';
+            const concerns = m.concerns || m.client_concerns || [];
+            const participants = m.participants || extra.participants || [];
+            const topics = m.topics || extra.topics || [];
+            const duration = m.duration || extra.duration;
+            const decisions = m.decisions || extra.decisions || [];
+            const riskFactors = m.risk_factors || extra.riskFactors || [];
+            const warningSignals = m.warning_signals || extra.warningSignals || [];
+            const positiveSignals = m.positive_signals || extra.positiveSignals || [];
+            const followUpNeeded = m.follow_up_needed || extra.followUpNeeded || false;
+            const sentimentExplanation = m.sentiment_explanation || extra.sentimentExplanation;
+            const createdByName = m.created_by_name || extra.createdByName;
+
+            return (
             <div
               key={m.id}
               className={`bg-dark-800 rounded-xl overflow-hidden ${getRiskBorderColor(m.risk_level)}`}
@@ -41,7 +81,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                 <div className="flex flex-wrap justify-between items-start gap-2">
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
-                      <span className="text-white font-semibold">{m.meeting_title || 'Meeting'}</span>
+                      <span className="text-white font-semibold">{title}</span>
                       <span className="text-slate-400 text-sm">
                         {new Date(m.meeting_date).toLocaleDateString()}
                       </span>
@@ -61,11 +101,11 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500">
-                  <span>📝 Added by: <span className="text-brand-purple">{m.created_by_name || getDisplayName(m.user_email)}</span></span>
-                  {m.duration && <span>⏱️ {m.duration}</span>}
-                  {m.participants?.length > 0 && <span>👥 {m.participants.length} participants</span>}
+                  <span>📝 Added by: <span className="text-brand-purple">{createdByName || getDisplayName(m.user_email)}</span></span>
+                  {duration && <span>⏱️ {duration}</span>}
+                  {participants?.length > 0 && <span>👥 {participants.length} participants</span>}
                   {m.action_items?.length > 0 && <span>✅ {m.action_items.length} action items</span>}
-                  {m.follow_up_needed && <span className="text-amber-400">📞 Follow-up needed</span>}
+                  {followUpNeeded && <span className="text-amber-400">📞 Follow-up needed</span>}
                 </div>
               </div>
 
@@ -74,21 +114,21 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                 <div className="p-4 pt-0 border-t border-dark-700 space-y-4">
                   {/* Participants & Topics */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {m.participants?.length > 0 && (
+                    {participants?.length > 0 && (
                       <div>
                         <span className="text-brand-cyan text-xs font-medium">👥 Participants</span>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {m.participants.map((p, i) => (
+                          {participants.map((p, i) => (
                             <Badge key={i} variant="default" className="text-xs">{p}</Badge>
                           ))}
                         </div>
                       </div>
                     )}
-                    {m.topics?.length > 0 && (
+                    {topics?.length > 0 && (
                       <div>
                         <span className="text-brand-cyan text-xs font-medium">📋 Topics</span>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {m.topics.map((t, i) => (
+                          {topics.map((t, i) => (
                             <Badge key={i} variant="purple" className="text-xs">{t}</Badge>
                           ))}
                         </div>
@@ -143,11 +183,11 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   )}
 
                   {/* Decisions */}
-                  {m.decisions?.length > 0 && (
+                  {decisions?.length > 0 && (
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">🎯 Decisions Made</span>
                       <ul className="mt-1 space-y-1">
-                        {m.decisions.map((d, i) => (
+                        {decisions.map((d, i) => (
                           <li key={i} className="text-slate-300 text-xs">✓ {d}</li>
                         ))}
                       </ul>
@@ -155,33 +195,33 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   )}
 
                   {/* Concerns & Risk Factors */}
-                  {(m.concerns?.length > 0 || m.risk_factors?.length > 0 || m.warning_signals?.length > 0) && (
+                  {(concerns?.length > 0 || riskFactors?.length > 0 || warningSignals?.length > 0) && (
                     <div className="p-2 bg-red-500/10 rounded">
                       <span className="text-red-400 text-xs font-medium">⚠️ Concerns & Risks</span>
                       <ul className="mt-1 space-y-0.5">
-                        {m.concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {c}</li>)}
-                        {m.risk_factors?.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {r}</li>)}
-                        {m.warning_signals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {w}</li>)}
+                        {concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {c}</li>)}
+                        {riskFactors?.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {r}</li>)}
+                        {warningSignals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {w}</li>)}
                       </ul>
                     </div>
                   )}
 
                   {/* Positive Signals */}
-                  {m.positive_signals?.length > 0 && (
+                  {positiveSignals?.length > 0 && (
                     <div className="p-2 bg-emerald-500/10 rounded">
                       <span className="text-emerald-400 text-xs font-medium">✨ Positive Signals</span>
                       <ul className="mt-1 space-y-0.5">
-                        {m.positive_signals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {p}</li>)}
+                        {positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {p}</li>)}
                       </ul>
                     </div>
                   )}
 
                   {/* Next Steps */}
-                  {m.next_steps?.length > 0 && (
+                  {parseJsonField(m.next_steps)?.length > 0 && (
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">➡️ Next Steps</span>
                       <ul className="mt-1 space-y-0.5">
-                        {m.next_steps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
+                        {parseJsonField(m.next_steps).map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
                       </ul>
                     </div>
                   )}
@@ -199,9 +239,9 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   )}
 
                   {/* Sentiment Explanation */}
-                  {m.sentiment_explanation && (
+                  {sentimentExplanation && (
                     <div className="text-xs text-slate-500 italic">
-                      💭 Sentiment note: {m.sentiment_explanation}
+                      💭 Sentiment note: {sentimentExplanation}
                     </div>
                   )}
 
@@ -220,7 +260,8 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
     </Card>
