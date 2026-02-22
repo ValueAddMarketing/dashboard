@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { useClients } from './hooks/useClients';
-import { Sidebar, Header, LoginPage } from './components';
+import { Sidebar, Header, LoginPage, ErrorBoundary } from './components';
 import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage } from './pages';
 import { CLIENT_HUB_TABS } from './utils/constants';
 
@@ -80,6 +80,7 @@ const AppLayout = () => {
           title={headerTitle}
         />
         <div className="flex-1 overflow-y-auto p-8 scrollbar">
+          <ErrorBoundary>
           <Routes>
             <Route
               path="overview"
@@ -120,6 +121,7 @@ const AppLayout = () => {
             />
             <Route path="*" element={<Navigate to="overview" replace />} />
           </Routes>
+          </ErrorBoundary>
         </div>
       </main>
     </div>

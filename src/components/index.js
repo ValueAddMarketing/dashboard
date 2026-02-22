@@ -9,3 +9,4 @@ export { HealthScoreCard } from './HealthScoreCard';
 export { Sidebar } from './Sidebar';
 export { Header } from './Header';
 export { LoginPage } from './LoginPage';
+export { ErrorBoundary } from './ErrorBoundary';
