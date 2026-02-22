@@ -21,10 +21,13 @@ export const NotesActivityPage = ({ client }) => {
   const {
     meetings,
     analyzing,
+    saving,
     analysis,
+    error: meetingError,
     processTranscript,
     saveMeeting,
-    removeMeeting
+    removeMeeting,
+    clearError: clearMeetingError
   } = useMeetings(clientName);
 
   const { activities } = useActivities(clientName);
@@ -38,8 +41,11 @@ export const NotesActivityPage = ({ client }) => {
   }
 
   const handleSaveMeeting = async (meetingData) => {
-    await saveMeeting(meetingData, addNote);
-    refreshNotes();
+    const result = await saveMeeting(meetingData, addNote);
+    if (result) {
+      refreshNotes();
+    }
+    return result;
   };
 
   return (
@@ -59,7 +65,10 @@ export const NotesActivityPage = ({ client }) => {
         onAnalyze={processTranscript}
         onSave={handleSaveMeeting}
         analyzing={analyzing}
+        saving={saving}
         analysis={analysis}
+        error={meetingError}
+        onClearError={clearMeetingError}
       />
 
       {/* Meeting History */}

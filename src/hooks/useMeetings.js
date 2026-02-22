@@ -16,6 +16,7 @@ export const useMeetings = (clientName) => {
   const { user } = useAuth();
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState(null);
@@ -73,6 +74,9 @@ export const useMeetings = (clientName) => {
   const saveMeeting = async (meetingData, addNoteCallback) => {
     if (!meetingData.transcript?.trim() && !analysis) return null;
 
+    setSaving(true);
+    setError(null);
+
     try {
       const fullMeetingData = {
         client_name: clientName,
@@ -103,7 +107,8 @@ export const useMeetings = (clientName) => {
       };
 
       const { data, error: err } = await addMeetingService(fullMeetingData);
-      if (err) throw err;
+      if (err) throw new Error(err.message || 'Failed to save meeting to database');
+      if (!data) throw new Error('No data returned after saving meeting');
 
       setMeetings(prev => [data, ...prev]);
 
@@ -145,10 +150,16 @@ export const useMeetings = (clientName) => {
       });
 
       setAnalysis(null);
+
+      // Refresh from database to confirm persistence
+      await loadMeetings();
+
       return data;
     } catch (err) {
       setError(err.message);
       return null;
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -174,10 +185,12 @@ export const useMeetings = (clientName) => {
   };
 
   const clearAnalysis = () => setAnalysis(null);
+  const clearError = () => setError(null);
 
   return {
     meetings,
     loading,
+    saving,
     analyzing,
     analysis,
     error,
@@ -185,6 +198,7 @@ export const useMeetings = (clientName) => {
     saveMeeting,
     removeMeeting,
     clearAnalysis,
+    clearError,
     refreshMeetings: loadMeetings
   };
 };

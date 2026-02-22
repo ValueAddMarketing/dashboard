@@ -8,13 +8,17 @@ export const MeetingTranscript = ({
   onAnalyze,
   onSave,
   analyzing,
-  analysis
+  saving,
+  analysis,
+  error,
+  onClearError
 }) => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [title, setTitle] = useState('');
   const [transcript, setTranscript] = useState('');
 
   const handleAnalyze = async () => {
+    if (onClearError) onClearError();
     const result = await onAnalyze(transcript);
     if (result?.title && !title) {
       setTitle(result.title);
@@ -22,9 +26,12 @@ export const MeetingTranscript = ({
   };
 
   const handleSave = async () => {
-    await onSave({ date, title, transcript });
-    setTranscript('');
-    setTitle('');
+    if (onClearError) onClearError();
+    const result = await onSave({ date, title, transcript });
+    if (result) {
+      setTranscript('');
+      setTitle('');
+    }
   };
 
   const getSentimentStyle = (sentiment) => {
@@ -81,11 +88,24 @@ export const MeetingTranscript = ({
         <Button
           variant="success"
           onClick={handleSave}
-          disabled={!transcript.trim()}
+          disabled={!transcript.trim() || saving}
+          loading={saving}
         >
           💾 Save Meeting
         </Button>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex items-center justify-between">
+          <span>Failed to save meeting: {error}</span>
+          {onClearError && (
+            <button onClick={onClearError} className="text-red-400 hover:text-red-300 ml-3 text-xs">
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Analysis Display */}
       {analysis && (
