@@ -30,7 +30,6 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
   const [filterCampaign, setFilterCampaign] = useState('');
   const [filterCallingStatus, setFilterCallingStatus] = useState('');
   const [filterOverallStanding, setFilterOverallStanding] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
 
   const getSetupInfo = (client) => {
     const name = client.client.toLowerCase().trim();
@@ -158,51 +157,37 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
 
       {/* Search & Filters */}
       <Card>
-        <div className="p-4 space-y-4">
-          <div className="flex gap-3">
+        <div className="p-4 space-y-3">
+          <div className="flex items-center gap-3">
             <input
               type="text"
               value={searchFilter}
               onChange={e => setSearchFilter(e.target.value)}
-              placeholder="Search clients, states, team members..."
-              className="flex-1 input-field border rounded-xl px-4 py-3 text-sm"
+              placeholder="Search clients..."
+              className="w-64 input-field border rounded-xl px-3 py-2 text-sm"
             />
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-3 rounded-xl border text-sm font-medium flex items-center gap-2 ${
-                showFilters || activeFilterCount > 0
-                  ? 'bg-brand-cyan/20 border-brand-cyan/50 text-brand-cyan'
-                  : 'bg-dark-800 border-dark-700 text-slate-400 hover:text-white'
-              }`}
-            >
-              Filters {activeFilterCount > 0 && (
-                <span className="bg-brand-cyan text-dark-900 px-2 py-0.5 rounded-full text-xs font-bold">{activeFilterCount}</span>
-              )}
-            </button>
             {activeFilterCount > 0 && (
               <button
                 onClick={clearAllFilters}
-                className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-medium hover:bg-red-500/20"
+                className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20"
               >
-                Clear All
+                Clear Filters ({activeFilterCount})
               </button>
             )}
+            {(activeFilterCount > 0 || searchFilter) && (
+              <span className="text-xs text-slate-500">
+                Showing {filtered.length} of {enriched.length}
+              </span>
+            )}
           </div>
-          {showFilters && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-dark-700">
-              <FilterSelect label="Status" value={filterStatus} onChange={setFilterStatus} options={statuses} />
-              <FilterSelect label="Team Member" value={filterTeamMember} onChange={setFilterTeamMember} options={teamMembers} />
-              <FilterSelect label="State" value={filterState} onChange={setFilterState} options={states} />
-              <FilterSelect label="Campaign" value={filterCampaign} onChange={setFilterCampaign} options={campaigns} />
-              <FilterSelect label="Calling Status" value={filterCallingStatus} onChange={setFilterCallingStatus} options={callingStatuses} />
-              <FilterSelect label="Overall Standing" value={filterOverallStanding} onChange={setFilterOverallStanding} options={overallStandings} />
-            </div>
-          )}
-          {(activeFilterCount > 0 || searchFilter) && (
-            <div className="text-sm text-slate-400">
-              Showing {filtered.length} of {enriched.length} clients
-            </div>
-          )}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <FilterSelect label="Status" value={filterStatus} onChange={setFilterStatus} options={statuses} />
+            <FilterSelect label="Team Member" value={filterTeamMember} onChange={setFilterTeamMember} options={teamMembers} />
+            <FilterSelect label="State" value={filterState} onChange={setFilterState} options={states} />
+            <FilterSelect label="Campaign" value={filterCampaign} onChange={setFilterCampaign} options={campaigns} />
+            <FilterSelect label="Calling Status" value={filterCallingStatus} onChange={setFilterCallingStatus} options={callingStatuses} />
+            <FilterSelect label="Overall Standing" value={filterOverallStanding} onChange={setFilterOverallStanding} options={overallStandings} />
+          </div>
         </div>
       </Card>
 
