@@ -131,6 +131,40 @@ export const ClientHealthPage = ({ client, setup }) => {
         </Card>
       </div>
 
+      {/* Status & Team Info */}
+      <CollapsibleSection
+        title="Status & Team Info"
+        icon="📋"
+        summary={`${c.status || 'No status'} • ${c.teamMember || 'No team member'} • ${c.overallStanding || 'No standing'}`}
+        defaultOpen={true}
+      >
+        <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+          <DataRow label="Status" value={c.status} highlight color={
+            (c.status || '').toLowerCase() === 'active' ? 'text-emerald-400' :
+            (c.status || '').toLowerCase() === 'paused' ? 'text-red-400' :
+            'text-brand-cyan'
+          } icon="📋"/>
+          <DataRow label="Team Member" value={c.teamMember} highlight color="text-brand-purple" icon="👥"/>
+          <DataRow label="Overall Standing" value={c.overallStanding} highlight color={
+            (c.overallStanding || '').toLowerCase().includes('good') ? 'text-emerald-400' :
+            (c.overallStanding || '').toLowerCase().includes('bad') || (c.overallStanding || '').toLowerCase().includes('poor') ? 'text-red-400' :
+            'text-amber-400'
+          } icon="📊"/>
+          <DataRow label="Specific Target" value={c.specificTarget} icon="🎯"/>
+          <DataRow label="Overlap" value={c.overlap} icon="🔄"/>
+          <DataRow label="Using DQ Reasons" value={c.usingDqReasons} icon="📝"/>
+          <DataRow label="Calling using CRM" value={c.callingUsingCrm} icon="💻"/>
+          <DataRow label="Current Testings" value={c.currentTestings} icon="🧪"/>
+          <DataRow label="Client Avg Home Value" value={c.clientAvgHomeValue} icon="🏠"/>
+        </div>
+        {c.mbNotes && (
+          <div className="mt-4 p-3 bg-dark-800 rounded-lg">
+            <div className="text-xs text-slate-500 mb-1">MB Detailed Notes / Test Conducted</div>
+            <div className="text-sm text-slate-300">{c.mbNotes}</div>
+          </div>
+        )}
+      </CollapsibleSection>
+
       {/* Collapsible Sections */}
       <CollapsibleSection
         title="CSM & Client Status"
@@ -153,12 +187,15 @@ export const ClientHealthPage = ({ client, setup }) => {
       <CollapsibleSection
         title="Client & Contract Details"
         icon="📋"
-        summary={`${s?.state || c.state || 'No state'} • ${s?.contractCategory || 'No category'} • Days Left: ${s?.daysLeft || '—'}`}
+        summary={`${s?.state || c.state || 'No state'} • ${c.contract || s?.contractCategory || 'No category'} • Days Left: ${s?.daysLeft || '—'}`}
         defaultOpen={false}
       >
         <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
           <DataRow label="State" value={s?.state || c.state} icon="📍"/>
           <DataRow label="Campaign" value={s?.campaign || c.campaign} icon="🎯"/>
+          <DataRow label="Contract" value={c.contract} highlight icon="📄"/>
+          <DataRow label="Contract Length (Months)" value={c.contractLengthMonths} icon="📅"/>
+          <DataRow label="Remaining Contract Months" value={c.remainingContractMonths} highlight color={pn(c.remainingContractMonths) <= 2 ? 'text-red-400' : 'text-brand-cyan'} icon="⏳"/>
           <DataRow label="Contract Category" value={s?.contractCategory} highlight icon="📄"/>
           <DataRow label="MRR" value={s?.mrr} highlight color="text-emerald-400" icon="💰"/>
           <DataRow label="Fulfilled" value={s?.fulfilled} highlight color="text-emerald-400" icon="✅"/>
@@ -206,9 +243,30 @@ export const ClientHealthPage = ({ client, setup }) => {
           <DataRow label="Weeks Running" value={c.weeks} icon="📊"/>
           <DataRow label="Months Running" value={c.months} icon="🗓️"/>
           <DataRow label="Calling Status" value={c.callingStatus} icon="📞"/>
-          <DataRow label="Leady Sync" value={c.leadySync} icon="🔗"/>
+          <DataRow label="Lead Sync" value={c.leadySync} icon="🔗"/>
         </div>
       </CollapsibleSection>
+
+      {/* Mortgage Data */}
+      {(c.mortgageLeads > 0 || c.last3DayMortgageLeads > 0 || c.last7DayMortgageLeads > 0 || c.mortgageAppts > 0) && (
+        <CollapsibleSection
+          title="Mortgage Performance"
+          icon="🏦"
+          summary={`${fmtN(c.mortgageLeads)} leads • ${fmtD(c.mortgageCPL)} CPL • ${fmtN(c.mortgageAppts)} appts`}
+          defaultOpen={false}
+        >
+          <div className="grid md:grid-cols-2 gap-x-8 gap-y-1">
+            <DataRow label="Last 3 Day Mortgage Leads" value={fmtN(c.last3DayMortgageLeads)} icon="📊"/>
+            <DataRow label="Last 3 Days Mortgage CPL" value={fmtD(c.last3DayMortgageCPL)} icon="💵"/>
+            <DataRow label="Last 7 Day Mortgage Leads" value={fmtN(c.last7DayMortgageLeads)} icon="📊"/>
+            <DataRow label="Last 7 Days Mortgage CPL" value={fmtD(c.last7DayMortgageCPL)} icon="💵"/>
+            <DataRow label="Lifetime Mortgage Leads" value={fmtN(c.mortgageLeads)} highlight color="text-brand-purple" icon="📊"/>
+            <DataRow label="Lifetime Mortgage CPL" value={fmtD(c.mortgageCPL)} highlight icon="💵"/>
+            <DataRow label="Lifetime Mortgage Spend" value={fmt(c.mortgageSpend)} icon="💰"/>
+            <DataRow label="Mortgage Appts" value={fmtN(c.mortgageAppts)} highlight color="text-emerald-400" icon="📅"/>
+          </div>
+        </CollapsibleSection>
+      )}
     </div>
   );
 };

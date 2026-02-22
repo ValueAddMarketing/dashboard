@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card } from '../components';
 import { fmt, fmtD, fmtN, getHealth, getHealthScore } from '../utils/formatters';
 import { HEALTH_COLORS } from '../utils/constants';
@@ -7,8 +7,30 @@ const HealthDot = ({ color }) => (
   <span className={`w-2.5 h-2.5 rounded-full inline-block flex-shrink-0 ${HEALTH_COLORS[color] || HEALTH_COLORS.gray}`} />
 );
 
+const FilterSelect = ({ label, value, onChange, options }) => (
+  <div>
+    <label className="block text-xs text-slate-500 mb-1">{label}</label>
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white"
+    >
+      <option value="">All</option>
+      {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+    </select>
+  </div>
+);
+
 export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
   const [expandedSection, setExpandedSection] = useState(null);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterTeamMember, setFilterTeamMember] = useState('');
+  const [filterState, setFilterState] = useState('');
+  const [filterCampaign, setFilterCampaign] = useState('');
+  const [filterCallingStatus, setFilterCallingStatus] = useState('');
+  const [filterOverallStanding, setFilterOverallStanding] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
 
   const getSetupInfo = (client) => {
     const name = client.client.toLowerCase().trim();
@@ -26,30 +48,61 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
     return { ...c, setup, health, score };
   });
 
+  // Get unique values for filter dropdowns
+  const uniqueValues = (key) => [...new Set(enriched.map(c => c[key]).filter(Boolean))].sort();
+  const statuses = useMemo(() => uniqueValues('status'), [enriched]);
+  const teamMembers = useMemo(() => uniqueValues('teamMember'), [enriched]);
+  const states = useMemo(() => uniqueValues('state'), [enriched]);
+  const campaigns = useMemo(() => uniqueValues('campaign'), [enriched]);
+  const callingStatuses = useMemo(() => uniqueValues('callingStatus'), [enriched]);
+  const overallStandings = useMemo(() => uniqueValues('overallStanding'), [enriched]);
+
+  const activeFilterCount = [filterStatus, filterTeamMember, filterState, filterCampaign, filterCallingStatus, filterOverallStanding].filter(Boolean).length;
+
+  // Apply filters
+  const filtered = enriched.filter(c => {
+    const matchesSearch = !searchFilter ||
+      c.client.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      (c.state || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
+      (c.teamMember || '').toLowerCase().includes(searchFilter.toLowerCase());
+    const matchesStatus = !filterStatus || c.status === filterStatus;
+    const matchesTeamMember = !filterTeamMember || c.teamMember === filterTeamMember;
+    const matchesState = !filterState || c.state === filterState;
+    const matchesCampaign = !filterCampaign || c.campaign === filterCampaign;
+    const matchesCalling = !filterCallingStatus || c.callingStatus === filterCallingStatus;
+    const matchesStanding = !filterOverallStanding || c.overallStanding === filterOverallStanding;
+    return matchesSearch && matchesStatus && matchesTeamMember && matchesState && matchesCampaign && matchesCalling && matchesStanding;
+  });
+
+  const clearAllFilters = () => {
+    setSearchFilter(''); setFilterStatus(''); setFilterTeamMember(''); setFilterState('');
+    setFilterCampaign(''); setFilterCallingStatus(''); setFilterOverallStanding('');
+  };
+
   // Sort helpers
   const byScoreAsc = (a, b) => a.score - b.score;
   const byScoreDesc = (a, b) => b.score - a.score;
 
-  // --- Categories ---
-  const struggling = enriched
+  // --- Categories (using filtered data) ---
+  const struggling = filtered
     .filter(c => c.health === 'red' && c.days > 7)
     .sort(byScoreAsc);
 
-  const doingWell = enriched
+  const doingWell = filtered
     .filter(c => c.health === 'green' && c.days > 7)
     .sort(byScoreDesc);
 
-  const noLeads = enriched
+  const noLeads = filtered
     .filter(c => c.days >= 3 && c.last3DayLeads === 0)
     .sort((a, b) => a.last7DayLeads - b.last7DayLeads);
 
-  const gettingMoreLeads = enriched
+  const gettingMoreLeads = filtered
     .filter(c => c.last3DayLeads > 0 && c.days > 3)
     .sort((a, b) => b.last3DayLeads - a.last3DayLeads);
 
   // --- Best performing ad/campaign names ---
   const campaignMap = {};
-  enriched.forEach(c => {
+  filtered.forEach(c => {
     const name = (c.campaign || '').trim();
     if (!name) return;
     if (!campaignMap[name]) {
@@ -61,13 +114,13 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
     campaignMap[name].totalAppts += c.appts;
     campaignMap[name].totalDeals += c.deals;
   });
-  const campaigns = Object.values(campaignMap)
+  const campaignsList = Object.values(campaignMap)
     .map(cp => ({ ...cp, cpl: cp.totalLeads > 0 ? cp.totalSpend / cp.totalLeads : 0 }))
     .filter(cp => cp.totalLeads > 0)
     .sort((a, b) => a.cpl - b.cpl);
 
   // --- Totals ---
-  const totals = enriched.reduce((acc, c) => ({
+  const totals = filtered.reduce((acc, c) => ({
     spend: acc.spend + c.spend,
     leads: acc.leads + c.leads,
     appts: acc.appts + c.appts,
@@ -82,7 +135,7 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="text-center">
-          <div className="text-3xl font-bold text-white">{enriched.length}</div>
+          <div className="text-3xl font-bold text-white">{filtered.length}</div>
           <div className="text-xs text-slate-400">Total Clients</div>
         </Card>
         <Card className="text-center">
@@ -103,6 +156,56 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
         </Card>
       </div>
 
+      {/* Search & Filters */}
+      <Card>
+        <div className="p-4 space-y-4">
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={searchFilter}
+              onChange={e => setSearchFilter(e.target.value)}
+              placeholder="Search clients, states, team members..."
+              className="flex-1 input-field border rounded-xl px-4 py-3 text-sm"
+            />
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`px-4 py-3 rounded-xl border text-sm font-medium flex items-center gap-2 ${
+                showFilters || activeFilterCount > 0
+                  ? 'bg-brand-cyan/20 border-brand-cyan/50 text-brand-cyan'
+                  : 'bg-dark-800 border-dark-700 text-slate-400 hover:text-white'
+              }`}
+            >
+              Filters {activeFilterCount > 0 && (
+                <span className="bg-brand-cyan text-dark-900 px-2 py-0.5 rounded-full text-xs font-bold">{activeFilterCount}</span>
+              )}
+            </button>
+            {activeFilterCount > 0 && (
+              <button
+                onClick={clearAllFilters}
+                className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-medium hover:bg-red-500/20"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+          {showFilters && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-dark-700">
+              <FilterSelect label="Status" value={filterStatus} onChange={setFilterStatus} options={statuses} />
+              <FilterSelect label="Team Member" value={filterTeamMember} onChange={setFilterTeamMember} options={teamMembers} />
+              <FilterSelect label="State" value={filterState} onChange={setFilterState} options={states} />
+              <FilterSelect label="Campaign" value={filterCampaign} onChange={setFilterCampaign} options={campaigns} />
+              <FilterSelect label="Calling Status" value={filterCallingStatus} onChange={setFilterCallingStatus} options={callingStatuses} />
+              <FilterSelect label="Overall Standing" value={filterOverallStanding} onChange={setFilterOverallStanding} options={overallStandings} />
+            </div>
+          )}
+          {(activeFilterCount > 0 || searchFilter) && (
+            <div className="text-sm text-slate-400">
+              Showing {filtered.length} of {enriched.length} clients
+            </div>
+          )}
+        </div>
+      </Card>
+
       {/* Health Distribution */}
       <Card>
         <div className="p-4 border-b border-dark-700">
@@ -111,10 +214,10 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
         <div className="p-4">
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Healthy', color: 'emerald', count: enriched.filter(c => c.health === 'green').length },
-              { label: 'Moderate', color: 'amber', count: enriched.filter(c => c.health === 'yellow').length },
-              { label: 'At Risk', color: 'red', count: enriched.filter(c => c.health === 'red').length },
-              { label: 'New/No Data', color: 'slate', count: enriched.filter(c => c.health === 'gray').length },
+              { label: 'Healthy', color: 'emerald', count: filtered.filter(c => c.health === 'green').length },
+              { label: 'Moderate', color: 'amber', count: filtered.filter(c => c.health === 'yellow').length },
+              { label: 'At Risk', color: 'red', count: filtered.filter(c => c.health === 'red').length },
+              { label: 'New/No Data', color: 'slate', count: filtered.filter(c => c.health === 'gray').length },
             ].map(item => (
               <div key={item.label} className="text-center">
                 <div className={`text-2xl font-bold text-${item.color}-400`}>{item.count}</div>
@@ -122,7 +225,7 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
                 <div className="mt-2 h-2 rounded-full bg-dark-700 overflow-hidden">
                   <div
                     className={`h-full bg-${item.color}-500 rounded-full`}
-                    style={{ width: `${enriched.length > 0 ? (item.count / enriched.length) * 100 : 0}%` }}
+                    style={{ width: `${filtered.length > 0 ? (item.count / filtered.length) * 100 : 0}%` }}
                   />
                 </div>
               </div>
@@ -166,11 +269,21 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
                       <div className="font-medium text-white">{c.client}</div>
                       <div className="text-xs text-slate-500">
                         {c.state || '—'} · Day {c.days} · {c.campaign || 'No campaign'}
+                        {c.teamMember && ` · ${c.teamMember}`}
                         {c.setup?.csmRep && ` · CSM: ${c.setup.csmRep}`}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-6 text-right">
+                    {c.status && (
+                      <div>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          c.status.toLowerCase() === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
+                          c.status.toLowerCase() === 'paused' ? 'bg-red-500/20 text-red-400' :
+                          'bg-slate-500/20 text-slate-400'
+                        }`}>{c.status}</span>
+                      </div>
+                    )}
                     <div>
                       <div className="text-red-400 font-bold">{fmtD(c.cpl)}</div>
                       <div className="text-xs text-slate-500">CPL</div>
@@ -233,10 +346,20 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
                       <div className="font-medium text-white">{c.client}</div>
                       <div className="text-xs text-slate-500">
                         {c.state || '—'} · Day {c.days} · {c.campaign || 'No campaign'}
+                        {c.teamMember && ` · ${c.teamMember}`}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-6 text-right">
+                    {c.status && (
+                      <div>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          c.status.toLowerCase() === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
+                          c.status.toLowerCase() === 'paused' ? 'bg-red-500/20 text-red-400' :
+                          'bg-slate-500/20 text-slate-400'
+                        }`}>{c.status}</span>
+                      </div>
+                    )}
                     <div>
                       <div className="text-emerald-400 font-bold">{fmtD(c.cpl)}</div>
                       <div className="text-xs text-slate-500">CPL</div>
@@ -299,6 +422,7 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
                       <div className="font-medium text-white">{c.client}</div>
                       <div className="text-xs text-slate-500">
                         {c.state || '—'} · Day {c.days} · {c.campaign || 'No campaign'}
+                        {c.teamMember && ` · ${c.teamMember}`}
                       </div>
                     </div>
                   </div>
@@ -365,6 +489,7 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
                       <div className="font-medium text-white">{c.client}</div>
                       <div className="text-xs text-slate-500">
                         {c.state || '—'} · Day {c.days} · {c.campaign || 'No campaign'}
+                        {c.teamMember && ` · ${c.teamMember}`}
                       </div>
                     </div>
                   </div>
@@ -422,12 +547,12 @@ export const OverviewPage = ({ clients, setupData, onSelectClient }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-dark-700">
-              {campaigns.length === 0 ? (
+              {campaignsList.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">No campaign data available</td>
                 </tr>
               ) : (
-                campaigns.map((cp, i) => (
+                campaignsList.map((cp, i) => (
                   <tr key={cp.campaign} className="hover:bg-dark-800 transition-colors">
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${

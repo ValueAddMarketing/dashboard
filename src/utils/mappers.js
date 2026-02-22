@@ -7,6 +7,7 @@ export const mapClient = (r) => {
   const sellerLeads = pn(r['Lifetime Seller Leads']);
   const buyerLeads = pn(r['Lifetime Buyer Leads']);
   const listingLeads = pn(r['Listing Leads']);
+  const mortgageLeads = pn(r['Lifetime Mortgage Leads']);
   const totalLeads = sellerLeads + buyerLeads + listingLeads;
   const spend = pn(r['Total Ad Spend']);
   const sellerAppts7 = pn(r['Seller Appts in the Last 7 Days']);
@@ -15,12 +16,25 @@ export const mapClient = (r) => {
   return {
     client: r['Client'] || '',
     adAccount: r['Ad Account Name'] || '',
+    teamMember: r['Team Member'] || '',
+    status: r['Status'] || '',
     dailySetAdSpend: pn(r['Daily Set Ad Spend']),
     state: r['State'] || '',
     campaign: r['CAMPAIGN'] || '',
+    specificTarget: r['Specific Target'] || '',
+    overlap: r['Overlap'] || '',
+    overallStanding: r['Overall Standing'] || '',
     callingStatus: r['Calling/Non-calling'] || '',
+    usingDqReasons: r['Using DQ Reasons'] || '',
+    callingUsingCrm: r['Calling using CRM'] || '',
+    mbNotes: r['MB Detailed Notes / Test Conducted'] || '',
+    currentTestings: r['Current Testings'] || '',
+    clientAvgHomeValue: r['Client Avg Home Value'] || '',
     startDate: r['CORRECT SETUP TIMING START DATE'] || r['OLD Start Date'] || '',
-    leadySync: r['Leady Sync'] || '',
+    contract: r['Contract'] || '',
+    contractLengthMonths: r['Contract Length In Months'] || '',
+    remainingContractMonths: r['# Of Remaining Contract Months Left'] || '',
+    leadySync: r['Lead Sync'] || r['Leady Sync'] || '',
     months: pn(r['Months Running']),
     weeks: pn(r['Weeks Running']),
     days: pn(r['Days Running']),
@@ -53,20 +67,29 @@ export const mapClient = (r) => {
     buyerCPL: pn(r['Lifetime Buyer CPL']),
     // Other lead types
     listingLeads: listingLeads,
-    mortgageLeads: pn(r['Mortgage Leads']),
-    agentAttraction: pn(r['Agent Attraction']),
+    // Mortgage
+    last3DayMortgageLeads: pn(r['Last 3 Day Mortgage Leads']),
+    last3DayMortgageSpend: pn(r['Last 3 Days Mortgage Ad Spend']),
+    last3DayMortgageCPL: pn(r['Last 3 Days Mortgage CPL']),
+    last7DayMortgageLeads: pn(r['Last 7 Day Mortgage Leads']),
+    last7DayMortgageSpend: pn(r['Last 7 Day Mortgage Spend']),
+    last7DayMortgageCPL: pn(r['Last 7 Days Mortgage CPL']),
+    mortgageLeads: mortgageLeads,
+    mortgageSpend: pn(r['Lifetime Mortgage Ad Spend']),
+    mortgageCPL: pn(r['Lifetime Mortgage CPL']),
+    mortgageAppts: pn(r['Total Appts Mortgage']),
     // Appointments
     appts: pn(r['Total Appts (Seller + Buyers)']),
     sellerAppts: pn(r['Total Seller Appts']),
     sellerAppts7: sellerAppts7,
     avgSellerApptsWeek: pn(r['Avg Seller Appts per Week']),
     sellerLeadToAppt: pn(r['Seller Lead To Appt Ratio']),
-    costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appts']),
+    costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appt'] || r['Total Ad Spend Cost Per Seller Appts']),
     buyerAppts: pn(r['Total Buyer Appts']),
     buyerAppts7: buyerAppts7,
     avgBuyerApptsWeek: pn(r['Avg Buyer Appts per Week']),
     buyerLeadToAppt: pn(r['Buyer Lead To Appt Ratio']),
-    costPerBuyerAppt: pn(r['Ad Spend Cost Per Buyer Appts']),
+    costPerBuyerAppt: pn(r['Total Ad Spend Cost Per Buyer Appts'] || r['Ad Spend Cost Per Buyer Appts']),
     // Deals
     deals: pn(r['Potential Deals']),
     listings: pn(r['Listing']),
@@ -74,6 +97,9 @@ export const mapClient = (r) => {
     leadsPerListing: pn(r['Leads/Listing']),
     leadsPerDeal: pn(r['Leads/Potential Deal']),
     leadsPerSignedBuyer: pn(r['Leads/Signed Buyer']),
+    adSpendPerDeal: pn(r['Ad Spend/Potential Deal']),
+    adSpendPerListing: pn(r['Ad Spend/Listing']),
+    adSpendPerBuyer: pn(r['Ad Spend/Buyer']),
     // Computed totals
     leads: totalLeads,
     cpl: totalLeads > 0 ? spend / totalLeads : 0,

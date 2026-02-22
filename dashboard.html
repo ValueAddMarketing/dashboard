@@ -90,18 +90,31 @@
 
         // Map Client Ads Performance sheet - headers in row 2 (A2:BA2)
         const mapClient = r => ({
-            client: r['Client']||'', 
+            client: r['Client']||'',
             adAccount: r['Ad Account Name']||'',
+            teamMember: r['Team Member']||'',
+            status: r['Status']||'',
             dailySetAdSpend: pn(r['Daily Set Ad Spend']),
-            state: r['State']||'', 
+            state: r['State']||'',
             campaign: r['CAMPAIGN']||'',
+            specificTarget: r['Specific Target']||'',
+            overlap: r['Overlap']||'',
+            overallStanding: r['Overall Standing']||'',
             callingStatus: r['Calling/Non-calling']||'',
+            usingDqReasons: r['Using DQ Reasons']||'',
+            callingUsingCrm: r['Calling using CRM']||'',
+            mbNotes: r['MB Detailed Notes / Test Conducted']||'',
+            currentTestings: r['Current Testings']||'',
+            clientAvgHomeValue: r['Client Avg Home Value']||'',
             startDate: r['CORRECT SETUP TIMING START DATE']||r['OLD Start Date']||'',
-            leadySync: r['Leady Sync']||'',
+            contract: r['Contract']||'',
+            contractLengthMonths: r['Contract Length In Months']||'',
+            remainingContractMonths: r['# Of Remaining Contract Months Left']||'',
+            leadySync: r['Lead Sync']||r['Leady Sync']||'',
             months: pn(r['Months Running']),
             weeks: pn(r['Weeks Running']),
             days: pn(r['Days Running']),
-            spend: pn(r['Total Ad Spend']), 
+            spend: pn(r['Total Ad Spend']),
             spendPerMonth: pn(r['Ad Spend Per Month']),
             spendPerDay: pn(r['Ad Spend Per Day']),
             // Last 3 Days - Seller
@@ -130,20 +143,29 @@
             lifetimeBuyerCPL: pn(r['Lifetime Buyer CPL']),
             // Other lead types
             listingLeads: pn(r['Listing Leads']),
-            mortgageLeads: pn(r['Mortgage Leads']),
-            agentAttraction: pn(r['Agent Attraction']),
+            // Mortgage
+            last3DayMortgageLeads: pn(r['Last 3 Day Mortgage Leads']),
+            last3DayMortgageSpend: pn(r['Last 3 Days Mortgage Ad Spend']),
+            last3DayMortgageCPL: pn(r['Last 3 Days Mortgage CPL']),
+            last7DayMortgageLeads: pn(r['Last 7 Day Mortgage Leads']),
+            last7DayMortgageSpend: pn(r['Last 7 Day Mortgage Spend']),
+            last7DayMortgageCPL: pn(r['Last 7 Days Mortgage CPL']),
+            mortgageLeads: pn(r['Lifetime Mortgage Leads']),
+            mortgageSpend: pn(r['Lifetime Mortgage Ad Spend']),
+            mortgageCPL: pn(r['Lifetime Mortgage CPL']),
+            mortgageAppts: pn(r['Total Appts Mortgage']),
             // Appointments
             appts: pn(r['Total Appts (Seller + Buyers)']),
             sellerAppts: pn(r['Total Seller Appts']),
             sellerAppts7: pn(r['Seller Appts in the Last 7 Days']),
             avgSellerApptsWeek: pn(r['Avg Seller Appts per Week']),
             sellerLeadToAppt: pn(r['Seller Lead To Appt Ratio']),
-            costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appts']),
+            costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appt']||r['Total Ad Spend Cost Per Seller Appts']),
             buyerAppts: pn(r['Total Buyer Appts']),
             buyerAppts7: pn(r['Buyer Appts in the Last 7 Days']),
             avgBuyerApptsWeek: pn(r['Avg Buyer Appts per Week']),
             buyerLeadToAppt: pn(r['Buyer Lead To Appt Ratio']),
-            costPerBuyerAppt: pn(r['Ad Spend Cost Per Buyer Appts']),
+            costPerBuyerAppt: pn(r['Total Ad Spend Cost Per Buyer Appts']||r['Ad Spend Cost Per Buyer Appts']),
             // Deals
             deals: pn(r['Potential Deals']),
             listings: pn(r['Listing']),
@@ -151,6 +173,9 @@
             leadsPerListing: pn(r['Leads/Listing']),
             leadsPerDeal: pn(r['Leads/Potential Deal']),
             leadsPerSignedBuyer: pn(r['Leads/Signed Buyer']),
+            adSpendPerDeal: pn(r['Ad Spend/Potential Deal']),
+            adSpendPerListing: pn(r['Ad Spend/Listing']),
+            adSpendPerBuyer: pn(r['Ad Spend/Buyer']),
         });
 
         // Computed properties helper
@@ -234,21 +259,40 @@
             const [sortBy, setSortBy] = useState('client');
             const [sortDir, setSortDir] = useState('asc');
             const [filter, setFilter] = useState('');
+            const [filterStatus, setFilterStatus] = useState('');
+            const [filterTeamMember, setFilterTeamMember] = useState('');
+            const [filterState, setFilterState] = useState('');
+            const [filterCampaign, setFilterCampaign] = useState('');
+            const [filterCallingStatus, setFilterCallingStatus] = useState('');
+            const [filterOverallStanding, setFilterOverallStanding] = useState('');
+            const [showFilters, setShowFilters] = useState(false);
 
             const getSetupInfo = (clientName) => {
                 const name = clientName.toLowerCase().trim();
-                return setupData.find(s => { 
-                    const sn = (s.client || '').toLowerCase().trim(); 
-                    return sn === name || sn.includes(name) || name.includes(sn); 
+                return setupData.find(s => {
+                    const sn = (s.client || '').toLowerCase().trim();
+                    return sn === name || sn.includes(name) || name.includes(sn);
                 });
             };
 
             // Enrich clients with computed metrics
             const enrichedClients = clients.map(getClientMetrics);
 
+            // Get unique values for filter dropdowns
+            const uniqueValues = (key) => [...new Set(enrichedClients.map(c => c[key]).filter(Boolean))].sort();
+            const statuses = uniqueValues('status');
+            const teamMembers = uniqueValues('teamMember');
+            const states = uniqueValues('state');
+            const campaigns = uniqueValues('campaign');
+            const callingStatuses = uniqueValues('callingStatus');
+            const overallStandings = uniqueValues('overallStanding');
+
+            // Count active filters
+            const activeFilterCount = [filterStatus, filterTeamMember, filterState, filterCampaign, filterCallingStatus, filterOverallStanding].filter(Boolean).length;
+
             // Get at-risk clients (red health = CPL > $50)
             const atRiskClients = enrichedClients.filter(c => getHealth(c.cpl) === 'red' && c.days > 7);
-            
+
             // Get clients with no leads in last 3 days
             const noRecentLeadsClients = enrichedClients.filter(c => c.days >= 3 && c.last3DayLeads === 0);
 
@@ -259,10 +303,16 @@
                 return sn && !clientNames.some(cn => cn === sn || cn.includes(sn) || sn.includes(cn));
             });
 
-            const filteredClients = enrichedClients.filter(c => 
-                c.client.toLowerCase().includes(filter.toLowerCase()) ||
-                c.state.toLowerCase().includes(filter.toLowerCase())
-            );
+            const filteredClients = enrichedClients.filter(c => {
+                const matchesSearch = !filter || c.client.toLowerCase().includes(filter.toLowerCase()) || c.state.toLowerCase().includes(filter.toLowerCase());
+                const matchesStatus = !filterStatus || c.status === filterStatus;
+                const matchesTeamMember = !filterTeamMember || c.teamMember === filterTeamMember;
+                const matchesState = !filterState || c.state === filterState;
+                const matchesCampaign = !filterCampaign || c.campaign === filterCampaign;
+                const matchesCalling = !filterCallingStatus || c.callingStatus === filterCallingStatus;
+                const matchesStanding = !filterOverallStanding || c.overallStanding === filterOverallStanding;
+                return matchesSearch && matchesStatus && matchesTeamMember && matchesState && matchesCampaign && matchesCalling && matchesStanding;
+            });
 
             const sortedClients = [...filteredClients].sort((a, b) => {
                 let aVal = a[sortBy], bVal = b[sortBy];
@@ -283,6 +333,21 @@
                 if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
                 else { setSortBy(col); setSortDir('asc'); }
             };
+
+            const clearAllFilters = () => {
+                setFilter(''); setFilterStatus(''); setFilterTeamMember(''); setFilterState('');
+                setFilterCampaign(''); setFilterCallingStatus(''); setFilterOverallStanding('');
+            };
+
+            const FilterSelect = ({ label, value, onChange, options }) => (
+                <div>
+                    <label className="block text-xs text-slate-500 mb-1">{label}</label>
+                    <select value={value} onChange={e => onChange(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white">
+                        <option value="">All</option>
+                        {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                </div>
+            );
 
             return (
                 <div className="space-y-6">
@@ -306,7 +371,7 @@
                                         <div key={c.client} onClick={() => onClientClick(c.client)} className="flex items-center justify-between p-3 bg-red-500/10 rounded-lg cursor-pointer hover:bg-red-500/20">
                                             <div>
                                                 <div className="font-medium text-white">{c.client}</div>
-                                                <div className="text-xs text-slate-400">{c.state} • Day {c.days}</div>
+                                                <div className="text-xs text-slate-400">{c.state} • Day {c.days}{c.teamMember && ` • ${c.teamMember}`}</div>
                                             </div>
                                             <div className="text-right">
                                                 <div className="text-red-400 font-bold">{fmtD(c.cpl)}</div>
@@ -336,7 +401,7 @@
                                         <div key={c.client} onClick={() => onClientClick(c.client)} className="flex items-center justify-between p-3 bg-amber-500/10 rounded-lg cursor-pointer hover:bg-amber-500/20">
                                             <div>
                                                 <div className="font-medium text-white">{c.client}</div>
-                                                <div className="text-xs text-slate-400">{c.state} • Day {c.days}</div>
+                                                <div className="text-xs text-slate-400">{c.state} • Day {c.days}{c.teamMember && ` • ${c.teamMember}`}</div>
                                             </div>
                                             <div className="text-right">
                                                 <div className="text-amber-400 font-bold">0 leads</div>
@@ -384,9 +449,30 @@
                         <div className="card p-4"><div className="text-slate-400 text-sm">Total Appts</div><div className="text-2xl font-bold text-emerald-400">{fmtN(totals.appts)}</div></div>
                     </div>
 
-                    {/* Search */}
-                    <div className="card p-4">
-                        <input type="text" value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search clients..." className="w-full bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" />
+                    {/* Search & Filters */}
+                    <div className="card p-4 space-y-4">
+                        <div className="flex gap-3">
+                            <input type="text" value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search clients..." className="flex-1 bg-dark-800 border border-dark-700 rounded-xl px-4 py-3 text-white" />
+                            <button onClick={() => setShowFilters(!showFilters)} className={`px-4 py-3 rounded-xl border text-sm font-medium flex items-center gap-2 ${showFilters || activeFilterCount > 0 ? 'bg-brand-cyan/20 border-brand-cyan/50 text-brand-cyan' : 'bg-dark-800 border-dark-700 text-slate-400 hover:text-white'}`}>
+                                🔍 Filters {activeFilterCount > 0 && <span className="bg-brand-cyan text-dark-900 px-2 py-0.5 rounded-full text-xs font-bold">{activeFilterCount}</span>}
+                            </button>
+                            {activeFilterCount > 0 && (
+                                <button onClick={clearAllFilters} className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-medium hover:bg-red-500/20">Clear All</button>
+                            )}
+                        </div>
+                        {showFilters && (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-2 border-t border-dark-700">
+                                <FilterSelect label="Status" value={filterStatus} onChange={setFilterStatus} options={statuses} />
+                                <FilterSelect label="Team Member" value={filterTeamMember} onChange={setFilterTeamMember} options={teamMembers} />
+                                <FilterSelect label="State" value={filterState} onChange={setFilterState} options={states} />
+                                <FilterSelect label="Campaign" value={filterCampaign} onChange={setFilterCampaign} options={campaigns} />
+                                <FilterSelect label="Calling Status" value={filterCallingStatus} onChange={setFilterCallingStatus} options={callingStatuses} />
+                                <FilterSelect label="Overall Standing" value={filterOverallStanding} onChange={setFilterOverallStanding} options={overallStandings} />
+                            </div>
+                        )}
+                        {activeFilterCount > 0 && (
+                            <div className="text-sm text-slate-400">Showing {sortedClients.length} of {enrichedClients.length} clients</div>
+                        )}
                     </div>
 
                     {/* Client Table */}
@@ -396,8 +482,13 @@
                                 <thead className="bg-dark-800">
                                     <tr>
                                         {[
+                                            { key: 'status', label: 'Status' },
+                                            { key: 'teamMember', label: 'Team Member' },
                                             { key: 'client', label: 'Client' },
                                             { key: 'state', label: 'State' },
+                                            { key: 'campaign', label: 'Campaign' },
+                                            { key: 'overallStanding', label: 'Standing' },
+                                            { key: 'callingStatus', label: 'Calling' },
                                             { key: 'days', label: 'Days' },
                                             { key: 'spend', label: 'Spend' },
                                             { key: 'last3DayLeads', label: '3-Day Leads' },
@@ -407,7 +498,7 @@
                                             { key: 'appts', label: 'Appts' },
                                             { key: 'deals', label: 'Deals' },
                                         ].map(col => (
-                                            <th key={col.key} onClick={() => handleSort(col.key)} className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase cursor-pointer hover:text-white">
+                                            <th key={col.key} onClick={() => handleSort(col.key)} className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase cursor-pointer hover:text-white whitespace-nowrap">
                                                 {col.label} {sortBy === col.key && (sortDir === 'asc' ? '↑' : '↓')}
                                             </th>
                                         ))}
@@ -418,13 +509,28 @@
                                     {sortedClients.map(c => {
                                         const s = getSetupInfo(c.client);
                                         const health = getHealth(c.cpl);
+                                        const standingColor = (c.overallStanding || '').toLowerCase().includes('good') ? 'text-emerald-400' :
+                                            (c.overallStanding || '').toLowerCase().includes('bad') || (c.overallStanding || '').toLowerCase().includes('poor') ? 'text-red-400' :
+                                            (c.overallStanding || '').toLowerCase().includes('ok') || (c.overallStanding || '').toLowerCase().includes('average') ? 'text-amber-400' : 'text-slate-300';
                                         return (
                                             <tr key={c.client} onClick={() => onClientClick(c.client)} className="hover:bg-dark-800 cursor-pointer transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                        (c.status || '').toLowerCase() === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
+                                                        (c.status || '').toLowerCase() === 'paused' ? 'bg-red-500/20 text-red-400' :
+                                                        (c.status || '').toLowerCase() === 'scheduled' ? 'bg-blue-500/20 text-blue-400' :
+                                                        'bg-slate-500/20 text-slate-400'
+                                                    }`}>{c.status || '—'}</span>
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-300 text-sm whitespace-nowrap">{c.teamMember || '—'}</td>
                                                 <td className="px-4 py-3">
                                                     <div className="font-medium text-white">{c.client}</div>
                                                     {s?.csmRep && <div className="text-xs text-slate-500">CSM: {s.csmRep}</div>}
                                                 </td>
                                                 <td className="px-4 py-3 text-slate-300">{c.state || '—'}</td>
+                                                <td className="px-4 py-3 text-slate-300 text-sm">{c.campaign || '—'}</td>
+                                                <td className={`px-4 py-3 text-sm font-medium ${standingColor}`}>{c.overallStanding || '—'}</td>
+                                                <td className="px-4 py-3 text-slate-300 text-sm">{c.callingStatus || '—'}</td>
                                                 <td className="px-4 py-3 text-slate-300">{c.days}</td>
                                                 <td className="px-4 py-3 text-slate-300">{fmt(c.spend)}</td>
                                                 <td className={`px-4 py-3 font-medium ${c.last3DayLeads === 0 && c.days >= 3 ? 'text-red-400' : 'text-brand-cyan'}`}>{fmtN(c.last3DayLeads)}</td>
