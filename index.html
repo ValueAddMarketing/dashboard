@@ -1401,16 +1401,12 @@ Provide a brief, practical response that the CSM can use immediately on the call
 
             const addNote = async (noteText, source = 'manual') => {
                 const text = noteText || newNote;
-                if (!text.trim()) return;
-                const { data } = await supabase.from('client_notes').insert({
-                    client_name: c.client,
-                    note_text: text,
-                    user_email: user?.email,
-                    user_id: user?.id,
-                    source: source,
-                    is_important: source === 'ai_extracted'
-                }).select().single();
-                if (data) { setNotes([data, ...notes]); if (!noteText) setNewNote(''); }
+                if (!text || !text.trim()) return;
+                if (!noteText) setNewNote('');
+                const noteObj = { client_name: c.client, note_text: text, user_email: user?.email, source: source, is_important: source === 'ai_extracted' };
+                const { data, error } = await supabase.from('client_notes').insert(noteObj).select().single();
+                if (error) { console.error('addNote error:', error); alert('Failed to save note: ' + error.message); if (!noteText) setNewNote(text); return; }
+                if (data) setNotes(prev => [data, ...prev]);
                 await supabase.from('activity_log').insert({ user_email: user?.email, client_name: c.client, action: source === 'ai_extracted' ? 'AI extracted important note' : 'Added note', details: text.substring(0, 50) });
                 return data;
             };
