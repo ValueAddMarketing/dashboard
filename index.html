@@ -90,6 +90,34 @@
             return email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
         };
 
+        // Safe parsing helpers for meeting data from Supabase
+        const toArr = (v) => {
+            if (v == null) return [];
+            if (Array.isArray(v)) return v;
+            if (typeof v === 'string') {
+                try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+            }
+            return [];
+        };
+        const safeStr = (v) => {
+            if (v == null) return '';
+            if (typeof v === 'string') return v;
+            if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+            try { return JSON.stringify(v); } catch { return String(v); }
+        };
+        const getExtra = (m) => {
+            if (!m.ad_performance_notes) return {};
+            try {
+                return typeof m.ad_performance_notes === 'string'
+                    ? JSON.parse(m.ad_performance_notes)
+                    : m.ad_performance_notes;
+            } catch { return {}; }
+        };
+        const pickArr = (...sources) => {
+            for (const s of sources) { const a = toArr(s); if (a.length > 0) return a; }
+            return [];
+        };
+
         // API Key Management - stored in browser localStorage for security
         const API_KEY_STORAGE_KEY = 'anthropic_api_key';
         const getAnthropicApiKey = () => localStorage.getItem(API_KEY_STORAGE_KEY);
@@ -1507,13 +1535,48 @@ ${transcript}`;
             const saveMeeting = async () => {
                 if (!summary && !transcript.trim()) return;
 
-                // Prepare comprehensive meeting data
-                const meetingData = {
+                const mTitle = meetingTitle || summary?.title || 'Meeting Notes';
+
+                // Store all analysis in ad_performance_notes JSON as a reliable fallback
+                const allAnalysis = summary ? JSON.stringify({
+                    title: mTitle,
+                    summary: summary.summary || null,
+                    clientSentiment: summary.clientSentiment || 'neutral',
+                    sentimentExplanation: summary.sentimentExplanation || null,
+                    keyPoints: summary.keyPoints || [],
+                    actionItems: summary.actionItems || [],
+                    concerns: summary.concerns || [],
+                    riskLevel: summary.riskLevel || 'medium',
+                    nextSteps: summary.nextSteps || [],
+                    duration: summary.duration || null,
+                    participants: summary.participants || [],
+                    topics: summary.topics || [],
+                    decisions: summary.decisions || [],
+                    followUpNeeded: summary.followUpNeeded || false,
+                    followUpItems: summary.followUpItems || [],
+                    riskFactors: summary.riskFactors || [],
+                    clientRequests: summary.clientRequests || [],
+                    positiveSignals: summary.positiveSignals || [],
+                    warningSignals: summary.warningSignals || [],
+                    importantNotes: summary.importantNotes || [],
+                    createdByName: getDisplayName(user?.email, user)
+                }) : null;
+
+                // Base columns that always exist
+                const baseData = {
                     client_name: c.client,
                     meeting_date: meetingDate,
-                    meeting_title: meetingTitle || summary?.title || 'Meeting Notes',
+                    meeting_type: mTitle,
                     transcript,
                     summary: summary?.summary || 'Manual entry',
+                    ad_performance_notes: allAnalysis,
+                    user_email: user?.email,
+                    user_id: user?.id
+                };
+
+                // Extended columns (require migration)
+                const extData = {
+                    meeting_title: mTitle,
                     duration: summary?.duration || null,
                     participants: summary?.participants || [],
                     topics: summary?.topics || [],
@@ -1531,11 +1594,15 @@ ${transcript}`;
                     client_requests: summary?.clientRequests || [],
                     positive_signals: summary?.positiveSignals || [],
                     warning_signals: summary?.warningSignals || [],
-                    user_email: user?.email,
                     created_by_name: getDisplayName(user?.email, user)
                 };
 
-                const { data } = await supabase.from('meeting_notes').insert(meetingData).select().single();
+                // Try with all columns first, fall back to base-only
+                let result = await supabase.from('meeting_notes').insert({ ...baseData, ...extData }).select().single();
+                if (result.error) {
+                    result = await supabase.from('meeting_notes').insert(baseData).select().single();
+                }
+                const { data } = result;
 
                 if (data) {
                     setMeetings([data, ...meetings]);
@@ -1814,8 +1881,29 @@ ${transcript}`;
                         <h3 className="text-lg font-semibold text-white mb-4">📅 Meeting History</h3>
                         {meetings.length === 0 ? <div className="text-slate-500 text-center py-4">No meetings recorded</div> : (
                             <div className="space-y-4 max-h-[600px] overflow-y-auto scrollbar">
-                                {meetings.map(m => (
-                                    <div key={m.id} className={`bg-dark-800 rounded-xl overflow-hidden ${m.risk_level === 'high' ? 'border-l-4 border-red-500' : m.risk_level === 'medium' ? 'border-l-4 border-amber-500' : 'border-l-4 border-emerald-500'}`}>
+                                {meetings.map(m => {
+                                    const ex = getExtra(m);
+                                    const title = safeStr(m.meeting_title || ex.title || m.meeting_type || 'Meeting');
+                                    const riskLevel = safeStr(m.risk_level || ex.riskLevel || 'medium');
+                                    const sentiment = safeStr(m.client_sentiment || ex.clientSentiment || '');
+                                    const participants = pickArr(m.participants, ex.participants);
+                                    const topics = pickArr(m.topics, ex.topics);
+                                    const keyPoints = pickArr(m.key_points, ex.keyPoints);
+                                    const actionItems = pickArr(m.action_items, ex.actionItems);
+                                    const decisions = pickArr(m.decisions, ex.decisions);
+                                    const concerns = pickArr(m.concerns, m.client_concerns, ex.concerns);
+                                    const riskFactors = pickArr(m.risk_factors, ex.riskFactors);
+                                    const warningSignals = pickArr(m.warning_signals, ex.warningSignals);
+                                    const positiveSignals = pickArr(m.positive_signals, ex.positiveSignals);
+                                    const clientRequests = pickArr(m.client_requests, ex.clientRequests);
+                                    const nextSteps = pickArr(m.next_steps, ex.nextSteps);
+                                    const followUpItems = pickArr(m.follow_up_items, ex.followUpItems);
+                                    const duration = m.duration || ex.duration;
+                                    const followUpNeeded = m.follow_up_needed || ex.followUpNeeded || false;
+                                    const sentimentExplanation = m.sentiment_explanation || ex.sentimentExplanation || '';
+
+                                    return (
+                                    <div key={m.id} className={`bg-dark-800 rounded-xl overflow-hidden ${riskLevel === 'high' ? 'border-l-4 border-red-500' : riskLevel === 'medium' ? 'border-l-4 border-amber-500' : 'border-l-4 border-emerald-500'}`}>
                                         {/* Meeting Header - Always Visible */}
                                         <div
                                             className="p-4 cursor-pointer hover:bg-dark-700/50 transition-colors"
@@ -1824,30 +1912,30 @@ ${transcript}`;
                                             <div className="flex flex-wrap justify-between items-start gap-2">
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-3">
-                                                        <span className="text-white font-semibold">{m.meeting_title || 'Meeting'}</span>
+                                                        <span className="text-white font-semibold">{title}</span>
                                                         <span className="text-slate-400 text-sm">{new Date(m.meeting_date).toLocaleDateString()}</span>
                                                     </div>
-                                                    <p className="text-slate-400 text-sm mt-1 line-clamp-2">{m.summary}</p>
+                                                    <p className="text-slate-400 text-sm mt-1 line-clamp-2">{safeStr(m.summary || ex.summary)}</p>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    {m.client_sentiment && (
+                                                    {sentiment && (
                                                         <span className={`px-2 py-1 rounded text-xs ${
-                                                            ['positive', 'excited'].includes(m.client_sentiment) ? 'bg-emerald-500/20 text-emerald-400' :
-                                                            ['negative', 'frustrated'].includes(m.client_sentiment) ? 'bg-red-500/20 text-red-400' :
-                                                            m.client_sentiment === 'concerned' ? 'bg-amber-500/20 text-amber-400' :
+                                                            ['positive', 'excited'].includes(sentiment) ? 'bg-emerald-500/20 text-emerald-400' :
+                                                            ['negative', 'frustrated'].includes(sentiment) ? 'bg-red-500/20 text-red-400' :
+                                                            sentiment === 'concerned' ? 'bg-amber-500/20 text-amber-400' :
                                                             'bg-slate-500/20 text-slate-400'
-                                                        }`}>{m.client_sentiment}</span>
+                                                        }`}>{sentiment}</span>
                                                     )}
-                                                    <span className={`px-2 py-1 rounded text-xs ${m.risk_level === 'high' ? 'bg-red-500/20 text-red-400' : m.risk_level === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{m.risk_level}</span>
+                                                    <span className={`px-2 py-1 rounded text-xs ${riskLevel === 'high' ? 'bg-red-500/20 text-red-400' : riskLevel === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{riskLevel}</span>
                                                     <span className="text-slate-600 text-xs">▼</span>
                                                 </div>
                                             </div>
                                             <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500">
-                                                <span>📝 Added by: <span className="text-brand-purple">{m.created_by_name || getDisplayName(m.user_email)}</span></span>
-                                                {m.duration && <span>⏱️ {m.duration}</span>}
-                                                {m.participants?.length > 0 && <span>👥 {m.participants.length} participants</span>}
-                                                {m.action_items?.length > 0 && <span>✅ {m.action_items.length} action items</span>}
-                                                {m.follow_up_needed && <span className="text-amber-400">📞 Follow-up needed</span>}
+                                                <span>📝 Added by: <span className="text-brand-purple">{m.created_by_name || ex.createdByName || getDisplayName(m.user_email)}</span></span>
+                                                {duration && <span>⏱️ {safeStr(duration)}</span>}
+                                                {participants.length > 0 && <span>👥 {participants.length} participants</span>}
+                                                {actionItems.length > 0 && <span>✅ {actionItems.length} action items</span>}
+                                                {followUpNeeded && <span className="text-amber-400">📞 Follow-up needed</span>}
                                             </div>
                                         </div>
 
@@ -1856,22 +1944,22 @@ ${transcript}`;
                                             <div className="p-4 pt-0 border-t border-dark-700 space-y-4">
                                                 {/* Participants & Topics */}
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    {m.participants?.length > 0 && (
+                                                    {participants.length > 0 && (
                                                         <div>
                                                             <span className="text-brand-cyan text-xs font-medium">👥 Participants</span>
                                                             <div className="flex flex-wrap gap-1 mt-1">
-                                                                {m.participants.map((p, i) => (
-                                                                    <span key={i} className="px-2 py-0.5 bg-dark-700 text-slate-300 text-xs rounded">{p}</span>
+                                                                {participants.map((p, i) => (
+                                                                    <span key={i} className="px-2 py-0.5 bg-dark-700 text-slate-300 text-xs rounded">{safeStr(p)}</span>
                                                                 ))}
                                                             </div>
                                                         </div>
                                                     )}
-                                                    {m.topics?.length > 0 && (
+                                                    {topics.length > 0 && (
                                                         <div>
                                                             <span className="text-brand-cyan text-xs font-medium">📋 Topics</span>
                                                             <div className="flex flex-wrap gap-1 mt-1">
-                                                                {m.topics.map((t, i) => (
-                                                                    <span key={i} className="px-2 py-0.5 bg-brand-purple/20 text-brand-purple text-xs rounded">{t}</span>
+                                                                {topics.map((t, i) => (
+                                                                    <span key={i} className="px-2 py-0.5 bg-brand-purple/20 text-brand-purple text-xs rounded">{safeStr(t)}</span>
                                                                 ))}
                                                             </div>
                                                         </div>
@@ -1879,93 +1967,97 @@ ${transcript}`;
                                                 </div>
 
                                                 {/* Key Points */}
-                                                {m.key_points?.length > 0 && (
+                                                {keyPoints.length > 0 && (
                                                     <div>
                                                         <span className="text-brand-cyan text-xs font-medium">🔑 Key Points</span>
                                                         <ul className="mt-1 space-y-1">
-                                                            {m.key_points.map((kp, i) => <li key={i} className="text-slate-300 text-xs">• {kp}</li>)}
+                                                            {keyPoints.map((kp, i) => <li key={i} className="text-slate-300 text-xs">• {safeStr(kp)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
 
                                                 {/* Action Items */}
-                                                {m.action_items?.length > 0 && (
+                                                {actionItems.length > 0 && (
                                                     <div>
                                                         <span className="text-brand-cyan text-xs font-medium">✅ Action Items</span>
                                                         <div className="mt-1 space-y-1">
-                                                            {m.action_items.map((ai, i) => (
-                                                                <div key={i} className={`p-2 rounded ${ai.priority === 'high' ? 'bg-red-500/10' : ai.priority === 'medium' ? 'bg-amber-500/10' : 'bg-dark-700'}`}>
+                                                            {actionItems.map((ai, i) => {
+                                                                if (typeof ai === 'string') return <div key={i} className="p-2 rounded bg-dark-700 text-slate-300 text-xs">{ai}</div>;
+                                                                const item = ai || {};
+                                                                return (
+                                                                <div key={i} className={`p-2 rounded ${item.priority === 'high' ? 'bg-red-500/10' : item.priority === 'medium' ? 'bg-amber-500/10' : 'bg-dark-700'}`}>
                                                                     <div className="flex items-center justify-between">
-                                                                        <span className="text-slate-300 text-xs">{ai.task}</span>
+                                                                        <span className="text-slate-300 text-xs">{safeStr(item.task || ai)}</span>
                                                                         <div className="flex items-center gap-2">
-                                                                            <span className="text-slate-500 text-xs">👤 {ai.owner}</span>
-                                                                            {ai.priority && <span className={`px-1.5 py-0.5 text-[10px] rounded ${ai.priority === 'high' ? 'bg-red-500/20 text-red-400' : ai.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>{ai.priority}</span>}
+                                                                            {item.owner && <span className="text-slate-500 text-xs">👤 {safeStr(item.owner)}</span>}
+                                                                            {item.priority && <span className={`px-1.5 py-0.5 text-[10px] rounded ${item.priority === 'high' ? 'bg-red-500/20 text-red-400' : item.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>{item.priority}</span>}
                                                                         </div>
                                                                     </div>
                                                                 </div>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
                                                 )}
 
                                                 {/* Decisions */}
-                                                {m.decisions?.length > 0 && (
+                                                {decisions.length > 0 && (
                                                     <div>
                                                         <span className="text-brand-cyan text-xs font-medium">🎯 Decisions Made</span>
                                                         <ul className="mt-1 space-y-1">
-                                                            {m.decisions.map((d, i) => <li key={i} className="text-slate-300 text-xs">✓ {d}</li>)}
+                                                            {decisions.map((d, i) => <li key={i} className="text-slate-300 text-xs">✓ {safeStr(d)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
 
                                                 {/* Concerns & Risk Factors */}
-                                                {(m.concerns?.length > 0 || m.risk_factors?.length > 0 || m.warning_signals?.length > 0) && (
+                                                {(concerns.length > 0 || riskFactors.length > 0 || warningSignals.length > 0) && (
                                                     <div className="p-2 bg-red-500/10 rounded">
                                                         <span className="text-red-400 text-xs font-medium">⚠️ Concerns & Risks</span>
                                                         <ul className="mt-1 space-y-0.5">
-                                                            {m.concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {c}</li>)}
-                                                            {m.risk_factors?.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {r}</li>)}
-                                                            {m.warning_signals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {w}</li>)}
+                                                            {concerns.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {safeStr(c)}</li>)}
+                                                            {riskFactors.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {safeStr(r)}</li>)}
+                                                            {warningSignals.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {safeStr(w)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
 
                                                 {/* Positive Signals */}
-                                                {m.positive_signals?.length > 0 && (
+                                                {positiveSignals.length > 0 && (
                                                     <div className="p-2 bg-emerald-500/10 rounded">
                                                         <span className="text-emerald-400 text-xs font-medium">✨ Positive Signals</span>
                                                         <ul className="mt-1 space-y-0.5">
-                                                            {m.positive_signals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {p}</li>)}
+                                                            {positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {safeStr(p)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
 
                                                 {/* Client Requests */}
-                                                {m.client_requests?.length > 0 && (
+                                                {clientRequests.length > 0 && (
                                                     <div>
                                                         <span className="text-brand-cyan text-xs font-medium">🙋 Client Requests</span>
                                                         <ul className="mt-1 space-y-0.5">
-                                                            {m.client_requests.map((r, i) => <li key={i} className="text-slate-300 text-xs">• {r}</li>)}
+                                                            {clientRequests.map((r, i) => <li key={i} className="text-slate-300 text-xs">• {safeStr(r)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
 
                                                 {/* Next Steps */}
-                                                {m.next_steps?.length > 0 && (
+                                                {nextSteps.length > 0 && (
                                                     <div>
                                                         <span className="text-brand-cyan text-xs font-medium">➡️ Next Steps</span>
                                                         <ul className="mt-1 space-y-0.5">
-                                                            {m.next_steps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
+                                                            {nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {safeStr(ns)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
 
                                                 {/* Follow-up Items */}
-                                                {m.follow_up_needed && m.follow_up_items?.length > 0 && (
+                                                {followUpNeeded && followUpItems.length > 0 && (
                                                     <div className="p-2 bg-brand-purple/10 rounded">
                                                         <span className="text-brand-purple text-xs font-medium">📞 Follow-up Items</span>
                                                         <ul className="mt-1 space-y-0.5">
-                                                            {m.follow_up_items.map((f, i) => <li key={i} className="text-slate-300 text-xs">• {f}</li>)}
+                                                            {followUpItems.map((f, i) => <li key={i} className="text-slate-300 text-xs">• {safeStr(f)}</li>)}
                                                         </ul>
                                                     </div>
                                                 )}
@@ -1981,9 +2073,9 @@ ${transcript}`;
                                                 )}
 
                                                 {/* Sentiment Explanation */}
-                                                {m.sentiment_explanation && (
+                                                {sentimentExplanation && (
                                                     <div className="text-xs text-slate-500 italic">
-                                                        💭 Sentiment note: {m.sentiment_explanation}
+                                                        💭 Sentiment note: {safeStr(sentimentExplanation)}
                                                     </div>
                                                 )}
 
@@ -1999,7 +2091,8 @@ ${transcript}`;
                                             </div>
                                         )}
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
