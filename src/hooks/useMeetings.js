@@ -80,13 +80,20 @@ export const useMeetings = (clientName) => {
     try {
       const meetingTitle = meetingData.title || analysis?.title || 'Meeting Notes';
 
-      // Extra analysis fields stored as JSON in ad_performance_notes
-      const extraAnalysis = analysis ? {
+      // Store ALL analysis data in ad_performance_notes JSON as the reliable store
+      const allAnalysis = analysis ? {
         title: meetingTitle,
+        summary: analysis.summary || null,
+        clientSentiment: analysis.clientSentiment || 'neutral',
+        sentimentExplanation: analysis.sentimentExplanation || null,
+        keyPoints: analysis.keyPoints || [],
+        actionItems: analysis.actionItems || [],
+        concerns: analysis.concerns || [],
+        riskLevel: analysis.riskLevel || 'medium',
+        nextSteps: analysis.nextSteps || [],
         duration: analysis.duration || null,
         participants: analysis.participants || [],
         topics: analysis.topics || [],
-        sentimentExplanation: analysis.sentimentExplanation || null,
         decisions: analysis.decisions || [],
         followUpNeeded: analysis.followUpNeeded || false,
         followUpItems: analysis.followUpItems || [],
@@ -94,28 +101,42 @@ export const useMeetings = (clientName) => {
         clientRequests: analysis.clientRequests || [],
         positiveSignals: analysis.positiveSignals || [],
         warningSignals: analysis.warningSignals || [],
+        importantNotes: analysis.importantNotes || [],
         createdByName: getDisplayName(user?.email, user)
       } : null;
 
-      // Only insert columns that exist in the meeting_notes table
-      const fullMeetingData = {
+      // Base columns that are guaranteed to exist in the meeting_notes table
+      const baseMeetingData = {
         client_name: clientName,
         meeting_date: meetingData.date,
         meeting_type: meetingTitle,
         transcript: meetingData.transcript,
         summary: analysis?.summary || 'Manual entry',
+        ad_performance_notes: allAnalysis ? JSON.stringify(allAnalysis) : null,
+        user_email: user?.email,
+        user_id: user?.id
+      };
+
+      // Extended columns that may or may not exist in the table
+      const extendedColumns = {
         client_sentiment: analysis?.clientSentiment || 'neutral',
         key_points: analysis?.keyPoints || [],
         action_items: analysis?.actionItems || [],
         client_concerns: analysis?.concerns || [],
         risk_level: analysis?.riskLevel || 'medium',
-        next_steps: JSON.stringify(analysis?.nextSteps || []),
-        ad_performance_notes: extraAnalysis ? JSON.stringify(extraAnalysis) : null,
-        user_email: user?.email,
-        user_id: user?.id
+        next_steps: JSON.stringify(analysis?.nextSteps || [])
       };
 
-      const { data, error: err } = await addMeetingService(fullMeetingData);
+      // Try with all columns first, fall back to base-only if columns don't exist
+      let data, err;
+      ({ data, error: err } = await addMeetingService({ ...baseMeetingData, ...extendedColumns }));
+
+      if (err) {
+        // If insert failed (likely missing columns), retry with base columns only
+        // All AI data is already stored in ad_performance_notes JSON
+        ({ data, error: err } = await addMeetingService(baseMeetingData));
+      }
+
       if (err) throw new Error(err.message || 'Failed to save meeting to database');
       if (!data) throw new Error('No data returned after saving meeting');
 

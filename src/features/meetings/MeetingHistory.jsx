@@ -56,7 +56,13 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
           {meetings.map(m => {
             const extra = getExtra(m);
             const title = m.meeting_title || extra.title || m.meeting_type || 'Meeting';
-            const concerns = m.concerns || m.client_concerns || [];
+            const summary = m.summary || extra.summary || 'No summary';
+            const riskLevel = m.risk_level || extra.riskLevel || 'medium';
+            const clientSentiment = m.client_sentiment || extra.clientSentiment || 'neutral';
+            const keyPoints = parseJsonField(m.key_points?.length ? m.key_points : extra.keyPoints);
+            const actionItems = parseJsonField(m.action_items?.length ? m.action_items : extra.actionItems);
+            const nextSteps = parseJsonField(m.next_steps || extra.nextSteps);
+            const concerns = m.concerns || m.client_concerns || extra.concerns || [];
             const participants = m.participants || extra.participants || [];
             const topics = m.topics || extra.topics || [];
             const duration = m.duration || extra.duration;
@@ -71,7 +77,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
             return (
             <div
               key={m.id}
-              className={`bg-dark-800 rounded-xl overflow-hidden ${getRiskBorderColor(m.risk_level)}`}
+              className={`bg-dark-800 rounded-xl overflow-hidden ${getRiskBorderColor(riskLevel)}`}
             >
               {/* Meeting Header - Always Visible */}
               <div
@@ -86,16 +92,16 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                         {new Date(m.meeting_date).toLocaleDateString()}
                       </span>
                     </div>
-                    <p className="text-slate-400 text-sm mt-1 line-clamp-2">{m.summary}</p>
+                    <p className="text-slate-400 text-sm mt-1 line-clamp-2">{summary}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {m.client_sentiment && (
-                      <span className={`px-2 py-1 rounded text-xs ${getSentimentStyle(m.client_sentiment)}`}>
-                        {m.client_sentiment}
+                    {clientSentiment && (
+                      <span className={`px-2 py-1 rounded text-xs ${getSentimentStyle(clientSentiment)}`}>
+                        {clientSentiment}
                       </span>
                     )}
-                    <Badge variant={m.risk_level === 'high' ? 'danger' : m.risk_level === 'medium' ? 'warning' : 'success'}>
-                      {m.risk_level}
+                    <Badge variant={riskLevel === 'high' ? 'danger' : riskLevel === 'medium' ? 'warning' : 'success'}>
+                      {riskLevel}
                     </Badge>
                     <span className="text-slate-600 text-xs">▼</span>
                   </div>
@@ -104,7 +110,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   <span>📝 Added by: <span className="text-brand-purple">{createdByName || getDisplayName(m.user_email)}</span></span>
                   {duration && <span>⏱️ {duration}</span>}
                   {participants?.length > 0 && <span>👥 {participants.length} participants</span>}
-                  {m.action_items?.length > 0 && <span>✅ {m.action_items.length} action items</span>}
+                  {actionItems?.length > 0 && <span>✅ {actionItems.length} action items</span>}
                   {followUpNeeded && <span className="text-amber-400">📞 Follow-up needed</span>}
                 </div>
               </div>
@@ -137,11 +143,11 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   </div>
 
                   {/* Key Points */}
-                  {m.key_points?.length > 0 && (
+                  {keyPoints?.length > 0 && (
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">🔑 Key Points</span>
                       <ul className="mt-1 space-y-1">
-                        {m.key_points.map((kp, i) => (
+                        {keyPoints.map((kp, i) => (
                           <li key={i} className="text-slate-300 text-xs">• {kp}</li>
                         ))}
                       </ul>
@@ -149,11 +155,11 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   )}
 
                   {/* Action Items */}
-                  {m.action_items?.length > 0 && (
+                  {actionItems?.length > 0 && (
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">✅ Action Items</span>
                       <div className="mt-1 space-y-1">
-                        {m.action_items.map((ai, i) => (
+                        {actionItems.map((ai, i) => (
                           <div
                             key={i}
                             className={`p-2 rounded ${
@@ -217,11 +223,11 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                   )}
 
                   {/* Next Steps */}
-                  {parseJsonField(m.next_steps)?.length > 0 && (
+                  {nextSteps?.length > 0 && (
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">➡️ Next Steps</span>
                       <ul className="mt-1 space-y-0.5">
-                        {parseJsonField(m.next_steps).map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
+                        {nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
                       </ul>
                     </div>
                   )}
