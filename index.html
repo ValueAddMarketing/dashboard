@@ -1403,7 +1403,7 @@ Provide a brief, practical response that the CSM can use immediately on the call
                 const text = noteText || newNote;
                 if (!text || !text.trim()) return;
                 if (!noteText) setNewNote('');
-                const noteObj = { client_name: c.client, note_text: text, user_email: user?.email, source: source, is_important: source === 'ai_extracted' };
+                const noteObj = { client_name: c.client, note_text: text, user_email: user?.email, source: source };
                 const { data, error } = await supabase.from('client_notes').insert(noteObj).select().single();
                 if (error) { console.error('addNote error:', error); alert('Failed to save note: ' + error.message); if (!noteText) setNewNote(text); return; }
                 if (data) setNotes(prev => [data, ...prev]);
