@@ -59,17 +59,21 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
             const summary = m.summary || extra.summary || 'No summary';
             const riskLevel = m.risk_level || extra.riskLevel || 'medium';
             const clientSentiment = m.client_sentiment || extra.clientSentiment || 'neutral';
-            const keyPoints = parseJsonField(m.key_points?.length ? m.key_points : extra.keyPoints);
-            const actionItems = parseJsonField(m.action_items?.length ? m.action_items : extra.actionItems);
-            const nextSteps = parseJsonField(m.next_steps || extra.nextSteps);
-            const concerns = m.concerns || m.client_concerns || extra.concerns || [];
-            const participants = m.participants || extra.participants || [];
-            const topics = m.topics || extra.topics || [];
+
+            // Use helper to pick the first non-empty array, avoiding empty [] masking fallback data
+            const pick = (...sources) => { for (const s of sources) { const a = parseJsonField(s); if (a.length > 0) return a; } return []; };
+
+            const keyPoints = pick(m.key_points, extra.keyPoints);
+            const actionItems = pick(m.action_items, extra.actionItems);
+            const nextSteps = pick(m.next_steps, extra.nextSteps);
+            const concerns = pick(m.client_concerns, m.concerns, extra.concerns);
+            const participants = pick(m.participants, extra.participants);
+            const topics = pick(m.topics, extra.topics);
             const duration = m.duration || extra.duration;
-            const decisions = m.decisions || extra.decisions || [];
-            const riskFactors = m.risk_factors || extra.riskFactors || [];
-            const warningSignals = m.warning_signals || extra.warningSignals || [];
-            const positiveSignals = m.positive_signals || extra.positiveSignals || [];
+            const decisions = pick(m.decisions, extra.decisions);
+            const riskFactors = pick(m.risk_factors, extra.riskFactors);
+            const warningSignals = pick(m.warning_signals, extra.warningSignals);
+            const positiveSignals = pick(m.positive_signals, extra.positiveSignals);
             const followUpNeeded = m.follow_up_needed || extra.followUpNeeded || false;
             const sentimentExplanation = m.sentiment_explanation || extra.sentimentExplanation;
             const createdByName = m.created_by_name || extra.createdByName;
@@ -125,7 +129,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                         <span className="text-brand-cyan text-xs font-medium">👥 Participants</span>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {participants.map((p, i) => (
-                            <Badge key={i} variant="default" className="text-xs">{p}</Badge>
+                            <Badge key={i} variant="default" className="text-xs">{typeof p === 'string' ? p : JSON.stringify(p)}</Badge>
                           ))}
                         </div>
                       </div>
@@ -135,7 +139,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                         <span className="text-brand-cyan text-xs font-medium">📋 Topics</span>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {topics.map((t, i) => (
-                            <Badge key={i} variant="purple" className="text-xs">{t}</Badge>
+                            <Badge key={i} variant="purple" className="text-xs">{typeof t === 'string' ? t : JSON.stringify(t)}</Badge>
                           ))}
                         </div>
                       </div>
@@ -148,7 +152,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                       <span className="text-brand-cyan text-xs font-medium">🔑 Key Points</span>
                       <ul className="mt-1 space-y-1">
                         {keyPoints.map((kp, i) => (
-                          <li key={i} className="text-slate-300 text-xs">• {kp}</li>
+                          <li key={i} className="text-slate-300 text-xs">• {typeof kp === 'string' ? kp : JSON.stringify(kp)}</li>
                         ))}
                       </ul>
                     </div>
@@ -159,20 +163,22 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">✅ Action Items</span>
                       <div className="mt-1 space-y-1">
-                        {actionItems.map((ai, i) => (
+                        {actionItems.map((ai, i) => {
+                          if (typeof ai === 'string') return <div key={i} className="p-2 rounded bg-dark-700 text-slate-300 text-xs">{ai}</div>;
+                          return (
                           <div
                             key={i}
                             className={`p-2 rounded ${
-                              ai.priority === 'high' ? 'bg-red-500/10' :
-                              ai.priority === 'medium' ? 'bg-amber-500/10' :
+                              ai?.priority === 'high' ? 'bg-red-500/10' :
+                              ai?.priority === 'medium' ? 'bg-amber-500/10' :
                               'bg-dark-700'
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <span className="text-slate-300 text-xs">{ai.task}</span>
+                              <span className="text-slate-300 text-xs">{ai?.task || String(ai)}</span>
                               <div className="flex items-center gap-2">
-                                <span className="text-slate-500 text-xs">👤 {ai.owner}</span>
-                                {ai.priority && (
+                                {ai?.owner && <span className="text-slate-500 text-xs">👤 {ai.owner}</span>}
+                                {ai?.priority && (
                                   <Badge
                                     variant={ai.priority === 'high' ? 'danger' : ai.priority === 'medium' ? 'warning' : 'slate'}
                                     className="text-[10px]"
@@ -183,7 +189,8 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -194,7 +201,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                       <span className="text-brand-cyan text-xs font-medium">🎯 Decisions Made</span>
                       <ul className="mt-1 space-y-1">
                         {decisions.map((d, i) => (
-                          <li key={i} className="text-slate-300 text-xs">✓ {d}</li>
+                          <li key={i} className="text-slate-300 text-xs">✓ {typeof d === 'string' ? d : JSON.stringify(d)}</li>
                         ))}
                       </ul>
                     </div>
@@ -205,9 +212,9 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                     <div className="p-2 bg-red-500/10 rounded">
                       <span className="text-red-400 text-xs font-medium">⚠️ Concerns & Risks</span>
                       <ul className="mt-1 space-y-0.5">
-                        {concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {c}</li>)}
-                        {riskFactors?.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {r}</li>)}
-                        {warningSignals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {w}</li>)}
+                        {concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-xs">• {typeof c === 'string' ? c : JSON.stringify(c)}</li>)}
+                        {riskFactors?.map((r, i) => <li key={`r-${i}`} className="text-amber-300 text-xs">• {typeof r === 'string' ? r : JSON.stringify(r)}</li>)}
+                        {warningSignals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-xs">• {typeof w === 'string' ? w : JSON.stringify(w)}</li>)}
                       </ul>
                     </div>
                   )}
@@ -217,7 +224,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                     <div className="p-2 bg-emerald-500/10 rounded">
                       <span className="text-emerald-400 text-xs font-medium">✨ Positive Signals</span>
                       <ul className="mt-1 space-y-0.5">
-                        {positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {p}</li>)}
+                        {positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-xs">• {typeof p === 'string' ? p : JSON.stringify(p)}</li>)}
                       </ul>
                     </div>
                   )}
@@ -227,7 +234,7 @@ export const MeetingHistory = ({ meetings, onDelete }) => {
                     <div>
                       <span className="text-brand-cyan text-xs font-medium">➡️ Next Steps</span>
                       <ul className="mt-1 space-y-0.5">
-                        {nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {ns}</li>)}
+                        {nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-xs">{i + 1}. {typeof ns === 'string' ? ns : JSON.stringify(ns)}</li>)}
                       </ul>
                     </div>
                   )}
