@@ -2606,11 +2606,11 @@ ${transcript}`;
                         </div>
                     </div>
 
-                    {/* Visual Timeline Bar */}
+                    {/* Scrollable Calendar Timeline */}
                     <div className="card rounded-2xl">
                         <div className="p-4 border-b border-dark-700">
                             <h3 className="text-lg font-semibold text-white">Renewal Timeline</h3>
-                            <p className="text-xs text-slate-500 mt-1">Visual overview of contract renewals sorted by urgency</p>
+                            <p className="text-xs text-slate-500 mt-1">Scroll left/right to see when each client's contract ends</p>
                         </div>
                         <div className="p-4">
                             <div className="flex items-center gap-6 mb-4 text-xs text-slate-400">
@@ -2618,21 +2618,93 @@ ${transcript}`;
                                 <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-amber-500"></span> Within 3 months</div>
                                 <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-emerald-500"></span> 3+ months away</div>
                             </div>
-                            <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar">
-                                {renewalData.map(d => {
-                                    const cfg = urgencyConfig[d.urgency];
-                                    const barWidth = Math.min(100, Math.max(2, (d.daysLeft / 365) * 100));
-                                    return (
-                                        <div key={d.client} className="flex items-center gap-3">
-                                            <div className="w-40 truncate text-sm text-slate-300 flex-shrink-0" title={d.client}>{d.client}</div>
-                                            <div className="flex-1 h-6 bg-dark-700 rounded-full overflow-hidden relative">
-                                                <div className={'h-full rounded-full ' + cfg.dot} style={{width: `${barWidth}%`}}></div>
-                                                <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white/80">{d.daysLeft} days</span>
+                            {(() => {
+                                // Build 8 months of weeks starting from today
+                                const today = new Date();
+                                const totalWeeks = 35; // ~8 months
+                                const weekWidth = 48; // px per week column
+                                const weeks = [];
+                                for (let i = 0; i < totalWeeks; i++) {
+                                    const d = new Date(today);
+                                    d.setDate(d.getDate() + i * 7);
+                                    weeks.push(d);
+                                }
+                                // Group weeks into months for header
+                                const months = [];
+                                let currentMonth = '';
+                                weeks.forEach((w, i) => {
+                                    const label = w.toLocaleString('default', { month: 'short', year: 'numeric' });
+                                    if (label !== currentMonth) {
+                                        months.push({ label, startIdx: i, span: 1 });
+                                        currentMonth = label;
+                                    } else {
+                                        months[months.length - 1].span++;
+                                    }
+                                });
+                                // Today marker position
+                                const todayX = 0;
+                                // Only show clients that renew within the timeline range
+                                const maxDays = totalWeeks * 7;
+                                const timelineClients = renewalData.filter(d => d.daysLeft <= maxDays && d.daysLeft >= -14).slice(0, 80);
+
+                                return (
+                                    <div className="overflow-x-auto scrollbar" style={{maxHeight: '500px'}}>
+                                        <div style={{minWidth: `${200 + totalWeeks * weekWidth}px`}}>
+                                            {/* Month headers */}
+                                            <div className="flex border-b border-dark-700" style={{position: 'sticky', top: 0, zIndex: 2, background: '#0a0a0a'}}>
+                                                <div className="flex-shrink-0" style={{width: 200, minWidth: 200}}></div>
+                                                {months.map((m, i) => (
+                                                    <div key={i} className="text-center text-xs font-semibold text-slate-300 py-2 border-l border-dark-700" style={{width: m.span * weekWidth, minWidth: m.span * weekWidth}}>
+                                                        {m.label}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {/* Week tick marks */}
+                                            <div className="flex border-b border-dark-600" style={{position: 'sticky', top: 30, zIndex: 2, background: '#0a0a0a'}}>
+                                                <div className="flex-shrink-0 text-xs text-slate-500 py-1 px-2" style={{width: 200, minWidth: 200}}>Client</div>
+                                                {weeks.map((w, i) => (
+                                                    <div key={i} className="text-center text-[10px] text-slate-600 py-1 border-l border-dark-700/50" style={{width: weekWidth, minWidth: weekWidth}}>
+                                                        {w.getDate() <= 7 ? '' : `${w.getMonth() + 1}/${w.getDate()}`}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {/* Today vertical line + client rows */}
+                                            <div style={{position: 'relative'}}>
+                                                {/* Today line */}
+                                                <div style={{position: 'absolute', top: 0, bottom: 0, left: 200, width: 2, background: '#06b6d4', zIndex: 1, opacity: 0.6}}></div>
+                                                <div style={{position: 'absolute', top: -2, left: 194, zIndex: 3, fontSize: 9, color: '#06b6d4', fontWeight: 700}}>TODAY</div>
+                                                {/* Client rows */}
+                                                {timelineClients.map((d, idx) => {
+                                                    const cfg = urgencyConfig[d.urgency];
+                                                    const markerLeft = 200 + (d.daysLeft / 7) * weekWidth;
+                                                    return (
+                                                        <div key={d.client} className={'flex items-center border-b border-dark-700/30 ' + (idx % 2 === 0 ? '' : 'bg-dark-800/30')} style={{height: 32, position: 'relative'}}>
+                                                            <div className="flex-shrink-0 truncate text-xs text-slate-300 px-2 font-medium" style={{width: 200, minWidth: 200}} title={d.client}>
+                                                                {d.client}
+                                                            </div>
+                                                            {/* Week grid lines */}
+                                                            {weeks.map((w, i) => (
+                                                                <div key={i} className="border-l border-dark-700/20" style={{width: weekWidth, minWidth: weekWidth, height: '100%'}}></div>
+                                                            ))}
+                                                            {/* Renewal marker */}
+                                                            <div style={{position: 'absolute', left: `${markerLeft - 6}px`, top: 4, zIndex: 2}} title={`${d.client}: ${d.daysLeft} days (${d.contractEndDate || '—'})`}>
+                                                                <div className={'rounded-full shadow-lg ' + cfg.dot} style={{width: 12, height: 12, border: '2px solid rgba(0,0,0,0.5)'}}></div>
+                                                                <div className={'absolute top-full left-1/2 -translate-x-1/2 mt-0.5 whitespace-nowrap text-[9px] font-bold ' + cfg.text} style={{lineHeight: 1}}>
+                                                                    {d.daysLeft}d
+                                                                </div>
+                                                            </div>
+                                                            {/* Line from today to marker */}
+                                                            {d.daysLeft > 0 && (
+                                                                <div style={{position: 'absolute', left: 200, top: 9, height: 2, width: `${(d.daysLeft / 7) * weekWidth}px`, zIndex: 1, opacity: 0.35}} className={cfg.dot}></div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
 
