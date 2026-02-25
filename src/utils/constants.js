@@ -30,6 +30,7 @@ export const CLIENT_HUB_TABS = [
   { id: 'redflags', name: 'Red Flags', icon: '🚩', desc: 'Clients needing attention' },
   { id: 'health', name: 'Client Health', icon: '❤️', desc: 'Overview of client status and metrics' },
   { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
+  { id: 'timeline', name: 'Renewals Timeline', icon: '📅', desc: 'Upcoming client contract renewals' },
 ];
 
 // Severity colors for flags
