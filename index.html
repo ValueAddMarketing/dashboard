@@ -2622,7 +2622,7 @@ ${transcript}`;
                                 // Build 8 months of weeks starting from today
                                 const today = new Date();
                                 const totalWeeks = 35; // ~8 months
-                                const weekWidth = 48; // px per week column
+                                const weekWidth = 28; // px per week column
                                 const weeks = [];
                                 for (let i = 0; i < totalWeeks; i++) {
                                     const d = new Date(today);
@@ -2649,19 +2649,19 @@ ${transcript}`;
 
                                 return (
                                     <div className="overflow-x-auto scrollbar" style={{maxHeight: '500px'}}>
-                                        <div style={{minWidth: `${200 + totalWeeks * weekWidth}px`}}>
+                                        <div style={{minWidth: `${150 + totalWeeks * weekWidth}px`}}>
                                             {/* Month headers */}
                                             <div className="flex border-b border-dark-700" style={{position: 'sticky', top: 0, zIndex: 2, background: '#0a0a0a'}}>
-                                                <div className="flex-shrink-0" style={{width: 200, minWidth: 200}}></div>
+                                                <div className="flex-shrink-0" style={{width: 150, minWidth: 150}}></div>
                                                 {months.map((m, i) => (
-                                                    <div key={i} className="text-center text-xs font-semibold text-slate-300 py-2 border-l border-dark-700" style={{width: m.span * weekWidth, minWidth: m.span * weekWidth}}>
+                                                    <div key={i} className="text-center text-sm font-bold text-slate-200 py-3 border-l border-dark-700" style={{width: m.span * weekWidth, minWidth: m.span * weekWidth}}>
                                                         {m.label}
                                                     </div>
                                                 ))}
                                             </div>
                                             {/* Week tick marks */}
                                             <div className="flex border-b border-dark-600" style={{position: 'sticky', top: 30, zIndex: 2, background: '#0a0a0a'}}>
-                                                <div className="flex-shrink-0 text-xs text-slate-500 py-1 px-2" style={{width: 200, minWidth: 200}}>Client</div>
+                                                <div className="flex-shrink-0 text-xs text-slate-500 py-1 px-2" style={{width: 150, minWidth: 150}}>Client</div>
                                                 {weeks.map((w, i) => (
                                                     <div key={i} className="text-center text-[10px] text-slate-600 py-1 border-l border-dark-700/50" style={{width: weekWidth, minWidth: weekWidth}}>
                                                         {w.getDate() <= 7 ? '' : `${w.getMonth() + 1}/${w.getDate()}`}
@@ -2671,15 +2671,15 @@ ${transcript}`;
                                             {/* Today vertical line + client rows */}
                                             <div style={{position: 'relative'}}>
                                                 {/* Today line */}
-                                                <div style={{position: 'absolute', top: 0, bottom: 0, left: 200, width: 2, background: '#06b6d4', zIndex: 1, opacity: 0.6}}></div>
-                                                <div style={{position: 'absolute', top: -2, left: 194, zIndex: 3, fontSize: 9, color: '#06b6d4', fontWeight: 700}}>TODAY</div>
+                                                <div style={{position: 'absolute', top: 0, bottom: 0, left: 150, width: 2, background: '#06b6d4', zIndex: 1, opacity: 0.6}}></div>
+                                                <div style={{position: 'absolute', top: -2, left: 144, zIndex: 3, fontSize: 9, color: '#06b6d4', fontWeight: 700}}>TODAY</div>
                                                 {/* Client rows */}
                                                 {timelineClients.map((d, idx) => {
                                                     const cfg = urgencyConfig[d.urgency];
-                                                    const markerLeft = 200 + (d.daysLeft / 7) * weekWidth;
+                                                    const markerLeft = 150 + (d.daysLeft / 7) * weekWidth;
                                                     return (
                                                         <div key={d.client} className={'flex items-center border-b border-dark-700/30 ' + (idx % 2 === 0 ? '' : 'bg-dark-800/30')} style={{height: 32, position: 'relative'}}>
-                                                            <div className="flex-shrink-0 truncate text-xs text-slate-300 px-2 font-medium" style={{width: 200, minWidth: 200}} title={d.client}>
+                                                            <div className="flex-shrink-0 truncate text-sm text-slate-200 px-2 font-semibold" style={{width: 150, minWidth: 150}} title={d.client}>
                                                                 {d.client}
                                                             </div>
                                                             {/* Week grid lines */}
@@ -2695,7 +2695,7 @@ ${transcript}`;
                                                             </div>
                                                             {/* Line from today to marker */}
                                                             {d.daysLeft > 0 && (
-                                                                <div style={{position: 'absolute', left: 200, top: 9, height: 2, width: `${(d.daysLeft / 7) * weekWidth}px`, zIndex: 1, opacity: 0.35}} className={cfg.dot}></div>
+                                                                <div style={{position: 'absolute', left: 150, top: 9, height: 2, width: `${(d.daysLeft / 7) * weekWidth}px`, zIndex: 1, opacity: 0.35}} className={cfg.dot}></div>
                                                             )}
                                                         </div>
                                                     );
