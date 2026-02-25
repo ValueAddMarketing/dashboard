@@ -2676,7 +2676,7 @@ ${transcript}`;
                                                 {/* Client rows */}
                                                 {timelineClients.map((d, idx) => {
                                                     const cfg = urgencyConfig[d.urgency];
-                                                    const markerLeft = 150 + (d.daysLeft / 7) * weekWidth;
+                                                    const markerLeft = d.daysLeft < 0 ? 150 - 20 : 150 + (d.daysLeft / 7) * weekWidth;
                                                     return (
                                                         <div key={d.client} className={'flex items-center border-b border-dark-700/30 ' + (idx % 2 === 0 ? '' : 'bg-dark-800/30')} style={{height: 32, position: 'relative'}}>
                                                             <div className="flex-shrink-0 truncate text-sm text-slate-200 px-2 font-semibold" style={{width: 150, minWidth: 150}} title={d.client}>
