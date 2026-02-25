@@ -63,7 +63,7 @@
 <body class="min-h-screen dark">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, createContext, useContext } = React;
+        const { useState, useEffect, useMemo, useCallback, createContext, useContext } = React;
 
         const SUPABASE_URL = 'https://ecmhhonjazfbletyvncw.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbWhob25qYXpmYmxldHl2bmN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5NDMwMjYsImV4cCI6MjA4MTUxOTAyNn0.3LZ8dAOX_ZpoUNkgY_jSeC10SaCknfPfBaZsDRjFt7c';
@@ -2125,42 +2125,44 @@ ${transcript}`;
         const OverviewTab = ({ clients, setupData, onSelectClient }) => {
             const [expandedSection, setExpandedSection] = useState(null);
 
-            const getSetupInfo = (client) => {
-                const name = client.client.toLowerCase().trim();
-                return setupData.find(s => { const sn = (s.client||'').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn); });
-            };
+            const { enriched, struggling, doingWell, noLeads, gettingMoreLeads, campaigns, totals, avgCpl } = useMemo(() => {
+                const getSetupInfo = (client) => {
+                    const name = client.client.toLowerCase().trim();
+                    return setupData.find(s => { const sn = (s.client||'').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn); });
+                };
 
-            const enriched = clients.map(c => {
-                const setup = getSetupInfo(c);
-                const health = getHealth(c.cpl);
-                const score = getHealthScore(c, setup);
-                return { ...c, setup, health, score };
-            });
+                const enriched = clients.map(c => {
+                    const setup = getSetupInfo(c);
+                    const health = getHealth(c.cpl);
+                    const score = getHealthScore(c, setup);
+                    return { ...c, setup, health, score };
+                });
 
-            const struggling = enriched.filter(c => c.health === 'red' && c.days > 7).sort((a,b) => a.score - b.score);
-            const doingWell = enriched.filter(c => c.health === 'green' && c.days > 7).sort((a,b) => b.score - a.score);
-            const noLeads = enriched.filter(c => c.days >= 3 && c.last3DayLeads === 0).sort((a,b) => a.last7DayLeads - b.last7DayLeads);
-            const gettingMoreLeads = enriched.filter(c => c.last3DayLeads > 0 && c.days > 3).sort((a,b) => b.last3DayLeads - a.last3DayLeads);
+                const struggling = enriched.filter(c => c.health === 'red' && c.days > 7).sort((a,b) => a.score - b.score);
+                const doingWell = enriched.filter(c => c.health === 'green' && c.days > 7).sort((a,b) => b.score - a.score);
+                const noLeads = enriched.filter(c => c.days >= 3 && c.last3DayLeads === 0).sort((a,b) => a.last7DayLeads - b.last7DayLeads);
+                const gettingMoreLeads = enriched.filter(c => c.last3DayLeads > 0 && c.days > 3).sort((a,b) => b.last3DayLeads - a.last3DayLeads);
 
-            // Best performing campaigns
-            const campaignMap = {};
-            enriched.forEach(c => {
-                const name = (c.campaign||'').trim();
-                if (!name) return;
-                if (!campaignMap[name]) campaignMap[name] = { campaign: name, clients: [], totalLeads: 0, totalSpend: 0, totalAppts: 0, totalDeals: 0 };
-                campaignMap[name].clients.push(c.client);
-                campaignMap[name].totalLeads += c.leads;
-                campaignMap[name].totalSpend += c.spend;
-                campaignMap[name].totalAppts += c.appts;
-                campaignMap[name].totalDeals += c.deals;
-            });
-            const campaigns = Object.values(campaignMap)
-                .map(cp => ({ ...cp, cpl: cp.totalLeads > 0 ? cp.totalSpend / cp.totalLeads : 0 }))
-                .filter(cp => cp.totalLeads > 0)
-                .sort((a,b) => a.cpl - b.cpl);
+                const campaignMap = {};
+                enriched.forEach(c => {
+                    const name = (c.campaign||'').trim();
+                    if (!name) return;
+                    if (!campaignMap[name]) campaignMap[name] = { campaign: name, clients: [], totalLeads: 0, totalSpend: 0, totalAppts: 0, totalDeals: 0 };
+                    campaignMap[name].clients.push(c.client);
+                    campaignMap[name].totalLeads += c.leads;
+                    campaignMap[name].totalSpend += c.spend;
+                    campaignMap[name].totalAppts += c.appts;
+                    campaignMap[name].totalDeals += c.deals;
+                });
+                const campaigns = Object.values(campaignMap)
+                    .map(cp => ({ ...cp, cpl: cp.totalLeads > 0 ? cp.totalSpend / cp.totalLeads : 0 }))
+                    .filter(cp => cp.totalLeads > 0)
+                    .sort((a,b) => a.cpl - b.cpl);
 
-            const totals = enriched.reduce((acc, c) => ({ spend: acc.spend+c.spend, leads: acc.leads+c.leads, appts: acc.appts+c.appts, deals: acc.deals+c.deals }), { spend:0, leads:0, appts:0, deals:0 });
-            const avgCpl = totals.leads > 0 ? totals.spend / totals.leads : 0;
+                const totals = enriched.reduce((acc, c) => ({ spend: acc.spend+c.spend, leads: acc.leads+c.leads, appts: acc.appts+c.appts, deals: acc.deals+c.deals }), { spend:0, leads:0, appts:0, deals:0 });
+                const avgCpl = totals.leads > 0 ? totals.spend / totals.leads : 0;
+                return { enriched, struggling, doingWell, noLeads, gettingMoreLeads, campaigns, totals, avgCpl };
+            }, [clients, setupData]);
 
             const toggle = (section) => setExpandedSection(expandedSection === section ? null : section);
 
@@ -2311,103 +2313,78 @@ ${transcript}`;
 
         // ========== RED FLAGS DASHBOARD ==========
         const RedFlagsTab = ({ clients, setupData, onSelectClient }) => {
-            // Helper to get setup info for a client
-            const getSetupInfo = (client) => {
-                const name = client.client.toLowerCase().trim();
-                return setupData.find(s => { 
-                    const sn = (s.client || '').toLowerCase().trim(); 
-                    return sn === name || sn.includes(name) || name.includes(sn); 
+            const { clientsWithFlags, highCount, mediumCount, lowCount, paymentIssues, leadIssues, setupIssues, perfIssues } = useMemo(() => {
+                const getSetupInfo = (client) => {
+                    const name = client.client.toLowerCase().trim();
+                    return setupData.find(s => {
+                        const sn = (s.client || '').toLowerCase().trim();
+                        return sn === name || sn.includes(name) || name.includes(sn);
+                    });
+                };
+
+                const analyzeClient = (c) => {
+                    const s = getSetupInfo(c);
+                    const flags = [];
+                    if (s && s.duePayment && s.duePayment.toUpperCase().includes('OVERDUE')) {
+                        flags.push({ type: 'payment', severity: 'high', icon: '💳', text: 'Payment Overdue', detail: s.duePayment });
+                    }
+                    if (c.days >= 3 && c.last3DayLeads === 0) {
+                        flags.push({ type: 'leads', severity: 'high', icon: '📉', text: 'No Leads (3 Days)', detail: '0 leads in the last 3 days' });
+                    }
+                    if (c.days >= 7 && c.last7DayLeads === 0) {
+                        flags.push({ type: 'leads', severity: 'high', icon: '🚨', text: 'No Leads (7 Days)', detail: '0 leads in the last 7 days' });
+                    }
+                    if (c.cpl > 50) {
+                        flags.push({ type: 'performance', severity: 'medium', icon: '📈', text: 'High CPL', detail: fmtD(c.cpl) + ' (above $50 threshold)' });
+                    }
+                    if (!c.leadySync || c.leadySync.trim() === '') {
+                        flags.push({ type: 'setup', severity: 'medium', icon: '🔄', text: 'Missing Leady Sync', detail: 'Lead sync not configured' });
+                    }
+                    if (!c.campaign || c.campaign.trim() === '') {
+                        flags.push({ type: 'setup', severity: 'low', icon: '🎯', text: 'Missing Campaign Type', detail: 'Campaign type not specified' });
+                    }
+                    if (!c.startDate || c.startDate.trim() === '') {
+                        flags.push({ type: 'setup', severity: 'low', icon: '📅', text: 'Missing Start Date', detail: 'No start date recorded' });
+                    }
+                    if (!c.state || c.state.trim() === '') {
+                        flags.push({ type: 'setup', severity: 'low', icon: '📍', text: 'Missing State', detail: 'State not specified' });
+                    }
+                    if (c.leads >= 20 && c.appts === 0) {
+                        flags.push({ type: 'performance', severity: 'medium', icon: '📞', text: 'No Appointments', detail: c.leads + ' leads but 0 appointments' });
+                    }
+                    if (s && s.redFlags && s.redFlags.trim() !== '') {
+                        flags.push({ type: 'manual', severity: 'high', icon: '🚩', text: 'Manual Red Flag', detail: s.redFlags });
+                    }
+                    if (!s) {
+                        flags.push({ type: 'setup', severity: 'low', icon: '📋', text: 'Not in Setup Timing', detail: 'Client not found in Setup Timing sheet' });
+                    }
+                    return flags;
+                };
+
+                const clientsWithFlags = clients.map(c => ({
+                    client: c,
+                    setup: getSetupInfo(c),
+                    flags: analyzeClient(c)
+                })).filter(c => c.flags.length > 0);
+
+                clientsWithFlags.sort((a, b) => {
+                    const aHigh = a.flags.filter(f => f.severity === 'high').length;
+                    const bHigh = b.flags.filter(f => f.severity === 'high').length;
+                    if (aHigh !== bHigh) return bHigh - aHigh;
+                    return b.flags.length - a.flags.length;
                 });
-            };
 
-            // Analyze all clients for red flags
-            const analyzeClient = (c) => {
-                const s = getSetupInfo(c);
-                const flags = [];
-                
-                // Payment Issues
-                if (s && s.duePayment && s.duePayment.toUpperCase().includes('OVERDUE')) {
-                    flags.push({ type: 'payment', severity: 'high', icon: '💳', text: 'Payment Overdue', detail: s.duePayment });
-                }
-                
-                // No Leads Recently (0 leads in last 3 days for clients running 3+ days)
-                if (c.days >= 3 && c.last3DayLeads === 0) {
-                    flags.push({ type: 'leads', severity: 'high', icon: '📉', text: 'No Leads (3 Days)', detail: '0 leads in the last 3 days' });
-                }
-                
-                // No Leads in Last 7 Days
-                if (c.days >= 7 && c.last7DayLeads === 0) {
-                    flags.push({ type: 'leads', severity: 'high', icon: '🚨', text: 'No Leads (7 Days)', detail: '0 leads in the last 7 days' });
-                }
-                
-                // High CPL (over $50)
-                if (c.cpl > 50) {
-                    flags.push({ type: 'performance', severity: 'medium', icon: '📈', text: 'High CPL', detail: fmtD(c.cpl) + ' (above $50 threshold)' });
-                }
-                
-                // Missing Lead Sync
-                if (!c.leadySync || c.leadySync.trim() === '') {
-                    flags.push({ type: 'setup', severity: 'medium', icon: '🔄', text: 'Missing Leady Sync', detail: 'Lead sync not configured' });
-                }
-                
-                // Missing Campaign Type
-                if (!c.campaign || c.campaign.trim() === '') {
-                    flags.push({ type: 'setup', severity: 'low', icon: '🎯', text: 'Missing Campaign Type', detail: 'Campaign type not specified' });
-                }
-                
-                // Missing Start Date
-                if (!c.startDate || c.startDate.trim() === '') {
-                    flags.push({ type: 'setup', severity: 'low', icon: '📅', text: 'Missing Start Date', detail: 'No start date recorded' });
-                }
-                
-                // Missing State
-                if (!c.state || c.state.trim() === '') {
-                    flags.push({ type: 'setup', severity: 'low', icon: '📍', text: 'Missing State', detail: 'State not specified' });
-                }
-                
-                // No Appointments (for clients with 20+ leads)
-                if (c.leads >= 20 && c.appts === 0) {
-                    flags.push({ type: 'performance', severity: 'medium', icon: '📞', text: 'No Appointments', detail: c.leads + ' leads but 0 appointments' });
-                }
-                
-                // Red Flags from Setup Timing
-                if (s && s.redFlags && s.redFlags.trim() !== '') {
-                    flags.push({ type: 'manual', severity: 'high', icon: '🚩', text: 'Manual Red Flag', detail: s.redFlags });
-                }
-                
-                // Missing from Setup Timing
-                if (!s) {
-                    flags.push({ type: 'setup', severity: 'low', icon: '📋', text: 'Not in Setup Timing', detail: 'Client not found in Setup Timing sheet' });
-                }
-                
-                return flags;
-            };
+                const highCount = clientsWithFlags.filter(c => c.flags.some(f => f.severity === 'high')).length;
+                const mediumCount = clientsWithFlags.filter(c => c.flags.some(f => f.severity === 'medium') && !c.flags.some(f => f.severity === 'high')).length;
+                const lowCount = clientsWithFlags.filter(c => !c.flags.some(f => f.severity === 'high') && !c.flags.some(f => f.severity === 'medium')).length;
 
-            // Get all clients with their flags
-            const clientsWithFlags = clients.map(c => ({
-                client: c,
-                setup: getSetupInfo(c),
-                flags: analyzeClient(c)
-            })).filter(c => c.flags.length > 0);
+                const paymentIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'payment')).length;
+                const leadIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'leads')).length;
+                const setupIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'setup')).length;
+                const perfIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'performance')).length;
 
-            // Sort by severity (high first, then by number of flags)
-            clientsWithFlags.sort((a, b) => {
-                const aHigh = a.flags.filter(f => f.severity === 'high').length;
-                const bHigh = b.flags.filter(f => f.severity === 'high').length;
-                if (aHigh !== bHigh) return bHigh - aHigh;
-                return b.flags.length - a.flags.length;
-            });
-
-            // Count by severity
-            const highCount = clientsWithFlags.filter(c => c.flags.some(f => f.severity === 'high')).length;
-            const mediumCount = clientsWithFlags.filter(c => c.flags.some(f => f.severity === 'medium') && !c.flags.some(f => f.severity === 'high')).length;
-            const lowCount = clientsWithFlags.filter(c => !c.flags.some(f => f.severity === 'high') && !c.flags.some(f => f.severity === 'medium')).length;
-
-            // Count by type
-            const paymentIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'payment')).length;
-            const leadIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'leads')).length;
-            const setupIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'setup')).length;
-            const perfIssues = clientsWithFlags.filter(c => c.flags.some(f => f.type === 'performance')).length;
+                return { clientsWithFlags, highCount, mediumCount, lowCount, paymentIssues, leadIssues, setupIssues, perfIssues };
+            }, [clients, setupData]);
 
             const severityColors = {
                 high: 'bg-red-500/20 border-red-500/50 text-red-400',
@@ -2526,52 +2503,51 @@ ${transcript}`;
                 green: { row: 'border-l-4 border-transparent', badge: 'bg-emerald-500/20 text-emerald-400', text: 'text-emerald-400', label: 'Safe', dot: 'bg-emerald-500' },
             };
 
-            // Build renewal data from setup sheet using "Days left for end of Contract" and "Contract End Date"
-            const renewalData = [];
-            setupData.forEach(setup => {
-                const daysLeftVal = pn(setup.daysLeftForEndOfContract);
-                const clientName = setup.client || '';
-                // Skip clients with no contract end data
-                if (!daysLeftVal && daysLeftVal !== 0 && !setup.daysLeftForEndOfContract) return;
-                const adsClient = clients.find(c => {
-                    const cn = c.client.toLowerCase().trim();
-                    const sn = clientName.toLowerCase().trim();
-                    return cn === sn || cn.includes(sn) || sn.includes(cn);
+            const { renewalData, csmOptions, urgentCount, upcomingCount, safeCount } = useMemo(() => {
+                const renewalData = [];
+                setupData.forEach(setup => {
+                    const daysLeftVal = pn(setup.daysLeftForEndOfContract);
+                    const clientName = setup.client || '';
+                    if (!daysLeftVal && daysLeftVal !== 0 && !setup.daysLeftForEndOfContract) return;
+                    const adsClient = clients.find(c => {
+                        const cn = c.client.toLowerCase().trim();
+                        const sn = clientName.toLowerCase().trim();
+                        return cn === sn || cn.includes(sn) || sn.includes(cn);
+                    });
+                    renewalData.push({
+                        client: clientName,
+                        daysLeft: daysLeftVal,
+                        contractEndDate: setup.contractEndDate || '',
+                        contractLength: setup.contractLength || '',
+                        contractCategory: setup.contractCategory || '',
+                        csmRep: setup.csmRep || '',
+                        mrr: setup.mrr || '',
+                        status: adsClient?.status || setup.status || '',
+                        duePayment: setup.duePayment || '',
+                        state: adsClient?.state || setup.state || '',
+                        campaign: adsClient?.campaign || setup.campaign || '',
+                        urgency: getUrgency(daysLeftVal),
+                    });
                 });
-                renewalData.push({
-                    client: clientName,
-                    daysLeft: daysLeftVal,
-                    contractEndDate: setup.contractEndDate || '',
-                    contractLength: setup.contractLength || '',
-                    contractCategory: setup.contractCategory || '',
-                    csmRep: setup.csmRep || '',
-                    mrr: setup.mrr || '',
-                    status: adsClient?.status || setup.status || '',
-                    duePayment: setup.duePayment || '',
-                    state: adsClient?.state || setup.state || '',
-                    campaign: adsClient?.campaign || setup.campaign || '',
-                    urgency: getUrgency(daysLeftVal),
+                renewalData.sort((a, b) => a.daysLeft - b.daysLeft);
+                const csmOptions = [...new Set(renewalData.map(d => d.csmRep).filter(Boolean))].sort();
+                const urgentCount = renewalData.filter(d => d.urgency === 'red').length;
+                const upcomingCount = renewalData.filter(d => d.urgency === 'yellow').length;
+                const safeCount = renewalData.filter(d => d.urgency === 'green').length;
+                return { renewalData, csmOptions, urgentCount, upcomingCount, safeCount };
+            }, [clients, setupData]);
+
+            const filtered = useMemo(() => {
+                return renewalData.filter(d => {
+                    const matchesSearch = !searchFilter ||
+                        d.client.toLowerCase().includes(searchFilter.toLowerCase()) ||
+                        d.csmRep.toLowerCase().includes(searchFilter.toLowerCase()) ||
+                        d.state.toLowerCase().includes(searchFilter.toLowerCase());
+                    const matchesUrgency = !filterUrgency || d.urgency === filterUrgency;
+                    const matchesCsm = !filterCsm || d.csmRep === filterCsm;
+                    return matchesSearch && matchesUrgency && matchesCsm;
                 });
-            });
-            renewalData.sort((a, b) => a.daysLeft - b.daysLeft);
-
-            // Get unique CSMs for filter
-            const csmOptions = [...new Set(renewalData.map(d => d.csmRep).filter(Boolean))].sort();
-
-            // Apply filters
-            const filtered = renewalData.filter(d => {
-                const matchesSearch = !searchFilter ||
-                    d.client.toLowerCase().includes(searchFilter.toLowerCase()) ||
-                    d.csmRep.toLowerCase().includes(searchFilter.toLowerCase()) ||
-                    d.state.toLowerCase().includes(searchFilter.toLowerCase());
-                const matchesUrgency = !filterUrgency || d.urgency === filterUrgency;
-                const matchesCsm = !filterCsm || d.csmRep === filterCsm;
-                return matchesSearch && matchesUrgency && matchesCsm;
-            });
-
-            const urgentCount = renewalData.filter(d => d.urgency === 'red').length;
-            const upcomingCount = renewalData.filter(d => d.urgency === 'yellow').length;
-            const safeCount = renewalData.filter(d => d.urgency === 'green').length;
+            }, [renewalData, searchFilter, filterUrgency, filterCsm]);
 
             const clearFilters = () => { setSearchFilter(''); setFilterUrgency(''); setFilterCsm(''); };
             const hasFilters = filterUrgency || filterCsm || searchFilter;
@@ -2799,91 +2775,90 @@ ${transcript}`;
 
         // ========== DATA GAPS TAB ==========
         const DataGapsTab = ({ clients, setupData }) => {
-            // Define the important fields to check per data source with human-readable labels
-            const adsFields = [
-                { key: 'adAccount', label: 'Ad Account Name' },
-                { key: 'state', label: 'State' },
-                { key: 'campaign', label: 'Campaign' },
-                { key: 'callingStatus', label: 'Calling/Non-calling' },
-                { key: 'startDate', label: 'Start Date' },
-                { key: 'spend', label: 'Total Ad Spend', isNum: true },
-                { key: 'sellerLeads', label: 'Seller Leads', isNum: true },
-                { key: 'buyerLeads', label: 'Buyer Leads', isNum: true },
-                { key: 'sellerCPL', label: 'Seller CPL', isNum: true },
-                { key: 'buyerCPL', label: 'Buyer CPL', isNum: true },
-                { key: 'appts', label: 'Total Appts', isNum: true },
-                { key: 'sellerAppts', label: 'Seller Appts', isNum: true },
-                { key: 'buyerAppts', label: 'Buyer Appts', isNum: true },
-                { key: 'deals', label: 'Potential Deals', isNum: true },
-            ];
-            const setupFields = [
-                { key: 'csmRep', label: 'CSM Rep' },
-                { key: 'status', label: 'Status' },
-                { key: 'contractCategory', label: 'Contract Category' },
-                { key: 'contractLength', label: 'Contract Length' },
-                { key: 'contractEndDate', label: 'Contract End Date' },
-                { key: 'daysLeftForEndOfContract', label: 'Days Left for Contract' },
-                { key: 'mrr', label: 'MRR' },
-                { key: 'billingCycle', label: 'Billing Cycle' },
-                { key: 'duePayment', label: 'Due Payment' },
-                { key: 'calling', label: 'Calling' },
-                { key: 'dialer', label: 'Dialer' },
-                { key: 'stageOnCrm', label: 'Stage on CRM' },
-                { key: 'onboardedDate', label: 'Onboarded Date' },
-                { key: 'adLiveDate', label: 'Ad Live Date' },
-                { key: 'adSpend', label: 'Ad Spend (Setup)' },
-                { key: 'city', label: 'City' },
-                { key: 'platform', label: 'Platform' },
-            ];
-
-            const isEmpty = (val, isNum) => {
-                if (val === undefined || val === null || val === '') return true;
-                if (typeof val === 'string' && (val.trim() === '' || val.trim() === '—')) return true;
-                if (isNum && (val === 0 || val === '0')) return true;
-                return false;
-            };
-
-            // For each field, find % of clients that have data. If >30% have data, that field is "expected"
-            // Then report which clients are missing those expected fields
-            const adsGaps = [];
-            adsFields.forEach(f => {
-                const withData = clients.filter(c => !isEmpty(c[f.key], f.isNum));
-                const pct = clients.length ? (withData.length / clients.length) * 100 : 0;
-                if (pct >= 30) {
-                    const missing = clients.filter(c => isEmpty(c[f.key], f.isNum)).map(c => c.client);
-                    if (missing.length > 0) {
-                        adsGaps.push({ field: f.label, missing, total: clients.length, filled: withData.length, pct: pct.toFixed(0) });
-                    }
-                }
-            });
-
-            const setupGaps = [];
-            setupFields.forEach(f => {
-                const withData = setupData.filter(s => !isEmpty(s[f.key], f.isNum));
-                const pct = setupData.length ? (withData.length / setupData.length) * 100 : 0;
-                if (pct >= 30) {
-                    const missing = setupData.filter(s => isEmpty(s[f.key], f.isNum)).map(s => s.client);
-                    if (missing.length > 0) {
-                        setupGaps.push({ field: f.label, missing, total: setupData.length, filled: withData.length, pct: pct.toFixed(0) });
-                    }
-                }
-            });
-
-            // Also find clients in setup but not in ads and vice versa
-            const adsClients = new Set(clients.map(c => c.client.toLowerCase()));
-            const setupClients = new Set(setupData.map(s => s.client.toLowerCase()));
-            const missingFromAds = setupData.filter(s => s.client && !adsClients.has(s.client.toLowerCase())).map(s => s.client);
-            const missingFromSetup = clients.filter(c => c.client && !setupClients.has(c.client.toLowerCase())).map(c => c.client);
-
-            // Per-client summary: how many gaps each client has
-            const clientGapCounts = {};
-            adsGaps.forEach(g => g.missing.forEach(name => { clientGapCounts[name] = (clientGapCounts[name] || 0) + 1; }));
-            setupGaps.forEach(g => g.missing.forEach(name => { clientGapCounts[name] = (clientGapCounts[name] || 0) + 1; }));
-            const sortedClients = Object.entries(clientGapCounts).sort((a, b) => b[1] - a[1]);
-
-            const totalGapInstances = adsGaps.reduce((s, g) => s + g.missing.length, 0) + setupGaps.reduce((s, g) => s + g.missing.length, 0);
-
             const [expandedField, setExpandedField] = useState(null);
+
+            const { adsGaps, setupGaps, missingFromAds, missingFromSetup, sortedClients, totalGapInstances } = useMemo(() => {
+                const adsFields = [
+                    { key: 'adAccount', label: 'Ad Account Name' },
+                    { key: 'state', label: 'State' },
+                    { key: 'campaign', label: 'Campaign' },
+                    { key: 'callingStatus', label: 'Calling/Non-calling' },
+                    { key: 'startDate', label: 'Start Date' },
+                    { key: 'spend', label: 'Total Ad Spend', isNum: true },
+                    { key: 'sellerLeads', label: 'Seller Leads', isNum: true },
+                    { key: 'buyerLeads', label: 'Buyer Leads', isNum: true },
+                    { key: 'sellerCPL', label: 'Seller CPL', isNum: true },
+                    { key: 'buyerCPL', label: 'Buyer CPL', isNum: true },
+                    { key: 'appts', label: 'Total Appts', isNum: true },
+                    { key: 'sellerAppts', label: 'Seller Appts', isNum: true },
+                    { key: 'buyerAppts', label: 'Buyer Appts', isNum: true },
+                    { key: 'deals', label: 'Potential Deals', isNum: true },
+                ];
+                const setupFields = [
+                    { key: 'csmRep', label: 'CSM Rep' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'contractCategory', label: 'Contract Category' },
+                    { key: 'contractLength', label: 'Contract Length' },
+                    { key: 'contractEndDate', label: 'Contract End Date' },
+                    { key: 'daysLeftForEndOfContract', label: 'Days Left for Contract' },
+                    { key: 'mrr', label: 'MRR' },
+                    { key: 'billingCycle', label: 'Billing Cycle' },
+                    { key: 'duePayment', label: 'Due Payment' },
+                    { key: 'calling', label: 'Calling' },
+                    { key: 'dialer', label: 'Dialer' },
+                    { key: 'stageOnCrm', label: 'Stage on CRM' },
+                    { key: 'onboardedDate', label: 'Onboarded Date' },
+                    { key: 'adLiveDate', label: 'Ad Live Date' },
+                    { key: 'adSpend', label: 'Ad Spend (Setup)' },
+                    { key: 'city', label: 'City' },
+                    { key: 'platform', label: 'Platform' },
+                ];
+
+                const isEmpty = (val, isNum) => {
+                    if (val === undefined || val === null || val === '') return true;
+                    if (typeof val === 'string' && (val.trim() === '' || val.trim() === '—')) return true;
+                    if (isNum && (val === 0 || val === '0')) return true;
+                    return false;
+                };
+
+                const adsGaps = [];
+                adsFields.forEach(f => {
+                    const withData = clients.filter(c => !isEmpty(c[f.key], f.isNum));
+                    const pct = clients.length ? (withData.length / clients.length) * 100 : 0;
+                    if (pct >= 30) {
+                        const missing = clients.filter(c => isEmpty(c[f.key], f.isNum)).map(c => c.client);
+                        if (missing.length > 0) {
+                            adsGaps.push({ field: f.label, missing, total: clients.length, filled: withData.length, pct: pct.toFixed(0) });
+                        }
+                    }
+                });
+
+                const setupGaps = [];
+                setupFields.forEach(f => {
+                    const withData = setupData.filter(s => !isEmpty(s[f.key], f.isNum));
+                    const pct = setupData.length ? (withData.length / setupData.length) * 100 : 0;
+                    if (pct >= 30) {
+                        const missing = setupData.filter(s => isEmpty(s[f.key], f.isNum)).map(s => s.client);
+                        if (missing.length > 0) {
+                            setupGaps.push({ field: f.label, missing, total: setupData.length, filled: withData.length, pct: pct.toFixed(0) });
+                        }
+                    }
+                });
+
+                const adsClients = new Set(clients.map(c => c.client.toLowerCase()));
+                const setupClients = new Set(setupData.map(s => s.client.toLowerCase()));
+                const missingFromAds = setupData.filter(s => s.client && !adsClients.has(s.client.toLowerCase())).map(s => s.client);
+                const missingFromSetup = clients.filter(c => c.client && !setupClients.has(c.client.toLowerCase())).map(c => c.client);
+
+                const clientGapCounts = {};
+                adsGaps.forEach(g => g.missing.forEach(name => { clientGapCounts[name] = (clientGapCounts[name] || 0) + 1; }));
+                setupGaps.forEach(g => g.missing.forEach(name => { clientGapCounts[name] = (clientGapCounts[name] || 0) + 1; }));
+                const sortedClients = Object.entries(clientGapCounts).sort((a, b) => b[1] - a[1]);
+
+                const totalGapInstances = adsGaps.reduce((s, g) => s + g.missing.length, 0) + setupGaps.reduce((s, g) => s + g.missing.length, 0);
+
+                return { adsGaps, setupGaps, missingFromAds, missingFromSetup, sortedClients, totalGapInstances };
+            }, [clients, setupData]);
 
             return (
                 <div className="p-6 space-y-6 max-w-7xl mx-auto">
