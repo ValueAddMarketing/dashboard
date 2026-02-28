@@ -101,12 +101,12 @@ serve(async (req) => {
     const defaultLookback = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const createdAfter = (body.created_after as string) || defaultLookback
 
-    const fathomUrl = new URL('https://api.fathom.video/v1/recordings')
+    const fathomUrl = new URL('https://api.fathom.ai/external/v1/meetings')
     fathomUrl.searchParams.set('include_transcript', 'true')
     fathomUrl.searchParams.set('created_after', createdAfter)
 
     const fathomResponse = await fetch(fathomUrl.toString(), {
-      headers: { 'Authorization': `Bearer ${FATHOM_API_KEY}` }
+      headers: { 'X-Api-Key': FATHOM_API_KEY }
     })
 
     if (!fathomResponse.ok) {
@@ -118,7 +118,7 @@ serve(async (req) => {
     }
 
     const fathomData = await fathomResponse.json()
-    const recordings: FathomRecording[] = fathomData.recordings || fathomData.data || fathomData || []
+    const recordings: FathomRecording[] = fathomData.meetings || fathomData.recordings || fathomData.data || fathomData || []
 
     if (!Array.isArray(recordings) || recordings.length === 0) {
       return new Response(
