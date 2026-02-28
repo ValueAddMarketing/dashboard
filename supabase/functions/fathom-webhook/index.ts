@@ -79,8 +79,8 @@ serve(async (req) => {
     if (!transcript && FATHOM_API_KEY) {
       // Fetch the full recording from Fathom
       const fathomResp = await fetch(
-        `https://api.fathom.video/v1/recordings/${recordingId}?include_transcript=true`,
-        { headers: { 'Authorization': `Bearer ${FATHOM_API_KEY}` } }
+        `https://api.fathom.ai/external/v1/meetings/${recordingId}?include_transcript=true`,
+        { headers: { 'X-Api-Key': FATHOM_API_KEY } }
       )
 
       if (fathomResp.ok) {
