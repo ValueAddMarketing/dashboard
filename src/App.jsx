@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { useClients } from './hooks/useClients';
 import { Sidebar, Header, LoginPage, ErrorBoundary } from './components';
-import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage, ClientTimelinePage } from './pages';
+import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage, ClientTimelinePage, MetaAdSettingsPage } from './pages';
 import { CLIENT_HUB_TABS } from './utils/constants';
 
 /**
@@ -62,7 +62,7 @@ const AppLayout = () => {
 
   const setup = getSetupInfo(selectedClient);
   const currentTab = location.pathname.split('/').pop() || 'redflags';
-  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : currentTab === 'timeline' ? '📅 Renewals Timeline' : undefined;
+  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : currentTab === 'timeline' ? '📅 Renewals Timeline' : currentTab === 'meta-settings' ? '⚙️ Meta Ad Settings' : undefined;
 
   return (
     <div className="flex min-h-screen">
@@ -126,6 +126,14 @@ const AppLayout = () => {
                 <ClientTimelinePage
                   clients={clients}
                   setupData={setupData}
+                />
+              }
+            />
+            <Route
+              path="meta-settings"
+              element={
+                <MetaAdSettingsPage
+                  clients={clients}
                 />
               }
             />

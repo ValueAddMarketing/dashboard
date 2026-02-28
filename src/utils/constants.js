@@ -8,12 +8,17 @@ export const SHEET_URLS = {
   setupTiming: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv'
 };
 
+// Meta Ads API (Vercel serverless function)
+export const META_ADS_API = '/api/meta-ads';
+
 // Cache settings
 export const CACHE_DURATION = 300000; // 5 minutes in milliseconds
 export const CACHE_KEYS = {
   clients: 'vam_clients',
   setup: 'vam_setup',
-  cacheTime: 'vam_cache_time'
+  cacheTime: 'vam_cache_time',
+  metaAds: 'vam_meta_ads',
+  metaAdsCacheTime: 'vam_meta_ads_cache_time'
 };
 
 // Health color mapping
@@ -31,6 +36,7 @@ export const CLIENT_HUB_TABS = [
   { id: 'health', name: 'Client Health', icon: '❤️', desc: 'Overview of client status and metrics' },
   { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
   { id: 'timeline', name: 'Renewals Timeline', icon: '📅', desc: 'Upcoming client contract renewals' },
+  { id: 'meta-settings', name: 'Meta Ads', icon: '⚙️', desc: 'Configure Meta ad account mappings' },
 ];
 
 // Severity colors for flags

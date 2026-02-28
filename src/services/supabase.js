@@ -226,6 +226,46 @@ export const deleteEmailDomainMapping = async (id) => {
   return { error };
 };
 
+// ============ META AD ACCOUNT MAPPING FUNCTIONS ============
+
+export const getAdMappings = async () => {
+  const { data, error } = await supabase
+    .from('client_ad_accounts')
+    .select('*')
+    .order('client_name', { ascending: true });
+  return { data, error };
+};
+
+export const saveAdMapping = async (clientName, adAccountId) => {
+  if (!adAccountId) {
+    // Delete mapping if unlinking
+    const { error } = await supabase
+      .from('client_ad_accounts')
+      .delete()
+      .eq('client_name', clientName);
+    return { error };
+  }
+
+  // Upsert mapping (insert or update)
+  const { data, error } = await supabase
+    .from('client_ad_accounts')
+    .upsert(
+      { client_name: clientName, meta_ad_account_id: adAccountId },
+      { onConflict: 'client_name' }
+    )
+    .select()
+    .single();
+  return { data, error };
+};
+
+export const deleteAdMapping = async (clientName) => {
+  const { error } = await supabase
+    .from('client_ad_accounts')
+    .delete()
+    .eq('client_name', clientName);
+  return { error };
+};
+
 export const retryFathomSync = async (recordingId) => {
   // Delete the failed sync log entry so ingest-fathom will reprocess it
   await supabase

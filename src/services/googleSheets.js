@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import { SHEET_URLS, CACHE_DURATION, CACHE_KEYS } from '../utils/constants';
 import { mapClient, mapSetupTiming } from '../utils/mappers';
+import { fetchMetaAdData } from './metaAds';
 
 /**
  * Fetch and parse CSV data from Google Sheets
@@ -96,14 +97,31 @@ export const fetchSetupData = async (useCache = true) => {
 };
 
 /**
- * Fetch all data (clients and setup)
+ * Fetch all data (clients, setup, and Meta ads)
  */
 export const fetchAllData = async (useCache = true) => {
-  const [clients, setupData] = await Promise.all([
+  const [clients, setupData, metaAds] = await Promise.all([
     fetchClients(useCache),
-    fetchSetupData(useCache)
+    fetchSetupData(useCache),
+    fetchMetaAdData(useCache).catch(() => ({}))
   ]);
-  return { clients, setupData };
+
+  // Merge Meta ad data into clients (override sheet values with real-time data)
+  const clientsWithMeta = clients.map(client => {
+    const meta = metaAds[client.client];
+    if (meta) {
+      return {
+        ...client,
+        weeklySpend: meta.spend != null ? parseFloat(meta.spend) : client.weeklySpend,
+        weeklyLeads: meta.leads != null ? meta.leads : client.weeklyLeads,
+        weeklyCPL: meta.cpl != null ? parseFloat(meta.cpl) : client.weeklyCPL,
+        adDataSource: 'meta'
+      };
+    }
+    return { ...client, adDataSource: 'sheets' };
+  });
+
+  return { clients: clientsWithMeta, setupData };
 };
 
 /**
@@ -122,10 +140,12 @@ export const getSetupInfoForClient = (client, setupData) => {
 };
 
 /**
- * Clear all cached data
+ * Clear all cached data (including Meta ads)
  */
 export const clearCache = () => {
   localStorage.removeItem(CACHE_KEYS.clients);
   localStorage.removeItem(CACHE_KEYS.setup);
   localStorage.removeItem(CACHE_KEYS.cacheTime);
+  localStorage.removeItem(CACHE_KEYS.metaAds);
+  localStorage.removeItem(CACHE_KEYS.metaAdsCacheTime);
 };
