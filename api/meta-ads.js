@@ -27,6 +27,17 @@ export default async function handler(req, res) {
   const selectedPreset = VALID_DATE_PRESETS.includes(datePreset) ? datePreset : 'last_7d';
 
   try {
+    // Diagnostic action to check env vars
+    if (action === 'diagnose') {
+      return res.json({
+        envVars: {
+          META_ACCESS_TOKEN: META_ACCESS_TOKEN ? `set (${META_ACCESS_TOKEN.slice(0, 8)}...)` : 'NOT SET',
+          SUPABASE_URL: SUPABASE_URL || 'NOT SET',
+          SUPABASE_SERVICE_KEY: SUPABASE_KEY ? `set (${SUPABASE_KEY.slice(0, 8)}...)` : 'NOT SET'
+        }
+      });
+    }
+
     if (action === 'listAdAccounts') {
       const url = `https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name,business_name&access_token=${META_ACCESS_TOKEN}&limit=100`;
       const response = await fetch(url);
