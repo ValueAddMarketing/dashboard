@@ -57,13 +57,16 @@ ALTER TABLE client_email_domains ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fathom_sync_log ENABLE ROW LEVEL SECURITY;
 
 -- Allow authenticated users full access
-CREATE POLICY IF NOT EXISTS "Authenticated users can manage email domains"
+-- (DROP first to make migration re-runnable; CREATE POLICY IF NOT EXISTS is not valid PostgreSQL)
+DROP POLICY IF EXISTS "Authenticated users can manage email domains" ON client_email_domains;
+CREATE POLICY "Authenticated users can manage email domains"
   ON client_email_domains FOR ALL
   TO authenticated
   USING (true)
   WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "Authenticated users can view sync log"
+DROP POLICY IF EXISTS "Authenticated users can view sync log" ON fathom_sync_log;
+CREATE POLICY "Authenticated users can view sync log"
   ON fathom_sync_log FOR ALL
   TO authenticated
   USING (true)
