@@ -82,7 +82,7 @@ serve(async (req) => {
     if (body.single_recording) {
       const recording = body.single_recording as FathomRecording
       const source = (body.source as string) || 'fathom_webhook'
-      const results = await processRecordings([recording], domainMap, supabase, ANTHROPIC_API_KEY, source)
+      const results = await processRecordings([recording], domainMap, supabase, ANTHROPIC_API_KEY, source, FATHOM_API_KEY)
 
       return new Response(
         JSON.stringify({ message: `Processed 1 recording`, results }),
@@ -102,7 +102,6 @@ serve(async (req) => {
     const createdAfter = (body.created_after as string) || defaultLookback
 
     const fathomUrl = new URL('https://api.fathom.ai/external/v1/meetings')
-    fathomUrl.searchParams.set('include_transcript', 'true')
     fathomUrl.searchParams.set('created_after', createdAfter)
 
     const fathomResponse = await fetch(fathomUrl.toString(), {
@@ -118,13 +117,25 @@ serve(async (req) => {
     }
 
     const fathomData = await fathomResponse.json()
-    console.log('Fathom API response keys:', Object.keys(fathomData))
-    console.log('Fathom API response (first 500 chars):', JSON.stringify(fathomData).substring(0, 500))
-    const recordings: FathomRecording[] = fathomData.meetings || fathomData.recordings || fathomData.data || fathomData || []
+    const rawItems = fathomData.items || fathomData.meetings || fathomData.recordings || fathomData.data || fathomData || []
 
-    if (!Array.isArray(recordings) || recordings.length === 0) {
+    // Map Fathom API fields to our expected format
+    const recordings: FathomRecording[] = (Array.isArray(rawItems) ? rawItems : []).map((item: Record<string, unknown>) => ({
+      id: String(item.recording_id || item.id),
+      title: (item.meeting_title || item.title) as string,
+      url: item.url as string,
+      created_at: item.created_at as string,
+      scheduled_at: (item.scheduled_start_time || item.scheduled_at) as string,
+      recording_start_at: (item.recording_start_time || item.recording_start_at) as string,
+      recording_end_at: (item.recording_end_time || item.recording_end_at) as string,
+      calendar_invitees: (item.calendar_invitees || item.invitees || []) as Array<{ email: string; name?: string }>,
+      transcript: item.transcript as FathomTranscriptEntry[] | undefined,
+      summary: item.summary as string | undefined,
+    }))
+
+    if (recordings.length === 0) {
       return new Response(
-        JSON.stringify({ message: 'No new meetings found', checked_after: createdAfter, debug_keys: Object.keys(fathomData), debug_type: typeof fathomData, debug_is_array: Array.isArray(fathomData), debug_sample: JSON.stringify(fathomData).substring(0, 300) }),
+        JSON.stringify({ message: 'No new meetings found', checked_after: createdAfter }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -140,7 +151,7 @@ serve(async (req) => {
     const newRecordings = recordings.filter(r => !alreadySynced.has(r.id))
 
     const skipped = recordings.length - newRecordings.length
-    const results = await processRecordings(newRecordings, domainMap, supabase, ANTHROPIC_API_KEY, 'fathom')
+    const results = await processRecordings(newRecordings, domainMap, supabase, ANTHROPIC_API_KEY, 'fathom', FATHOM_API_KEY)
 
     // Add skip entries
     for (const r of recordings) {
@@ -175,12 +186,29 @@ async function processRecordings(
   domainMap: Map<string, string>,
   supabase: SupabaseClient,
   anthropicApiKey: string | undefined,
-  source: string
+  source: string,
+  fathomApiKey?: string | null
 ): Promise<ProcessingResult[]> {
   const results: ProcessingResult[] = []
 
   for (const recording of recordings) {
     try {
+      // ── Fetch transcript if missing ─────────────────────────
+      if (!recording.transcript && fathomApiKey) {
+        try {
+          const transcriptResp = await fetch(
+            `https://api.fathom.ai/external/v1/recordings/${recording.id}/transcript`,
+            { headers: { 'X-Api-Key': fathomApiKey } }
+          )
+          if (transcriptResp.ok) {
+            const transcriptData = await transcriptResp.json()
+            recording.transcript = transcriptData.transcript || transcriptData
+          }
+        } catch (err) {
+          console.error(`Failed to fetch transcript for ${recording.id}:`, err)
+        }
+      }
+
       // ── Match to a client ────────────────────────────────────
       const clientName = matchClient(recording, domainMap)
 
