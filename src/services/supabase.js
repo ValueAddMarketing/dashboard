@@ -43,6 +43,13 @@ export const signInWithGoogle = async () => {
   return { data, error };
 };
 
+export const resetPassword = async (email) => {
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/client/overview`,
+  });
+  return { data, error };
+};
+
 export const signOut = async () => {
   const { error } = await supabase.auth.signOut();
   return { error };

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { signInWithGoogle, signInWithEmail, signUpWithEmail } from '../services/supabase';
+import { signInWithGoogle, signInWithEmail, signUpWithEmail, resetPassword } from '../services/supabase';
 import Button from './Button';
 
 /**
@@ -10,6 +10,7 @@ export const LoginPage = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -27,7 +28,11 @@ export const LoginPage = () => {
     setError(null);
     setSuccess(null);
     try {
-      if (isSignUp) {
+      if (isForgotPassword) {
+        const { error } = await resetPassword(email);
+        if (error) throw error;
+        setSuccess('Password reset link sent! Check your email to reset your password.');
+      } else if (isSignUp) {
         const { data, error } = await signUpWithEmail(email, password);
         if (error) throw error;
         if (data.user && !data.session) {
@@ -65,7 +70,9 @@ export const LoginPage = () => {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent mb-2">
             VAM Dashboard
           </h1>
-          <p className="text-slate-400">Client Success Hub</p>
+          <p className="text-slate-400">
+            {isForgotPassword ? 'Reset your password' : 'Client Success Hub'}
+          </p>
         </div>
 
         {error && (
@@ -93,19 +100,21 @@ export const LoginPage = () => {
               placeholder="you@example.com"
             />
           </div>
-          <div>
-            <label htmlFor="password" className="block text-sm text-slate-400 mb-1">Password</label>
-            <input
-              id="password"
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 bg-dark-800 border border-dark-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan focus:ring-1 focus:ring-brand-cyan"
-              placeholder="Min 6 characters"
-            />
-          </div>
+          {!isForgotPassword && (
+            <div>
+              <label htmlFor="password" className="block text-sm text-slate-400 mb-1">Password</label>
+              <input
+                id="password"
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-2.5 bg-dark-800 border border-dark-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan focus:ring-1 focus:ring-brand-cyan"
+                placeholder="Min 6 characters"
+              />
+            </div>
+          )}
           <Button
             type="submit"
             variant="primary"
@@ -113,17 +122,26 @@ export const LoginPage = () => {
             loading={loading}
             className="w-full"
           >
-            {isSignUp ? 'Create Account' : 'Sign In'}
+            {isForgotPassword ? 'Send Reset Link' : isSignUp ? 'Create Account' : 'Sign In'}
           </Button>
         </form>
 
-        <div className="text-center mb-6">
+        <div className="text-center mb-6 space-y-2">
+          {!isForgotPassword && !isSignUp && (
+            <button
+              type="button"
+              onClick={() => { setIsForgotPassword(true); setError(null); setSuccess(null); }}
+              className="block w-full text-sm text-slate-400 hover:text-brand-cyan hover:underline"
+            >
+              Forgot your password?
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => { setIsSignUp(!isSignUp); setError(null); setSuccess(null); }}
+            onClick={() => { setIsSignUp(!isSignUp); setIsForgotPassword(false); setError(null); setSuccess(null); }}
             className="text-sm text-brand-cyan hover:underline"
           >
-            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+            {isForgotPassword ? 'Back to sign in' : isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
           </button>
         </div>
 
