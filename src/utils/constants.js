@@ -37,6 +37,7 @@ export const CLIENT_HUB_TABS = [
   { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
   { id: 'timeline', name: 'Renewals Timeline', icon: '📅', desc: 'Upcoming client contract renewals' },
   { id: 'meta-settings', name: 'Meta Ads', icon: '⚙️', desc: 'Configure Meta ad account mappings' },
+  { id: 'fathom-meetings', name: 'Fathom Meetings', icon: '🎙️', desc: 'All meetings from the previous month' },
 ];
 
 // Severity colors for flags
