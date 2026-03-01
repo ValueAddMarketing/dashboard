@@ -337,6 +337,7 @@
             { id: 'health', name: 'Client Health', icon: '❤️', desc: 'Overview of client status and metrics' },
             { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
             { id: 'datagaps', name: 'Data Gaps', icon: '🔍', desc: 'Missing data across client records' },
+            { id: 'fathom-meetings', name: 'Fathom Meetings', icon: '🎙️', desc: 'All meetings from the previous month' },
         ];
 
         // ========== LOGIN ==========
@@ -3317,6 +3318,357 @@ ${transcript}`;
             );
         };
 
+        // ========== FATHOM MEETINGS DASHBOARD TAB ==========
+        const FathomMeetingsTab = () => {
+            const [meetings, setMeetings] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [expandedId, setExpandedId] = useState(null);
+            const [activeTab, setActiveTab] = useState({});
+            const [viewMode, setViewMode] = useState('timeline');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [filterClient, setFilterClient] = useState('');
+
+            // Month selector state — default to previous month
+            const now = new Date();
+            const defaultMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+            const defaultYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+            const [selMonth, setSelMonth] = useState(defaultMonth);
+            const [selYear, setSelYear] = useState(defaultYear);
+
+            const startDate = new Date(selYear, selMonth, 1).toISOString().split('T')[0];
+            const endDate = new Date(selYear, selMonth + 1, 0).toISOString().split('T')[0];
+            const monthLabel = new Date(selYear, selMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+            // Build month options (current + 6 previous)
+            const monthOptions = useMemo(() => {
+                const opts = [];
+                for (let i = 0; i < 7; i++) {
+                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                    opts.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString('default', { month: 'long', year: 'numeric' }) });
+                }
+                return opts;
+            }, []);
+
+            // Fetch meetings for selected month
+            useEffect(() => {
+                const load = async () => {
+                    setLoading(true);
+                    const { data } = await supabase
+                        .from('meeting_notes')
+                        .select('*')
+                        .gte('meeting_date', startDate)
+                        .lte('meeting_date', endDate)
+                        .order('meeting_date', { ascending: false });
+                    setMeetings(data || []);
+                    setLoading(false);
+                };
+                load();
+            }, [startDate, endDate]);
+
+            // Helpers
+            const getExtra = (m) => {
+                if (!m.ad_performance_notes) return {};
+                try { return typeof m.ad_performance_notes === 'string' ? JSON.parse(m.ad_performance_notes) : m.ad_performance_notes; } catch { return {}; }
+            };
+            const safe = (v) => { if (v == null) return ''; if (typeof v === 'string') return v; try { return JSON.stringify(v); } catch { return String(v); } };
+            const toArr = (v) => { if (!v) return []; if (Array.isArray(v)) return v; try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } };
+            const pick = (...sources) => { for (const s of sources) { const a = toArr(s); if (a.length) return a; } return []; };
+            const sentimentStyle = (s) => { if (['positive','excited'].includes(s)) return 'bg-emerald-500/20 text-emerald-400'; if (['negative','frustrated'].includes(s)) return 'bg-red-500/20 text-red-400'; if (s === 'concerned') return 'bg-amber-500/20 text-amber-400'; return 'bg-slate-500/20 text-slate-400'; };
+            const riskBorder = (l) => { if (l === 'high') return 'border-l-4 border-red-500'; if (l === 'medium') return 'border-l-4 border-amber-500'; return 'border-l-4 border-emerald-500'; };
+            const riskBadge = (l) => { if (l === 'high') return 'bg-red-500/20 text-red-400'; if (l === 'medium') return 'bg-amber-500/20 text-amber-400'; return 'bg-emerald-500/20 text-emerald-400'; };
+
+            // Filter
+            const filtered = meetings.filter(m => {
+                const matchSearch = !searchQuery || [m.meeting_title, m.meeting_type, m.summary, m.client_name, m.transcript].some(f => f && f.toLowerCase().includes(searchQuery.toLowerCase()));
+                const matchClient = !filterClient || m.client_name === filterClient;
+                return matchSearch && matchClient;
+            });
+
+            // Group by client
+            const byClient = filtered.reduce((acc, m) => { const c = m.client_name || 'Unknown'; if (!acc[c]) acc[c] = []; acc[c].push(m); return acc; }, {});
+            const clientNames = [...new Set(meetings.map(m => m.client_name).filter(Boolean))].sort();
+
+            // Stats
+            const stats = {
+                total: meetings.length,
+                clients: new Set(meetings.map(m => m.client_name).filter(Boolean)).size,
+                fathom: meetings.filter(m => m.source && m.source !== 'manual').length,
+                manual: meetings.filter(m => !m.source || m.source === 'manual').length,
+                withActions: meetings.filter(m => { const e = getExtra(m); return (toArr(m.action_items).length + toArr(e.actionItems).length) > 0; }).length,
+            };
+
+            // Aggregate all action items
+            const allActionItems = useMemo(() => {
+                const items = [];
+                filtered.forEach(m => {
+                    const e = getExtra(m);
+                    const title = safe(m.meeting_title || e.title || m.meeting_type || 'Meeting');
+                    const ais = pick(m.action_items, e.actionItems);
+                    ais.forEach(ai => items.push({ meeting: title, client: m.client_name, date: m.meeting_date, ...(typeof ai === 'string' ? { task: ai } : ai) }));
+                });
+                const order = { high: 0, medium: 1, low: 2 };
+                items.sort((a, b) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2));
+                return items;
+            }, [filtered]);
+
+            // Get active sub-tab for a meeting
+            const getMeetingTab = (id) => activeTab[id] || 'summary';
+            const setMeetingTab = (id, tab) => setActiveTab(prev => ({ ...prev, [id]: tab }));
+
+            // ====== Render a single meeting card ======
+            const renderMeeting = (m) => {
+                const e = getExtra(m);
+                const title = safe(m.meeting_title || e.title || m.meeting_type || 'Meeting');
+                const summary = safe(m.summary || e.summary || 'No summary available');
+                const risk = safe(m.risk_level || e.riskLevel || 'medium');
+                const sentiment = safe(m.client_sentiment || e.clientSentiment || 'neutral');
+                const actionItems = pick(m.action_items, e.actionItems);
+                const participants = pick(m.participants, e.participants);
+                const duration = m.duration || e.duration;
+                const source = m.source || 'manual';
+                const isOpen = expandedId === m.id;
+                const subTab = getMeetingTab(m.id);
+
+                return (
+                    <div key={m.id} className={`bg-dark-800 rounded-xl overflow-hidden ${riskBorder(risk)} transition-all`}>
+                        {/* Header */}
+                        <div className="p-4 cursor-pointer hover:bg-dark-700/50 transition-colors" onClick={() => setExpandedId(isOpen ? null : m.id)}>
+                            <div className="flex flex-wrap justify-between items-start gap-2">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <span className="text-white font-semibold truncate">{title}</span>
+                                        <span className="text-slate-500 text-sm">{new Date(m.meeting_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                                        {m.client_name && <span className="px-2 py-0.5 rounded bg-brand-purple/20 text-brand-purple text-xs">{m.client_name}</span>}
+                                    </div>
+                                    <p className="text-slate-400 text-sm mt-1" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{summary}</p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className={`px-2 py-1 rounded text-xs ${sentimentStyle(sentiment)}`}>{sentiment}</span>
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${riskBadge(risk)}`}>{risk}</span>
+                                    <span className={`text-slate-600 text-xs transition-transform ${isOpen ? 'rotate-180' : ''}`}>&#9660;</span>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500">
+                                {source !== 'manual' && <span className="px-1.5 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan text-[10px] font-medium">Fathom</span>}
+                                {duration && <span>&#9201; {safe(duration)}</span>}
+                                {participants.length > 0 && <span>&#128101; {participants.length} participants</span>}
+                                {actionItems.length > 0 && <span>&#9989; {actionItems.length} action items</span>}
+                            </div>
+                        </div>
+
+                        {/* Expanded Detail */}
+                        {isOpen && (
+                            <div className="border-t border-dark-700">
+                                {/* Sub-tabs */}
+                                <div className="flex border-b border-dark-700">
+                                    {[
+                                        { id: 'summary', label: 'AI Summary' },
+                                        { id: 'actions', label: `Action Items${actionItems.length ? ` (${actionItems.length})` : ''}` },
+                                        { id: 'transcript', label: 'Transcript' },
+                                        { id: 'details', label: 'Details' },
+                                    ].map(t => (
+                                        <button key={t.id} onClick={(ev) => { ev.stopPropagation(); setMeetingTab(m.id, t.id); }}
+                                            className={`px-4 py-2.5 text-xs font-medium transition-colors ${subTab === t.id ? 'text-brand-cyan border-b-2 border-brand-cyan' : 'text-slate-500 hover:text-slate-300'}`}>
+                                            {t.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div className="p-4 space-y-4">
+                                    {/* ---- AI SUMMARY ---- */}
+                                    {subTab === 'summary' && (() => {
+                                        const keyPoints = pick(m.key_points, e.keyPoints);
+                                        const decisions = pick(m.decisions, e.decisions);
+                                        const topics = pick(m.topics, e.topics);
+                                        const concerns = pick(m.concerns, e.concerns);
+                                        const riskFactors = pick(m.risk_factors, e.riskFactors);
+                                        const warningSignals = pick(m.warning_signals, e.warningSignals);
+                                        const positiveSignals = pick(m.positive_signals, e.positiveSignals);
+                                        const sentExpl = m.sentiment_explanation || e.sentimentExplanation;
+                                        return (
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide mb-2">Summary</h4>
+                                                    <p className="text-slate-300 text-sm leading-relaxed">{summary}</p>
+                                                </div>
+                                                {(participants.length > 0 || duration) && (
+                                                    <div className="flex flex-wrap gap-4">
+                                                        {participants.length > 0 && <div><span className="text-slate-500 text-xs">Participants</span><div className="flex flex-wrap gap-1 mt-1">{participants.map((p,i) => <span key={i} className="px-2 py-1 rounded text-xs bg-dark-700 text-slate-300">{safe(p)}</span>)}</div></div>}
+                                                        {duration && <div><span className="text-slate-500 text-xs">Duration</span><div className="text-slate-300 text-sm mt-1">{safe(duration)}</div></div>}
+                                                    </div>
+                                                )}
+                                                {topics.length > 0 && <div><span className="text-slate-500 text-xs">Topics Discussed</span><div className="flex flex-wrap gap-1 mt-1">{topics.map((t,i) => <span key={i} className="px-2 py-1 rounded text-xs bg-purple-500/20 text-purple-400">{safe(t)}</span>)}</div></div>}
+                                                {keyPoints.length > 0 && <div><h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide mb-2">Key Points</h4><ul className="space-y-1.5">{keyPoints.map((kp,i) => <li key={i} className="flex gap-2 text-sm text-slate-300"><span className="text-brand-cyan mt-0.5 shrink-0">-</span><span>{safe(kp)}</span></li>)}</ul></div>}
+                                                {decisions.length > 0 && <div><h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide mb-2">Decisions Made</h4><ul className="space-y-1.5">{decisions.map((d,i) => <li key={i} className="flex gap-2 text-sm text-slate-300"><span className="text-emerald-400 mt-0.5 shrink-0">&#10003;</span><span>{safe(d)}</span></li>)}</ul></div>}
+                                                {sentExpl && <div className="p-3 bg-dark-700 rounded-lg"><span className="text-slate-500 text-xs">Client Sentiment</span><div className="flex items-center gap-2 mt-1"><span className={`px-2 py-0.5 rounded text-xs ${sentimentStyle(sentiment)}`}>{sentiment}</span><span className="text-slate-400 text-xs italic">{safe(sentExpl)}</span></div></div>}
+                                                {positiveSignals.length > 0 && <div className="p-3 bg-emerald-500/10 rounded-lg"><span className="text-emerald-400 text-xs font-medium">Positive Signals</span><ul className="mt-1.5 space-y-1">{positiveSignals.map((p,i) => <li key={i} className="text-emerald-300 text-xs">+ {safe(p)}</li>)}</ul></div>}
+                                                {(concerns.length > 0 || riskFactors.length > 0 || warningSignals.length > 0) && <div className="p-3 bg-red-500/10 rounded-lg"><span className="text-red-400 text-xs font-medium">Concerns & Risks</span><ul className="mt-1.5 space-y-1">{concerns.map((c,i) => <li key={`c${i}`} className="text-red-300 text-xs">- {safe(c)}</li>)}{riskFactors.map((r,i) => <li key={`r${i}`} className="text-amber-300 text-xs">- {safe(r)}</li>)}{warningSignals.map((w,i) => <li key={`w${i}`} className="text-amber-300 text-xs">- {safe(w)}</li>)}</ul></div>}
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* ---- ACTION ITEMS ---- */}
+                                    {subTab === 'actions' && (() => {
+                                        const nextSteps = pick(m.next_steps, e.nextSteps);
+                                        const followUpItems = pick(e.followUpItems);
+                                        const clientRequests = pick(e.clientRequests);
+                                        return (
+                                            <div className="space-y-4">
+                                                {actionItems.length === 0 ? <p className="text-slate-500 text-sm text-center py-6">No action items recorded.</p> : (
+                                                    <div className="space-y-2">
+                                                        <h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide">Action Items</h4>
+                                                        {actionItems.map((ai, i) => {
+                                                            const isStr = typeof ai === 'string';
+                                                            const item = isStr ? { task: ai } : (ai || {});
+                                                            return (
+                                                                <div key={i} className={`p-3 rounded-lg ${item.priority === 'high' ? 'bg-red-500/10 border border-red-500/20' : item.priority === 'medium' ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-dark-700'}`}>
+                                                                    <div className="flex items-start gap-3">
+                                                                        <div className="w-5 h-5 rounded border border-slate-600 shrink-0 mt-0.5"></div>
+                                                                        <div className="flex-1">
+                                                                            <div className="text-slate-300 text-sm">{safe(item.task || ai)}</div>
+                                                                            <div className="flex items-center gap-3 mt-1.5">
+                                                                                {item.owner && <span className="text-slate-500 text-xs">Owner: {safe(item.owner)}</span>}
+                                                                                {item.deadline && <span className="text-slate-500 text-xs">Due: {safe(item.deadline)}</span>}
+                                                                                {item.priority && <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${riskBadge(item.priority)}`}>{item.priority}</span>}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                                {nextSteps.length > 0 && <div><h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide mb-2">Next Steps</h4><ol className="space-y-1.5">{nextSteps.map((ns,i) => <li key={i} className="flex gap-2 text-sm text-slate-300"><span className="text-brand-purple font-medium shrink-0">{i+1}.</span><span>{safe(ns)}</span></li>)}</ol></div>}
+                                                {followUpItems.length > 0 && <div><h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide mb-2">Follow-up Items</h4><ul className="space-y-1.5">{followUpItems.map((f,i) => <li key={i} className="flex gap-2 text-sm text-slate-300"><span className="text-amber-400 shrink-0">-</span><span>{safe(f)}</span></li>)}</ul></div>}
+                                                {clientRequests.length > 0 && <div><h4 className="text-brand-cyan text-xs font-semibold uppercase tracking-wide mb-2">Client Requests</h4><ul className="space-y-1.5">{clientRequests.map((r,i) => <li key={i} className="flex gap-2 text-sm text-slate-300"><span className="text-brand-cyan shrink-0">-</span><span>{safe(r)}</span></li>)}</ul></div>}
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* ---- TRANSCRIPT ---- */}
+                                    {subTab === 'transcript' && (
+                                        m.transcript
+                                            ? <div className="bg-dark-700 rounded-lg p-4 max-h-[400px] overflow-y-auto scrollbar"><pre className="text-slate-400 text-sm whitespace-pre-wrap font-sans leading-relaxed">{m.transcript}</pre></div>
+                                            : <p className="text-slate-500 text-sm text-center py-6">No transcript available.</p>
+                                    )}
+
+                                    {/* ---- DETAILS ---- */}
+                                    {subTab === 'details' && (
+                                        <div className="space-y-3">
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-slate-500 text-xs">Client</span><div className="text-white text-sm mt-0.5">{m.client_name || 'Unknown'}</div></div>
+                                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-slate-500 text-xs">Date</span><div className="text-white text-sm mt-0.5">{new Date(m.meeting_date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</div></div>
+                                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-slate-500 text-xs">Source</span><div className="text-sm mt-0.5">{source !== 'manual' ? <span className="text-brand-cyan">{source === 'fathom_webhook' ? 'Fathom (Live)' : 'Fathom (Sync)'}</span> : <span className="text-slate-400">Manual Entry</span>}</div></div>
+                                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-slate-500 text-xs">Risk Level</span><div className="mt-0.5"><span className={`px-2 py-0.5 rounded text-xs font-medium ${riskBadge(risk)}`}>{risk}</span></div></div>
+                                                {duration && <div className="bg-dark-700 rounded-lg p-3"><span className="text-slate-500 text-xs">Duration</span><div className="text-white text-sm mt-0.5">{safe(duration)}</div></div>}
+                                                <div className="bg-dark-700 rounded-lg p-3"><span className="text-slate-500 text-xs">Sentiment</span><div className="mt-0.5"><span className={`px-2 py-0.5 rounded text-xs ${sentimentStyle(sentiment)}`}>{sentiment}</span></div></div>
+                                            </div>
+                                            {e.fathomUrl && <a href={e.fathomUrl} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-brand-cyan hover:text-brand-purple transition-colors">Open in Fathom &rarr;</a>}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            if (loading) return <div className="flex items-center justify-center py-20"><div className="text-center"><div className="text-4xl mb-4 animate-pulse">&#128260;</div><p className="text-slate-400 text-sm">Loading meetings...</p></div></div>;
+
+            return (
+                <div className="max-w-6xl mx-auto space-y-6">
+                    {/* Header */}
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <h1 className="text-2xl font-bold text-white">🎙️ Fathom Meetings</h1>
+                            <p className="text-slate-400 text-sm mt-1">{monthLabel}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <select value={`${selYear}-${selMonth}`} onChange={e => { const [y,m] = e.target.value.split('-').map(Number); setSelYear(y); setSelMonth(m); }} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-slate-300">
+                                {monthOptions.map(o => <option key={o.label} value={`${o.year}-${o.month}`}>{o.label}</option>)}
+                            </select>
+                            <button onClick={() => { setLoading(true); supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false }).then(({ data }) => { setMeetings(data || []); setLoading(false); }); }} className="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm transition-colors">Refresh</button>
+                        </div>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                        {[
+                            { label: 'Total Meetings', value: stats.total, color: 'text-white' },
+                            { label: 'Clients', value: stats.clients, color: 'text-brand-cyan' },
+                            { label: 'Fathom Synced', value: stats.fathom, color: 'text-brand-purple' },
+                            { label: 'Manual', value: stats.manual, color: 'text-slate-400' },
+                            { label: 'With Action Items', value: stats.withActions, color: 'text-amber-400' },
+                        ].map(s => <div key={s.label} className="bg-dark-800 rounded-xl p-4 text-center"><div className={`text-2xl font-bold ${s.color}`}>{s.value}</div><div className="text-xs text-slate-500 mt-1">{s.label}</div></div>)}
+                    </div>
+
+                    {/* Controls */}
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex rounded-lg overflow-hidden border border-dark-700">
+                            {[{ id: 'timeline', label: 'Timeline' }, { id: 'by-client', label: 'By Client' }, { id: 'actions', label: 'Action Items' }].map(mode => (
+                                <button key={mode.id} onClick={() => setViewMode(mode.id)} className={`px-4 py-2 text-xs font-medium transition-colors ${viewMode === mode.id ? 'bg-brand-cyan/20 text-brand-cyan' : 'bg-dark-800 text-slate-400 hover:text-slate-300'}`}>{mode.label}</button>
+                            ))}
+                        </div>
+                        <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search meetings..." className="flex-1 min-w-[200px] bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
+                        <select value={filterClient} onChange={e => setFilterClient(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-slate-300">
+                            <option value="">All Clients</option>
+                            {clientNames.map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Timeline View */}
+                    {viewMode === 'timeline' && (
+                        <div className="space-y-3">
+                            {filtered.length === 0 ? <div className="card p-8 text-center text-slate-500">No meetings found for {monthLabel}.</div> : filtered.map(renderMeeting)}
+                        </div>
+                    )}
+
+                    {/* By Client View */}
+                    {viewMode === 'by-client' && (
+                        <div className="space-y-6">
+                            {Object.keys(byClient).length === 0 ? <div className="card p-8 text-center text-slate-500">No meetings found for {monthLabel}.</div> : (
+                                Object.entries(byClient).sort(([,a],[,b]) => b.length - a.length).map(([client, mts]) => (
+                                    <div key={client}>
+                                        <div className="flex items-center gap-3 mb-3">
+                                            <h2 className="text-lg font-semibold text-white">{client}</h2>
+                                            <span className="px-2 py-1 rounded text-xs bg-brand-cyan/20 text-brand-cyan">{mts.length} meetings</span>
+                                        </div>
+                                        <div className="space-y-3">{mts.map(renderMeeting)}</div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+
+                    {/* Action Items View */}
+                    {viewMode === 'actions' && (
+                        <div className="card p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">All Action Items <span className="text-slate-500 text-sm font-normal">({allActionItems.length})</span></h3>
+                            {allActionItems.length === 0 ? <p className="text-slate-500 text-sm text-center py-6">No action items found for this period.</p> : (
+                                <div className="space-y-2 max-h-[600px] overflow-y-auto scrollbar">
+                                    {allActionItems.map((item, i) => (
+                                        <div key={i} className={`p-3 rounded-lg ${item.priority === 'high' ? 'bg-red-500/10 border border-red-500/20' : item.priority === 'medium' ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-dark-800'}`}>
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-slate-300 text-sm">{safe(item.task || item)}</div>
+                                                    <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-500">
+                                                        <span className="text-brand-purple">{item.client}</span>
+                                                        <span>{item.meeting}</span>
+                                                        {item.owner && <span>Owner: {safe(item.owner)}</span>}
+                                                    </div>
+                                                </div>
+                                                {item.priority && <span className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 ${riskBadge(item.priority)}`}>{item.priority}</span>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
         // ========== MAIN APP ==========
         const App = () => {
             const [user, setUser] = useState(null);
@@ -3438,6 +3790,7 @@ ${transcript}`;
                     case 'timeline': return <ClientTimelineTab clients={clients} setupData={setupData} />;
                     case 'datagaps': return <DataGapsTab clients={clients} setupData={setupData} />;
                     case 'meta-settings': return <MetaAdSettingsTab clients={clients} />;
+                    case 'fathom-meetings': return <FathomMeetingsTab />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
