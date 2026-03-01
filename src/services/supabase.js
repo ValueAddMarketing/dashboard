@@ -113,6 +113,19 @@ export const getMeetings = async (clientName) => {
   return { data, error };
 };
 
+export const getAllMeetings = async (startDate, endDate) => {
+  let query = supabase
+    .from('meeting_notes')
+    .select('*')
+    .order('meeting_date', { ascending: false });
+
+  if (startDate) query = query.gte('meeting_date', startDate);
+  if (endDate) query = query.lte('meeting_date', endDate);
+
+  const { data, error } = await query;
+  return { data, error };
+};
+
 export const addMeeting = async (meeting) => {
   const { data, error } = await supabase
     .from('meeting_notes')
