@@ -254,6 +254,22 @@
                 : 0
         });
 
+        const mergeClientWithMeta = (client, recentData, lifetimeData) => {
+            const recent = recentData ? recentData[client.client] : null;
+            const lifetime = lifetimeData ? lifetimeData[client.client] : null;
+            const hasMetaLink = !!(recent || lifetime);
+            return {
+                ...client,
+                hasMetaLink,
+                metaRecentSpend: recent ? parseFloat(recent.spend || 0) : null,
+                metaRecentLeads: recent ? (recent.leads || 0) : null,
+                metaRecentCPL: recent ? (recent.leads > 0 ? parseFloat(recent.spend || 0) / recent.leads : 0) : null,
+                metaLifetimeSpend: lifetime ? parseFloat(lifetime.spend || 0) : null,
+                metaLifetimeLeads: lifetime ? (lifetime.leads || 0) : null,
+                metaLifetimeCPL: lifetime ? (lifetime.leads > 0 ? parseFloat(lifetime.spend || 0) / lifetime.leads : 0) : null,
+            };
+        };
+
         const mapSetupTiming = r => ({
             client: r['VAM'] || '', csmRep: r['CSM'] || '', status: r['Status'] || '',
             mrr: r['MRR'] || '', duePayment: r['Due Payment'] || '', redFlags: r['Red flags'] || '',
@@ -368,7 +384,7 @@
         };
 
         // ========== ALL CLIENTS OVERVIEW ==========
-        const AllClientsView = ({ clients, setupData, onClientClick }) => {
+        const AllClientsView = ({ clients, setupData, onClientClick, metaRecentData, metaLifetimeData, metaLoading, recentPeriod, onRecentPeriodChange }) => {
             const [sortBy, setSortBy] = useState('client');
             const [sortDir, setSortDir] = useState('asc');
             const [filter, setFilter] = useState('');
@@ -379,6 +395,17 @@
             const [filterCallingStatus, setFilterCallingStatus] = useState('');
             const [filterOverallStanding, setFilterOverallStanding] = useState('');
 
+            const periodLabels = { last_3d: '3d', last_7d: '7d', last_14d: '14d', last_30d: '30d', last_90d: '90d', this_month: 'MTD' };
+            const periodLabel = periodLabels[recentPeriod] || '7d';
+            const periodOptions = [
+                { value: 'last_3d', label: '3d' },
+                { value: 'last_7d', label: '7d' },
+                { value: 'last_14d', label: '14d' },
+                { value: 'last_30d', label: '30d' },
+                { value: 'last_90d', label: '90d' },
+                { value: 'this_month', label: 'This Month' },
+            ];
+
             const getSetupInfo = (clientName) => {
                 const name = clientName.toLowerCase().trim();
                 return setupData.find(s => {
@@ -387,10 +414,8 @@
                 });
             };
 
-            // Enrich clients with computed metrics
-            const enrichedClients = clients.map(getClientMetrics);
+            const enrichedClients = clients.map(c => mergeClientWithMeta(c, metaRecentData, metaLifetimeData));
 
-            // Get unique values for filter dropdowns
             const uniqueValues = (key) => [...new Set(enrichedClients.map(c => c[key]).filter(Boolean))].sort();
             const statuses = uniqueValues('status');
             const teamMembers = uniqueValues('teamMember');
@@ -399,21 +424,17 @@
             const callingStatuses = uniqueValues('callingStatus');
             const overallStandings = uniqueValues('overallStanding');
 
-            // Count active filters
             const activeFilterCount = [filterStatus, filterTeamMember, filterState, filterCampaign, filterCallingStatus, filterOverallStanding].filter(Boolean).length;
 
-            // Get at-risk clients (red health = CPL > $50)
-            const atRiskClients = enrichedClients.filter(c => getHealth(c.cpl) === 'red' && c.days > 7);
-
-            // Get clients with no leads in last 3 days
-            const noRecentLeadsClients = enrichedClients.filter(c => c.days >= 3 && c.last3DayLeads === 0);
-
-            // Get clients from Setup Timing that are NOT in Client Ads Performance
+            // Alert data
+            const atRiskClients = enrichedClients.filter(c => c.hasMetaLink && c.metaLifetimeCPL !== null && c.metaLifetimeCPL > 50);
+            const noRecentLeadsClients = enrichedClients.filter(c => c.hasMetaLink && c.metaRecentLeads !== null && c.metaRecentLeads === 0);
             const clientNames = clients.map(c => c.client.toLowerCase().trim());
             const missingFromAdsPerformance = setupData.filter(s => {
                 const sn = (s.client || '').toLowerCase().trim();
                 return sn && !clientNames.some(cn => cn === sn || cn.includes(sn) || sn.includes(cn));
             });
+            const notLinkedClients = enrichedClients.filter(c => (c.status || '').toLowerCase() === 'active' && !c.hasMetaLink);
 
             const filteredClients = enrichedClients.filter(c => {
                 const matchesSearch = !filter || c.client.toLowerCase().includes(filter.toLowerCase()) || c.state.toLowerCase().includes(filter.toLowerCase());
@@ -428,18 +449,21 @@
 
             const sortedClients = [...filteredClients].sort((a, b) => {
                 let aVal = a[sortBy], bVal = b[sortBy];
+                if (aVal === null && bVal === null) return 0;
+                if (aVal === null) return 1;
+                if (bVal === null) return -1;
                 if (typeof aVal === 'string') aVal = aVal.toLowerCase();
                 if (typeof bVal === 'string') bVal = bVal.toLowerCase();
                 if (sortDir === 'asc') return aVal > bVal ? 1 : -1;
                 return aVal < bVal ? 1 : -1;
             });
 
-            const totals = enrichedClients.reduce((acc, c) => ({
-                spend: acc.spend + c.spend,
-                leads: acc.leads + c.totalLeads,
-                appts: acc.appts + c.appts,
-                deals: acc.deals + c.deals
-            }), { spend: 0, leads: 0, appts: 0, deals: 0 });
+            const linkedCount = enrichedClients.filter(c => c.hasMetaLink).length;
+            const recentSpendTotal = enrichedClients.reduce((s, c) => s + (c.metaRecentSpend || 0), 0);
+            const recentLeadsTotal = enrichedClients.reduce((s, c) => s + (c.metaRecentLeads || 0), 0);
+            const avgCPL = recentLeadsTotal > 0 ? recentSpendTotal / recentLeadsTotal : 0;
+            const totalAppts = enrichedClients.reduce((s, c) => s + c.appts, 0);
+            const lifetimeSpendTotal = enrichedClients.reduce((s, c) => s + (c.metaLifetimeSpend || 0), 0);
 
             const handleSort = (col) => {
                 if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -461,17 +485,19 @@
                 </div>
             );
 
+            const metaVal = (val, formatter) => val !== null && val !== undefined ? formatter(val) : '--';
+
             return (
                 <div className="space-y-6">
-                    {/* Alert Sections */}
-                    <div className="grid lg:grid-cols-3 gap-6">
-                        {/* At-Risk Clients (Red Health) */}
+                    {/* Alert Cards */}
+                    <div className="grid lg:grid-cols-2 xl:grid-cols-4 gap-6">
+                        {/* At-Risk (High Lifetime CPL) */}
                         <div className="card p-5 border-l-4 border-red-500">
                             <div className="flex items-center gap-3 mb-4">
                                 <span className="text-2xl">🚨</span>
                                 <div>
                                     <h3 className="text-lg font-bold text-red-400">At-Risk Clients</h3>
-                                    <p className="text-slate-500 text-xs">High CPL (&gt;$50) - Needs attention</p>
+                                    <p className="text-slate-500 text-xs">Lifetime CPL &gt;$50</p>
                                 </div>
                                 <span className="ml-auto bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-sm font-bold">{atRiskClients.length}</span>
                             </div>
@@ -483,11 +509,11 @@
                                         <div key={c.client} onClick={() => onClientClick(c.client)} className="flex items-center justify-between p-3 bg-red-500/10 rounded-lg cursor-pointer hover:bg-red-500/20">
                                             <div>
                                                 <div className="font-medium text-white">{c.client}</div>
-                                                <div className="text-xs text-slate-400">{c.state} • Day {c.days}{c.teamMember && ` • ${c.teamMember}`}</div>
+                                                <div className="text-xs text-slate-400">{c.state}{c.teamMember && ` • ${c.teamMember}`}</div>
                                             </div>
                                             <div className="text-right">
-                                                <div className="text-red-400 font-bold">{fmtD(c.cpl)}</div>
-                                                <div className="text-xs text-slate-500">CPL</div>
+                                                <div className="text-red-400 font-bold">{fmtD(c.metaLifetimeCPL)}</div>
+                                                <div className="text-xs text-slate-500">LT CPL</div>
                                             </div>
                                         </div>
                                     ))}
@@ -495,13 +521,13 @@
                             )}
                         </div>
 
-                        {/* No Leads in Last 3 Days */}
+                        {/* No Recent Leads */}
                         <div className="card p-5 border-l-4 border-amber-500">
                             <div className="flex items-center gap-3 mb-4">
                                 <span className="text-2xl">⚠️</span>
                                 <div>
-                                    <h3 className="text-lg font-bold text-amber-400">No Leads (3 Days)</h3>
-                                    <p className="text-slate-500 text-xs">Zero leads in last 3 days</p>
+                                    <h3 className="text-lg font-bold text-amber-400">No Leads ({periodLabel})</h3>
+                                    <p className="text-slate-500 text-xs">Zero leads in selected period</p>
                                 </div>
                                 <span className="ml-auto bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full text-sm font-bold">{noRecentLeadsClients.length}</span>
                             </div>
@@ -513,11 +539,11 @@
                                         <div key={c.client} onClick={() => onClientClick(c.client)} className="flex items-center justify-between p-3 bg-amber-500/10 rounded-lg cursor-pointer hover:bg-amber-500/20">
                                             <div>
                                                 <div className="font-medium text-white">{c.client}</div>
-                                                <div className="text-xs text-slate-400">{c.state} • Day {c.days}{c.teamMember && ` • ${c.teamMember}`}</div>
+                                                <div className="text-xs text-slate-400">{c.state}{c.teamMember && ` • ${c.teamMember}`}</div>
                                             </div>
                                             <div className="text-right">
                                                 <div className="text-amber-400 font-bold">0 leads</div>
-                                                <div className="text-xs text-slate-500">Last 3 days</div>
+                                                <div className="text-xs text-slate-500">{periodLabel}</div>
                                             </div>
                                         </div>
                                     ))}
@@ -530,8 +556,8 @@
                             <div className="flex items-center gap-3 mb-4">
                                 <span className="text-2xl">📋</span>
                                 <div>
-                                    <h3 className="text-lg font-bold text-purple-400">Missing from Ads Sheet</h3>
-                                    <p className="text-slate-500 text-xs">Add to Client Ads Performance</p>
+                                    <h3 className="text-lg font-bold text-purple-400">Missing from Sheet</h3>
+                                    <p className="text-slate-500 text-xs">Not in Client Ads Performance</p>
                                 </div>
                                 <span className="ml-auto bg-purple-500/20 text-purple-400 px-3 py-1 rounded-full text-sm font-bold">{missingFromAdsPerformance.length}</span>
                             </div>
@@ -551,14 +577,56 @@
                                 </div>
                             )}
                         </div>
+
+                        {/* Not Linked to Meta */}
+                        <div className="card p-5 border-l-4 border-sky-500">
+                            <div className="flex items-center gap-3 mb-4">
+                                <span className="text-2xl">🔗</span>
+                                <div>
+                                    <h3 className="text-lg font-bold text-sky-400">Not Linked to Meta</h3>
+                                    <p className="text-slate-500 text-xs">Active clients without ad data</p>
+                                </div>
+                                <span className="ml-auto bg-sky-500/20 text-sky-400 px-3 py-1 rounded-full text-sm font-bold">{notLinkedClients.length}</span>
+                            </div>
+                            {notLinkedClients.length === 0 ? (
+                                <div className="text-slate-500 text-sm text-center py-4">✅ All active clients linked</div>
+                            ) : (
+                                <div className="space-y-2 max-h-[200px] overflow-y-auto scrollbar">
+                                    {notLinkedClients.map(c => (
+                                        <div key={c.client} className="flex items-center justify-between p-3 bg-sky-500/10 rounded-lg">
+                                            <div>
+                                                <div className="font-medium text-white">{c.client}</div>
+                                                <div className="text-xs text-slate-400">{c.state}{c.teamMember && ` • ${c.teamMember}`}</div>
+                                            </div>
+                                            <div className="text-sky-400 text-xs font-medium">LINK ACCOUNT</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Clients</div><div className="text-2xl font-bold text-white">{clients.length}</div></div>
-                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Spend</div><div className="text-2xl font-bold text-brand-cyan">{fmt(totals.spend)}</div></div>
-                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Leads</div><div className="text-2xl font-bold text-brand-purple">{fmtN(totals.leads)}</div></div>
-                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Appts</div><div className="text-2xl font-bold text-emerald-400">{fmtN(totals.appts)}</div></div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Clients</div><div className="text-2xl font-bold text-white">{clients.length} <span className="text-sm text-slate-500">({linkedCount} linked)</span></div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">{periodLabel} Spend</div><div className="text-2xl font-bold text-brand-cyan">{fmt(recentSpendTotal)}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">{periodLabel} Leads</div><div className="text-2xl font-bold text-brand-purple">{fmtN(recentLeadsTotal)}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Avg CPL</div><div className={'text-2xl font-bold ' + (avgCPL > 50 ? 'text-red-400' : avgCPL > 25 ? 'text-amber-400' : 'text-emerald-400')}>{avgCPL > 0 ? fmtD(avgCPL) : '--'}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Total Appts</div><div className="text-2xl font-bold text-emerald-400">{fmtN(totalAppts)}</div></div>
+                        <div className="card p-4"><div className="text-slate-400 text-sm">Lifetime Spend</div><div className="text-2xl font-bold text-brand-cyan">{fmt(lifetimeSpendTotal)}</div></div>
+                    </div>
+
+                    {/* Date Period Selector */}
+                    <div className="card p-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-secondary font-medium">Period:</span>
+                            {periodOptions.map(p => (
+                                <button key={p.value} onClick={() => onRecentPeriodChange(p.value)} className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (recentPeriod === p.value ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30' : 'text-secondary hover-bg border border-transparent')}>
+                                    {p.label}
+                                </button>
+                            ))}
+                            {metaLoading && <span className="text-xs text-brand-cyan ml-2">Loading...</span>}
+                        </div>
                     </div>
 
                     {/* Search & Filters */}
@@ -597,11 +665,12 @@
                                             { key: 'overallStanding', label: 'Standing' },
                                             { key: 'callingStatus', label: 'Calling' },
                                             { key: 'days', label: 'Days' },
-                                            { key: 'spend', label: 'Spend' },
-                                            { key: 'last3DayLeads', label: '3-Day Leads' },
-                                            { key: 'last7DayLeads', label: '7-Day Leads' },
-                                            { key: 'totalLeads', label: 'Total Leads' },
-                                            { key: 'cpl', label: 'CPL' },
+                                            { key: 'metaRecentSpend', label: periodLabel + ' Spend' },
+                                            { key: 'metaRecentLeads', label: periodLabel + ' Leads' },
+                                            { key: 'metaRecentCPL', label: periodLabel + ' CPL' },
+                                            { key: 'metaLifetimeSpend', label: 'LT Spend' },
+                                            { key: 'metaLifetimeLeads', label: 'LT Leads' },
+                                            { key: 'metaLifetimeCPL', label: 'LT CPL' },
                                             { key: 'appts', label: 'Appts' },
                                             { key: 'deals', label: 'Deals' },
                                         ].map(col => (
@@ -615,10 +684,7 @@
                                 <tbody className="divide-y divide-dark-700">
                                     {sortedClients.map(c => {
                                         const s = getSetupInfo(c.client);
-                                        const health = getHealth(c.cpl);
-                                        const standingColor = (c.overallStanding || '').toLowerCase().includes('good') ? 'text-emerald-400' :
-                                            (c.overallStanding || '').toLowerCase().includes('bad') || (c.overallStanding || '').toLowerCase().includes('poor') ? 'text-red-400' :
-                                            (c.overallStanding || '').toLowerCase().includes('ok') || (c.overallStanding || '').toLowerCase().includes('average') ? 'text-amber-400' : 'text-slate-300';
+                                        const health = c.hasMetaLink ? getHealth(c.metaLifetimeCPL) : 'gray';
                                         const standingBadge = (c.overallStanding || '').toLowerCase().includes('good') ? 'bg-emerald-500/20 text-emerald-400' :
                                             (c.overallStanding || '').toLowerCase().includes('bad') || (c.overallStanding || '').toLowerCase().includes('poor') ? 'bg-red-500/20 text-red-400' :
                                             (c.overallStanding || '').toLowerCase().includes('ok') || (c.overallStanding || '').toLowerCase().includes('average') ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400';
@@ -654,11 +720,12 @@
                                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${callingBadge}`}>{c.callingStatus || '—'}</span>
                                                 </td>
                                                 <td className="px-4 py-3 text-slate-300">{c.days}</td>
-                                                <td className="px-4 py-3 text-slate-300">{fmt(c.spend)}</td>
-                                                <td className={`px-4 py-3 font-medium ${c.last3DayLeads === 0 && c.days >= 3 ? 'text-red-400' : 'text-brand-cyan'}`}>{fmtN(c.last3DayLeads)}</td>
-                                                <td className="px-4 py-3 text-brand-cyan font-medium">{fmtN(c.last7DayLeads)}</td>
-                                                <td className="px-4 py-3 text-brand-purple font-medium">{fmtN(c.totalLeads)}</td>
-                                                <td className="px-4 py-3 text-white font-medium">{fmtD(c.cpl)}</td>
+                                                <td className="px-4 py-3 text-brand-cyan">{metaVal(c.metaRecentSpend, fmt)}</td>
+                                                <td className={`px-4 py-3 font-medium ${c.hasMetaLink && c.metaRecentLeads === 0 ? 'text-red-400' : 'text-brand-cyan'}`}>{metaVal(c.metaRecentLeads, fmtN)}</td>
+                                                <td className="px-4 py-3 text-white font-medium">{metaVal(c.metaRecentCPL, fmtD)}</td>
+                                                <td className="px-4 py-3 text-brand-cyan">{metaVal(c.metaLifetimeSpend, fmt)}</td>
+                                                <td className="px-4 py-3 text-brand-purple font-medium">{metaVal(c.metaLifetimeLeads, fmtN)}</td>
+                                                <td className={'px-4 py-3 font-bold ' + (c.metaLifetimeCPL !== null ? (c.metaLifetimeCPL > 50 ? 'text-red-400' : c.metaLifetimeCPL > 25 ? 'text-amber-400' : 'text-emerald-400') : 'text-slate-500')}>{metaVal(c.metaLifetimeCPL, fmtD)}</td>
                                                 <td className="px-4 py-3 text-brand-purple font-medium">{fmtN(c.appts)}</td>
                                                 <td className="px-4 py-3 text-emerald-400 font-medium">{fmtN(c.deals)}</td>
                                                 <td className="px-4 py-3"><span className={`w-3 h-3 rounded-full inline-block ${healthColors[health]}`}></span></td>
@@ -675,36 +742,24 @@
         };
 
         // ========== META AD SETTINGS TAB ==========
-        const MetaAdSettingsTab = ({ clients, viewMode = 'performance' }) => {
+        const MetaAdSettingsTab = ({ clients }) => {
             const [adAccounts, setAdAccounts] = useState([]);
             const [mappings, setMappings] = useState([]);
-            const [metaData, setMetaData] = useState({});
             const [loading, setLoading] = useState(true);
-            const [dataLoading, setDataLoading] = useState(false);
             const [savingClient, setSavingClient] = useState(null);
             const [searchFilter, setSearchFilter] = useState('');
             const [statusMessage, setStatusMessage] = useState(null);
-            const [datePreset, setDatePreset] = useState('last_7d');
 
             useEffect(() => {
                 const load = async () => {
                     setLoading(true);
-                    const [accounts, { data: maps }, data] = await Promise.all([fetchAdAccountsList(), getAdMappings(), fetchMetaAdData(datePreset)]);
+                    const [accounts, { data: maps }] = await Promise.all([fetchAdAccountsList(), getAdMappings()]);
                     setAdAccounts(accounts);
                     setMappings(maps || []);
-                    setMetaData(data);
                     setLoading(false);
                 };
                 load();
             }, []);
-
-            const handleDateChange = async (preset) => {
-                setDatePreset(preset);
-                setDataLoading(true);
-                const data = await fetchMetaAdData(preset);
-                setMetaData(data);
-                setDataLoading(false);
-            };
 
             const getMappingForClient = (clientName) => mappings.find(m => m.client_name === clientName);
 
@@ -717,8 +772,6 @@
                     const { data: updated } = await getAdMappings();
                     setMappings(updated || []);
                     META_DATE_PRESETS.forEach(p => { localStorage.removeItem('vam_meta_ads_' + p.value); localStorage.removeItem('vam_meta_ads_time_' + p.value); });
-                    const data = await fetchMetaAdData(datePreset);
-                    setMetaData(data);
                     setStatusMessage({ type: 'success', text: `${clientName} ${adAccountId ? 'linked' : 'unlinked'} successfully` });
                 } catch (err) {
                     setStatusMessage({ type: 'error', text: `Failed to save: ${err.message}` });
@@ -730,16 +783,6 @@
             const filteredClients = clients.filter(c => !searchFilter || c.client.toLowerCase().includes(searchFilter.toLowerCase()));
             const mappedCount = clients.filter(c => getMappingForClient(c.client)).length;
 
-            const totals = Object.values(metaData).reduce((acc, d) => ({
-                spend: acc.spend + parseFloat(d.spend || 0),
-                leads: acc.leads + (d.leads || 0),
-                impressions: acc.impressions + (d.impressions || 0),
-                reach: acc.reach + (d.reach || 0),
-                clicks: acc.clicks + (d.clicks || 0),
-                linkClicks: acc.linkClicks + (d.linkClicks || 0),
-            }), { spend: 0, leads: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0 });
-            const totalCPL = totals.leads > 0 ? totals.spend / totals.leads : 0;
-
             if (loading) return <div className="text-center py-12 text-secondary">Loading Meta ad accounts...</div>;
 
             return (
@@ -750,99 +793,7 @@
                         </div>
                     )}
 
-                    <div className="card p-4">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm text-secondary font-medium">Date Range:</span>
-                                <div className="flex flex-wrap gap-2">
-                                    {META_DATE_PRESETS.map(p => (
-                                        <button key={p.value} onClick={() => handleDateChange(p.value)} className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (datePreset === p.value ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30' : 'text-secondary hover-bg border border-transparent')}>
-                                            {p.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            {dataLoading && <span className="text-xs text-brand-cyan">Loading...</span>}
-                        </div>
-                    </div>
-
-                    {viewMode === 'performance' ? (
-                        <>
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                                <div className="card p-4 text-center">
-                                    <div className="text-2xl font-bold text-brand-cyan">{fmt(totals.spend)}</div>
-                                    <div className="text-xs text-secondary">Total Spend</div>
-                                </div>
-                                <div className="card p-4 text-center">
-                                    <div className="text-2xl font-bold text-brand-purple">{fmtN(totals.leads)}</div>
-                                    <div className="text-xs text-secondary">Total Leads</div>
-                                </div>
-                                <div className="card p-4 text-center">
-                                    <div className={'text-2xl font-bold ' + (totalCPL > 50 ? 'text-red-400' : totalCPL > 25 ? 'text-amber-400' : 'text-emerald-400')}>{fmtD(totalCPL)}</div>
-                                    <div className="text-xs text-secondary">Avg CPL</div>
-                                </div>
-                                <div className="card p-4 text-center">
-                                    <div className="text-2xl font-bold text-primary">{fmtN(totals.impressions)}</div>
-                                    <div className="text-xs text-secondary">Impressions</div>
-                                </div>
-                                <div className="card p-4 text-center">
-                                    <div className="text-2xl font-bold text-primary">{fmtN(totals.reach)}</div>
-                                    <div className="text-xs text-secondary">Reach</div>
-                                </div>
-                                <div className="card p-4 text-center">
-                                    <div className="text-2xl font-bold text-primary">{fmtN(totals.clicks)}</div>
-                                    <div className="text-xs text-secondary">Clicks</div>
-                                </div>
-                            </div>
-
-                            <div className="card">
-                                <div className="p-4 border-b divider flex items-center justify-between">
-                                    <h3 className="text-lg font-semibold text-primary">Client Performance ({META_DATE_PRESETS.find(p => p.value === datePreset)?.label})</h3>
-                                    <span className="text-xs text-secondary">{Object.keys(metaData).length} linked accounts</span>
-                                </div>
-                                {Object.keys(metaData).length === 0 ? (
-                                    <div className="p-8 text-center text-secondary text-sm">No linked clients with data. Switch to Account Mappings to link clients to their ad accounts.</div>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full">
-                                            <thead>
-                                                <tr className="border-b divider">
-                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Client</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">Spend</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">Leads</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">CPL</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">Impressions</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">Reach</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">Clicks</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">CTR</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">CPC</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-secondary uppercase">Frequency</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divider">
-                                                {Object.entries(metaData).sort((a, b) => parseFloat(b[1].spend) - parseFloat(a[1].spend)).map(([clientName, d]) => (
-                                                    <tr key={clientName} className="hover-bg transition-colors">
-                                                        <td className="px-4 py-3 font-medium text-primary">{clientName}</td>
-                                                        <td className="px-4 py-3 text-right text-brand-cyan font-medium">{fmt(d.spend)}</td>
-                                                        <td className="px-4 py-3 text-right text-brand-purple font-medium">{fmtN(d.leads)}</td>
-                                                        <td className={'px-4 py-3 text-right font-bold ' + (parseFloat(d.cpl) > 50 ? 'text-red-400' : parseFloat(d.cpl) > 25 ? 'text-amber-400' : 'text-emerald-400')}>{d.cpl ? fmtD(d.cpl) : '—'}</td>
-                                                        <td className="px-4 py-3 text-right text-secondary">{fmtN(d.impressions)}</td>
-                                                        <td className="px-4 py-3 text-right text-secondary">{fmtN(d.reach)}</td>
-                                                        <td className="px-4 py-3 text-right text-secondary">{fmtN(d.clicks)}</td>
-                                                        <td className="px-4 py-3 text-right text-secondary">{d.ctr}%</td>
-                                                        <td className="px-4 py-3 text-right text-secondary">{fmtD(d.cpc)}</td>
-                                                        <td className="px-4 py-3 text-right text-secondary">{d.frequency}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                                 <div className="card p-6 text-center">
                                     <div className="text-2xl font-bold text-brand-cyan">{adAccounts.length}</div>
                                     <div className="text-xs text-secondary">Ad Accounts Available</div>
@@ -898,8 +849,6 @@
                                     )}
                                 </div>
                             </div>
-                        </>
-                    )}
                 </div>
             );
         };
@@ -907,7 +856,7 @@
         // ========== AI DAILY BRIEFING ==========
         const ANALYZE_API = '/api/analyze';
 
-        const DailyBriefingView = ({ clients, setupData }) => {
+        const DailyBriefingView = ({ clients, setupData, metaData }) => {
             const [activeTab, setActiveTab] = useState('briefing');
             const [briefing, setBriefing] = useState('');
             const [briefingLoading, setBriefingLoading] = useState(false);
@@ -915,19 +864,6 @@
             const [question, setQuestion] = useState('');
             const [chatHistory, setChatHistory] = useState([]);
             const [askLoading, setAskLoading] = useState(false);
-            const [metaData, setMetaData] = useState({});
-            const [metaLoading, setMetaLoading] = useState(true);
-
-            // Fetch meta data on mount
-            useEffect(() => {
-                const loadMeta = async () => {
-                    setMetaLoading(true);
-                    const data = await fetchMetaAdData('last_7d');
-                    setMetaData(data);
-                    setMetaLoading(false);
-                };
-                loadMeta();
-            }, []);
 
             // Build data context string for AI
             const buildDataContext = () => {
@@ -1205,8 +1141,6 @@ Answer questions directly and specifically using the data above. Use markdown fo
                 return elements;
             };
 
-            if (metaLoading) return React.createElement('div', { className: 'text-center py-12 text-secondary' }, 'Loading data...');
-
             return React.createElement('div', { className: 'space-y-6' },
                 // Tab switcher
                 React.createElement('div', { className: 'flex items-center gap-0 border-b divider' },
@@ -1404,6 +1338,11 @@ Answer questions directly and specifically using the data above. Use markdown fo
             const [error, setError] = useState(null);
             const [theme, setTheme] = useState('dark');
             const [tab, setTab] = useState('clients');
+            const [metaRecentData, setMetaRecentData] = useState({});
+            const [metaLifetimeData, setMetaLifetimeData] = useState({});
+            const [metaLoading, setMetaLoading] = useState(true);
+            const [recentPeriod, setRecentPeriod] = useState('last_7d');
+            const metaInitRef = React.useRef(false);
 
             // Theme toggle function
             const toggleTheme = () => {
@@ -1488,6 +1427,32 @@ Answer questions directly and specifically using the data above. Use markdown fo
                 });
             };
 
+            // Fetch Meta API data after clients load
+            useEffect(() => {
+                if (!user || loading) return;
+                let cancelled = false;
+                const loadMeta = async () => {
+                    setMetaLoading(true);
+                    if (!metaInitRef.current) {
+                        const [recent, lifetime] = await Promise.all([
+                            fetchMetaAdData(recentPeriod),
+                            fetchMetaAdData('maximum')
+                        ]);
+                        if (cancelled) return;
+                        setMetaRecentData(recent);
+                        setMetaLifetimeData(lifetime);
+                        metaInitRef.current = true;
+                    } else {
+                        const recent = await fetchMetaAdData(recentPeriod);
+                        if (cancelled) return;
+                        setMetaRecentData(recent);
+                    }
+                    setMetaLoading(false);
+                };
+                loadMeta();
+                return () => { cancelled = true; };
+            }, [user, loading, recentPeriod]);
+
             const handleClientClick = (clientName) => {
                 window.location.href = 'index.html?client=' + encodeURIComponent(clientName);
             };
@@ -1534,10 +1499,6 @@ Answer questions directly and specifically using the data above. Use markdown fo
                                         <span className="text-lg">📊</span>
                                         <div><div className="text-sm font-medium">All Clients</div><div className="text-xs text-muted">Overview of all client metrics</div></div>
                                     </button>
-                                    <button onClick={() => setTab('meta-ads')} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === 'meta-ads' ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
-                                        <span className="text-lg">📈</span>
-                                        <div><div className="text-sm font-medium">Meta Ads</div><div className="text-xs text-muted">Real-time ad performance</div></div>
-                                    </button>
                                     <button onClick={() => setTab('mappings')} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === 'mappings' ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
                                         <span className="text-lg">🔗</span>
                                         <div><div className="text-sm font-medium">Account Mappings</div><div className="text-xs text-muted">Link clients to Meta ad accounts</div></div>
@@ -1554,8 +1515,8 @@ Answer questions directly and specifically using the data above. Use markdown fo
                             <main className="flex-1 flex flex-col">
                                 <header className="header-bar backdrop-blur border-b px-8 py-4 flex items-center justify-between divider">
                                     <div>
-                                        <h2 className="text-xl font-bold text-primary">{tab === 'clients' ? 'Media Buyer Overview' : tab === 'meta-ads' ? '📈 Meta Ads Performance' : tab === 'ai-briefing' ? '🧠 AI Briefing' : '🔗 Account Mappings'}</h2>
-                                        <p className="text-secondary text-sm">{tab === 'clients' ? 'All clients at a glance' : tab === 'meta-ads' ? 'Real-time ad performance from Meta Marketing API' : tab === 'ai-briefing' ? 'AI-powered daily analysis and Q&A for your ad accounts' : 'Link clients to their Meta ad accounts'}</p>
+                                        <h2 className="text-xl font-bold text-primary">{tab === 'clients' ? 'Media Buyer Overview' : tab === 'ai-briefing' ? '🧠 AI Briefing' : '🔗 Account Mappings'}</h2>
+                                        <p className="text-secondary text-sm">{tab === 'clients' ? 'All clients at a glance' : tab === 'ai-briefing' ? 'AI-powered daily analysis and Q&A for your ad accounts' : 'Link clients to their Meta ad accounts'}</p>
                                     </div>
                                     <button
                                         onClick={toggleTheme}
@@ -1565,10 +1526,9 @@ Answer questions directly and specifically using the data above. Use markdown fo
                                     </button>
                                 </header>
                                 <div className="flex-1 overflow-y-auto p-8 scrollbar">
-                                    {tab === 'clients' && <AllClientsView clients={clients} setupData={setupData} onClientClick={handleClientClick} />}
-                                    {tab === 'meta-ads' && <MetaAdSettingsTab clients={clients} viewMode="performance" />}
-                                    {tab === 'mappings' && <MetaAdSettingsTab clients={clients} viewMode="mappings" />}
-                                    {tab === 'ai-briefing' && <DailyBriefingView clients={clients} setupData={setupData} />}
+                                    {tab === 'clients' && <AllClientsView clients={clients} setupData={setupData} onClientClick={handleClientClick} metaRecentData={metaRecentData} metaLifetimeData={metaLifetimeData} metaLoading={metaLoading} recentPeriod={recentPeriod} onRecentPeriodChange={setRecentPeriod} />}
+                                    {tab === 'mappings' && <MetaAdSettingsTab clients={clients} />}
+                                    {tab === 'ai-briefing' && <DailyBriefingView clients={clients} setupData={setupData} metaData={metaRecentData} />}
                                 </div>
                             </main>
                         </div>
