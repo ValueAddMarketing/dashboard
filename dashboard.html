@@ -904,6 +904,496 @@
             );
         };
 
+        // ========== AI DAILY BRIEFING ==========
+        const ANALYZE_API = '/api/analyze';
+
+        const DailyBriefingView = ({ clients, setupData }) => {
+            const [activeTab, setActiveTab] = useState('briefing');
+            const [briefing, setBriefing] = useState('');
+            const [briefingLoading, setBriefingLoading] = useState(false);
+            const [briefingError, setBriefingError] = useState(null);
+            const [question, setQuestion] = useState('');
+            const [chatHistory, setChatHistory] = useState([]);
+            const [askLoading, setAskLoading] = useState(false);
+            const [metaData, setMetaData] = useState({});
+            const [metaLoading, setMetaLoading] = useState(true);
+
+            // Fetch meta data on mount
+            useEffect(() => {
+                const loadMeta = async () => {
+                    setMetaLoading(true);
+                    const data = await fetchMetaAdData('last_7d');
+                    setMetaData(data);
+                    setMetaLoading(false);
+                };
+                loadMeta();
+            }, []);
+
+            // Build data context string for AI
+            const buildDataContext = () => {
+                const enriched = clients.map(getClientMetrics);
+                const totalSpend = enriched.reduce((s, c) => s + c.spend, 0);
+                const totalLeads = enriched.reduce((s, c) => s + c.totalLeads, 0);
+                const totalAppts = enriched.reduce((s, c) => s + c.appts, 0);
+
+                const atRisk = enriched.filter(c => getHealth(c.cpl) === 'red' && c.days > 7);
+                const noRecent = enriched.filter(c => c.days >= 3 && c.last3DayLeads === 0);
+
+                let ctx = `=== VAM MEDIA BUYER DATA SNAPSHOT ===\n`;
+                ctx += `Total Clients: ${enriched.length}\n`;
+                ctx += `Total Lifetime Spend: $${totalSpend.toLocaleString()}\n`;
+                ctx += `Total Lifetime Leads: ${totalLeads.toLocaleString()}\n`;
+                ctx += `Total Appointments: ${totalAppts.toLocaleString()}\n`;
+                ctx += `At-Risk Clients (CPL > $50): ${atRisk.length}\n`;
+                ctx += `Clients with 0 leads in last 3 days: ${noRecent.length}\n\n`;
+
+                // Meta Ads real-time data
+                if (Object.keys(metaData).length > 0) {
+                    ctx += `=== META ADS REAL-TIME DATA (Last 7 Days) ===\n`;
+                    const metaTotals = Object.values(metaData).reduce((acc, d) => ({
+                        spend: acc.spend + parseFloat(d.spend || 0),
+                        leads: acc.leads + (d.leads || 0),
+                        impressions: acc.impressions + (d.impressions || 0),
+                        clicks: acc.clicks + (d.clicks || 0),
+                    }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+                    ctx += `Meta Total Spend (7d): $${metaTotals.spend.toFixed(2)}\n`;
+                    ctx += `Meta Total Leads (7d): ${metaTotals.leads}\n`;
+                    ctx += `Meta Total Impressions (7d): ${metaTotals.impressions.toLocaleString()}\n`;
+                    ctx += `Meta Avg CPL (7d): $${metaTotals.leads > 0 ? (metaTotals.spend / metaTotals.leads).toFixed(2) : 'N/A'}\n\n`;
+
+                    Object.entries(metaData).forEach(([name, d]) => {
+                        ctx += `[META] ${name}: Spend=$${d.spend}, Leads=${d.leads}, CPL=${d.cpl ? '$'+d.cpl : 'N/A'}, Impressions=${d.impressions}, Reach=${d.reach}, Clicks=${d.clicks}, CTR=${d.ctr}%, CPC=$${d.cpc}, Frequency=${d.frequency}\n`;
+                    });
+                    ctx += '\n';
+                }
+
+                // Per-client detail
+                ctx += `=== CLIENT DETAIL ===\n`;
+                enriched.forEach(c => {
+                    ctx += `\n--- ${c.client} ---\n`;
+                    ctx += `Status: ${c.status || 'N/A'} | Team Member: ${c.teamMember || 'N/A'} | State: ${c.state || 'N/A'}\n`;
+                    ctx += `Campaign: ${c.campaign || 'N/A'} | Overall Standing: ${c.overallStanding || 'N/A'} | Calling: ${c.callingStatus || 'N/A'}\n`;
+                    ctx += `Days Running: ${c.days} | Daily Set Ad Spend: $${c.dailySetAdSpend}\n`;
+                    ctx += `Lifetime: Spend=$${c.spend.toLocaleString()}, Leads=${c.totalLeads}, CPL=$${c.cpl.toFixed(2)}, Appts=${c.appts}, Deals=${c.deals}\n`;
+                    ctx += `Last 3 Days: Seller Leads=${c.last3DaySellerLeads} (CPL $${c.last3DaySellerCPL.toFixed(2)}), Buyer Leads=${c.last3DayBuyerLeads} (CPL $${c.last3DayBuyerCPL.toFixed(2)})\n`;
+                    ctx += `Last 7 Days: Seller Leads=${c.last7DaySellerLeads} (CPL $${c.last7DaySellerCPL.toFixed(2)}), Buyer Leads=${c.last7DayBuyerLeads} (CPL $${c.last7DayBuyerCPL.toFixed(2)})\n`;
+                    ctx += `Mortgage: 3d Leads=${c.last3DayMortgageLeads}, 7d Leads=${c.last7DayMortgageLeads}, Lifetime=${c.mortgageLeads}\n`;
+                    if (c.mbNotes) ctx += `MB Notes: ${c.mbNotes}\n`;
+                    if (c.currentTestings) ctx += `Current Tests: ${c.currentTestings}\n`;
+                    ctx += `Contract: ${c.contract || 'N/A'}, Length: ${c.contractLengthMonths || 'N/A'} months, Remaining: ${c.remainingContractMonths || 'N/A'} months\n`;
+                });
+
+                return ctx;
+            };
+
+            // Generate daily briefing
+            const generateBriefing = async () => {
+                setBriefingLoading(true);
+                setBriefingError(null);
+                setBriefing('');
+
+                const dataContext = buildDataContext();
+                const systemPrompt = `You are an expert Meta Ads media buying strategist for VAM (a real estate marketing company). You analyze ad account data and provide actionable daily briefings.
+
+Your analysis should be thorough, specific, and action-oriented. Format your response in clean markdown with:
+- A quick summary line at the top showing key metrics that need attention
+- Detailed analysis of accounts that need attention, grouped by urgency
+- Specific issues identified (high CPL, no leads, declining performance, etc.)
+- Root cause analysis where possible
+- Numbered "Immediate Actions" with specific, actionable steps
+- Use bold for client names and important terms
+- Use bullet points for detailed analysis
+- Flag urgent items with ACTION NEEDED markers
+
+Focus on accounts that are underperforming, have zero leads recently, have high CPL, or show concerning trends. Be specific about what needs to change.`;
+
+                try {
+                    const response = await fetch(ANALYZE_API, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            system: systemPrompt,
+                            messages: [{
+                                role: 'user',
+                                content: `Generate a comprehensive daily briefing for the media buying team based on this data. Review ALL ad accounts, identify issues, and suggest specific improvements.\n\n${dataContext}`
+                            }],
+                            max_tokens: 4000
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.error) {
+                        setBriefingError(data.error.message || data.error);
+                    } else if (data.content && data.content[0]) {
+                        setBriefing(data.content[0].text);
+                    }
+                } catch (err) {
+                    setBriefingError(err.message);
+                }
+                setBriefingLoading(false);
+            };
+
+            // Ask a question
+            const handleAskQuestion = async (e) => {
+                e.preventDefault();
+                if (!question.trim() || askLoading) return;
+
+                const userQ = question.trim();
+                setQuestion('');
+                setChatHistory(prev => [...prev, { role: 'user', content: userQ }]);
+                setAskLoading(true);
+
+                const dataContext = buildDataContext();
+                const systemPrompt = `You are an expert Meta Ads media buying analyst for VAM (a real estate marketing company). You answer questions about ad account performance, provide insights, and make recommendations.
+
+You have access to the following real-time data:
+
+${dataContext}
+
+Answer questions directly and specifically using the data above. Use markdown formatting. Be concise but thorough. Reference specific client names, numbers, and metrics when answering.`;
+
+                // Build conversation messages for context
+                const messages = [];
+                chatHistory.forEach(msg => {
+                    messages.push({ role: msg.role, content: msg.content });
+                });
+                messages.push({ role: 'user', content: userQ });
+
+                try {
+                    const response = await fetch(ANALYZE_API, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            system: systemPrompt,
+                            messages,
+                            max_tokens: 3000
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.error) {
+                        setChatHistory(prev => [...prev, { role: 'assistant', content: 'Error: ' + (data.error.message || data.error) }]);
+                    } else if (data.content && data.content[0]) {
+                        setChatHistory(prev => [...prev, { role: 'assistant', content: data.content[0].text }]);
+                    }
+                } catch (err) {
+                    setChatHistory(prev => [...prev, { role: 'assistant', content: 'Error: ' + err.message }]);
+                }
+                setAskLoading(false);
+            };
+
+            // Simple markdown renderer
+            const renderMarkdown = (text) => {
+                if (!text) return null;
+                const lines = text.split('\n');
+                const elements = [];
+                let inList = false;
+                let inNumberedList = false;
+                let listItems = [];
+                let numberedItems = [];
+
+                const flushList = () => {
+                    if (listItems.length > 0) {
+                        elements.push(React.createElement('ul', { key: 'ul-' + elements.length, className: 'space-y-1.5 my-3 ml-4' },
+                            listItems.map((item, i) => React.createElement('li', { key: i, className: 'text-secondary text-sm leading-relaxed flex gap-2' },
+                                React.createElement('span', { className: 'text-slate-500 mt-0.5 flex-shrink-0' }, '\u2022'),
+                                React.createElement('span', { dangerouslySetInnerHTML: { __html: formatInline(item) } })
+                            ))
+                        ));
+                        listItems = [];
+                    }
+                    inList = false;
+                };
+
+                const flushNumberedList = () => {
+                    if (numberedItems.length > 0) {
+                        elements.push(React.createElement('ol', { key: 'ol-' + elements.length, className: 'space-y-2 my-3 ml-4' },
+                            numberedItems.map((item, i) => React.createElement('li', { key: i, className: 'text-secondary text-sm leading-relaxed flex gap-2' },
+                                React.createElement('span', { className: 'text-brand-cyan font-bold flex-shrink-0' }, (i + 1) + '.'),
+                                React.createElement('span', { dangerouslySetInnerHTML: { __html: formatInline(item.text) } })
+                            ))
+                        ));
+                        numberedItems = [];
+                    }
+                    inNumberedList = false;
+                };
+
+                const formatInline = (text) => {
+                    return text
+                        .replace(/\*\*(.*?)\*\*/g, '<strong class="text-primary font-semibold">$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/`(.*?)`/g, '<code class="bg-dark-800 px-1.5 py-0.5 rounded text-brand-cyan text-xs">$1</code>')
+                        .replace(/ACTION NEEDED/g, '<span class="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded text-xs font-bold">ACTION NEEDED</span>')
+                        .replace(/🟡/g, '<span class="text-amber-400">&#x1F7E1;</span>')
+                        .replace(/🔴/g, '<span class="text-red-400">&#x1F534;</span>')
+                        .replace(/🟢/g, '<span class="text-emerald-400">&#x1F7E2;</span>')
+                        .replace(/⚠️/g, '<span class="text-amber-400">&#x26A0;&#xFE0F;</span>');
+                };
+
+                lines.forEach((line, idx) => {
+                    const trimmed = line.trim();
+
+                    // Empty line
+                    if (!trimmed) {
+                        flushList();
+                        flushNumberedList();
+                        return;
+                    }
+
+                    // H1
+                    if (trimmed.startsWith('# ')) {
+                        flushList(); flushNumberedList();
+                        elements.push(React.createElement('h2', { key: idx, className: 'text-xl font-bold text-primary mt-6 mb-3 pb-2 border-b divider' }, trimmed.slice(2)));
+                        return;
+                    }
+                    // H2
+                    if (trimmed.startsWith('## ')) {
+                        flushList(); flushNumberedList();
+                        elements.push(React.createElement('h3', { key: idx, className: 'text-lg font-bold text-primary mt-5 mb-2' }, trimmed.slice(3)));
+                        return;
+                    }
+                    // H3
+                    if (trimmed.startsWith('### ')) {
+                        flushList(); flushNumberedList();
+                        elements.push(React.createElement('h4', { key: idx, className: 'text-base font-semibold text-primary mt-4 mb-2' }, trimmed.slice(4)));
+                        return;
+                    }
+
+                    // Horizontal rule
+                    if (trimmed === '---' || trimmed === '***') {
+                        flushList(); flushNumberedList();
+                        elements.push(React.createElement('hr', { key: idx, className: 'border-dark-700 my-4' }));
+                        return;
+                    }
+
+                    // Numbered list
+                    const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+                    if (numMatch) {
+                        flushList();
+                        if (!inNumberedList) inNumberedList = true;
+                        numberedItems.push({ num: numMatch[1], text: numMatch[2] });
+                        return;
+                    } else if (inNumberedList) {
+                        flushNumberedList();
+                    }
+
+                    // Bullet list
+                    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                        flushNumberedList();
+                        if (!inList) inList = true;
+                        listItems.push(trimmed.slice(2));
+                        return;
+                    } else if (inList) {
+                        // Sub-bullet
+                        if (trimmed.startsWith('  - ') || trimmed.startsWith('  * ')) {
+                            listItems.push('&nbsp;&nbsp;' + trimmed.slice(4));
+                            return;
+                        }
+                        flushList();
+                    }
+
+                    // Regular paragraph
+                    elements.push(React.createElement('p', {
+                        key: idx,
+                        className: 'text-secondary text-sm leading-relaxed my-2',
+                        dangerouslySetInnerHTML: { __html: formatInline(trimmed) }
+                    }));
+                });
+
+                flushList();
+                flushNumberedList();
+                return elements;
+            };
+
+            if (metaLoading) return React.createElement('div', { className: 'text-center py-12 text-secondary' }, 'Loading data...');
+
+            return React.createElement('div', { className: 'space-y-6' },
+                // Tab switcher
+                React.createElement('div', { className: 'flex items-center gap-0 border-b divider' },
+                    React.createElement('button', {
+                        onClick: () => setActiveTab('briefing'),
+                        className: 'px-6 py-3 text-sm font-medium transition-colors relative ' +
+                            (activeTab === 'briefing' ? 'text-primary' : 'text-secondary hover:text-primary')
+                    },
+                        'Daily Briefing',
+                        activeTab === 'briefing' && React.createElement('div', { className: 'absolute bottom-0 left-0 right-0 h-0.5 bg-brand-cyan' })
+                    ),
+                    React.createElement('button', {
+                        onClick: () => setActiveTab('ask'),
+                        className: 'px-6 py-3 text-sm font-medium transition-colors relative ' +
+                            (activeTab === 'ask' ? 'text-primary' : 'text-secondary hover:text-primary')
+                    },
+                        'Ask a Question',
+                        activeTab === 'ask' && React.createElement('div', { className: 'absolute bottom-0 left-0 right-0 h-0.5 bg-brand-cyan' })
+                    )
+                ),
+
+                // Daily Briefing Tab
+                activeTab === 'briefing' && React.createElement('div', { className: 'space-y-4' },
+                    // Quick stats bar
+                    React.createElement('div', { className: 'card p-4' },
+                        React.createElement('div', { className: 'flex items-center gap-4 flex-wrap text-sm' },
+                            (() => {
+                                const enriched = clients.map(getClientMetrics);
+                                const atRisk = enriched.filter(c => getHealth(c.cpl) === 'red' && c.days > 7);
+                                const noRecent = enriched.filter(c => c.days >= 3 && c.last3DayLeads === 0);
+                                const metaLinked = Object.keys(metaData).length;
+                                const metaTotalLeads = Object.values(metaData).reduce((s, d) => s + (d.leads || 0), 0);
+                                const metaTotalSpend = Object.values(metaData).reduce((s, d) => s + parseFloat(d.spend || 0), 0);
+                                return React.createElement(React.Fragment, null,
+                                    React.createElement('span', { className: 'text-secondary' },
+                                        React.createElement('span', { className: 'font-semibold text-brand-cyan' }, metaLinked), ' linked accounts'
+                                    ),
+                                    React.createElement('span', { className: 'text-muted' }, '|'),
+                                    React.createElement('span', { className: 'text-secondary' },
+                                        'Meta 7d: ', React.createElement('span', { className: 'font-semibold text-brand-cyan' }, '$' + metaTotalSpend.toFixed(0)), ' spend, ',
+                                        React.createElement('span', { className: 'font-semibold text-brand-purple' }, metaTotalLeads), ' leads'
+                                    ),
+                                    React.createElement('span', { className: 'text-muted' }, '|'),
+                                    atRisk.length > 0 && React.createElement('span', { className: 'text-amber-400 font-medium flex items-center gap-1' },
+                                        '\u26A0\uFE0F ', atRisk.length, ' at-risk clients'
+                                    ),
+                                    noRecent.length > 0 && React.createElement('span', { className: 'text-red-400 font-medium flex items-center gap-1' },
+                                        '\u26A0\uFE0F ', noRecent.length, ' with 0 leads (3d)'
+                                    )
+                                );
+                            })()
+                        )
+                    ),
+
+                    // Generate button or briefing content
+                    !briefing && !briefingLoading && React.createElement('div', { className: 'card p-12 text-center' },
+                        React.createElement('div', { className: 'text-4xl mb-4' }, '\uD83E\uDDE0'),
+                        React.createElement('h3', { className: 'text-lg font-bold text-primary mb-2' }, 'AI Daily Briefing'),
+                        React.createElement('p', { className: 'text-secondary text-sm mb-6 max-w-md mx-auto' },
+                            'Generate an AI-powered analysis of all your ad accounts. Get performance insights, identify issues, and receive actionable improvement suggestions.'
+                        ),
+                        React.createElement('button', {
+                            onClick: generateBriefing,
+                            className: 'px-8 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl hover:opacity-90 transition-opacity'
+                        }, 'Generate Daily Briefing')
+                    ),
+
+                    briefingLoading && React.createElement('div', { className: 'card p-8' },
+                        React.createElement('div', { className: 'flex items-center gap-3 mb-6' },
+                            React.createElement('div', { className: 'w-6 h-6 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin' }),
+                            React.createElement('span', { className: 'text-primary font-medium' }, 'Analyzing all ad accounts...')
+                        ),
+                        React.createElement('div', { className: 'space-y-3' },
+                            ...[1,2,3,4,5].map(i =>
+                                React.createElement('div', { key: i, className: 'h-4 bg-dark-700 rounded animate-pulse', style: { width: (60 + Math.random() * 40) + '%' } })
+                            )
+                        )
+                    ),
+
+                    briefingError && React.createElement('div', { className: 'card p-6 border-l-4 border-red-500' },
+                        React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
+                            React.createElement('span', { className: 'text-red-400 font-semibold' }, 'Error generating briefing')
+                        ),
+                        React.createElement('p', { className: 'text-secondary text-sm' }, briefingError),
+                        React.createElement('button', {
+                            onClick: generateBriefing,
+                            className: 'mt-3 px-4 py-2 bg-red-500/10 text-red-400 rounded-lg text-sm hover:bg-red-500/20'
+                        }, 'Retry')
+                    ),
+
+                    briefing && React.createElement('div', null,
+                        React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+                            React.createElement('div', { className: 'flex items-center gap-2' },
+                                React.createElement('span', { className: 'text-emerald-400' }, '\u2713'),
+                                React.createElement('span', { className: 'text-sm text-secondary' }, 'Briefing generated')
+                            ),
+                            React.createElement('button', {
+                                onClick: generateBriefing,
+                                className: 'px-4 py-1.5 bg-brand-cyan/10 text-brand-cyan rounded-lg text-xs font-medium hover:bg-brand-cyan/20'
+                            }, 'Regenerate')
+                        ),
+                        React.createElement('div', { className: 'card p-6 prose-container' },
+                            renderMarkdown(briefing)
+                        )
+                    )
+                ),
+
+                // Ask a Question Tab
+                activeTab === 'ask' && React.createElement('div', { className: 'space-y-4' },
+                    // Input form
+                    React.createElement('form', { onSubmit: handleAskQuestion, className: 'card p-4' },
+                        React.createElement('div', { className: 'flex gap-3' },
+                            React.createElement('input', {
+                                type: 'text',
+                                value: question,
+                                onChange: (e) => setQuestion(e.target.value),
+                                placeholder: 'Ask about your ad accounts, performance, recommendations...',
+                                className: 'flex-1 input-field border rounded-xl px-4 py-3 text-sm',
+                                disabled: askLoading
+                            }),
+                            React.createElement('button', {
+                                type: 'submit',
+                                disabled: askLoading || !question.trim(),
+                                className: 'px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50'
+                            }, askLoading ? 'Thinking...' : 'Ask')
+                        ),
+                        React.createElement('div', { className: 'flex gap-2 mt-3 flex-wrap' },
+                            ...[
+                                'Which clients need immediate attention?',
+                                'What are the top performing accounts this week?',
+                                'How can we reduce CPL across accounts?',
+                                'Which accounts have declining performance?'
+                            ].map((suggestion, i) =>
+                                React.createElement('button', {
+                                    key: i,
+                                    type: 'button',
+                                    onClick: () => setQuestion(suggestion),
+                                    className: 'px-3 py-1.5 bg-dark-800 text-secondary text-xs rounded-lg hover-bg border border-transparent hover:border-dark-600'
+                                }, suggestion)
+                            )
+                        )
+                    ),
+
+                    // Chat history
+                    chatHistory.length === 0 && React.createElement('div', { className: 'card p-12 text-center' },
+                        React.createElement('div', { className: 'text-4xl mb-4' }, '\uD83D\uDCAC'),
+                        React.createElement('h3', { className: 'text-lg font-bold text-primary mb-2' }, 'Ask Anything About Your Ads'),
+                        React.createElement('p', { className: 'text-secondary text-sm max-w-md mx-auto' },
+                            'Get instant AI-powered answers about your ad account performance, client metrics, recommendations, and more. Your questions are answered using real-time data from all linked accounts.'
+                        )
+                    ),
+
+                    chatHistory.length > 0 && React.createElement('div', { className: 'space-y-4' },
+                        chatHistory.map((msg, i) =>
+                            React.createElement('div', { key: i, className: msg.role === 'user' ? 'flex justify-end' : '' },
+                                msg.role === 'user'
+                                    ? React.createElement('div', { className: 'card px-5 py-3 bg-brand-cyan/10 border-brand-cyan/20 max-w-[80%]' },
+                                        React.createElement('p', { className: 'text-sm text-primary' }, msg.content)
+                                    )
+                                    : React.createElement('div', { className: 'card p-5' },
+                                        React.createElement('div', { className: 'flex items-center gap-2 mb-3' },
+                                            React.createElement('span', { className: 'text-xs bg-brand-purple/20 text-brand-purple px-2 py-0.5 rounded-full font-medium' }, 'AI'),
+                                            React.createElement('span', { className: 'text-xs text-muted' }, 'Based on your data')
+                                        ),
+                                        React.createElement('div', null, renderMarkdown(msg.content))
+                                    )
+                            )
+                        ),
+                        askLoading && React.createElement('div', { className: 'card p-5' },
+                            React.createElement('div', { className: 'flex items-center gap-3' },
+                                React.createElement('div', { className: 'w-5 h-5 border-2 border-brand-purple border-t-transparent rounded-full animate-spin' }),
+                                React.createElement('span', { className: 'text-sm text-secondary' }, 'Analyzing your data...')
+                            )
+                        )
+                    ),
+
+                    // Clear chat button
+                    chatHistory.length > 0 && React.createElement('div', { className: 'text-center' },
+                        React.createElement('button', {
+                            onClick: () => setChatHistory([]),
+                            className: 'text-xs text-muted hover:text-secondary'
+                        }, 'Clear conversation')
+                    )
+                )
+            );
+        };
+
         // ========== MAIN APP ==========
         const App = () => {
             const [user, setUser] = useState(null);
@@ -1052,6 +1542,10 @@
                                         <span className="text-lg">🔗</span>
                                         <div><div className="text-sm font-medium">Account Mappings</div><div className="text-xs text-muted">Link clients to Meta ad accounts</div></div>
                                     </button>
+                                    <button onClick={() => setTab('ai-briefing')} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === 'ai-briefing' ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
+                                        <span className="text-lg">🧠</span>
+                                        <div><div className="text-sm font-medium">AI Briefing</div><div className="text-xs text-muted">Daily analysis & ask questions</div></div>
+                                    </button>
                                     <div className="px-4 pt-4 pb-2">
                                         <button onClick={() => supabase.auth.signOut()} className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm">Logout</button>
                                     </div>
@@ -1060,8 +1554,8 @@
                             <main className="flex-1 flex flex-col">
                                 <header className="header-bar backdrop-blur border-b px-8 py-4 flex items-center justify-between divider">
                                     <div>
-                                        <h2 className="text-xl font-bold text-primary">{tab === 'clients' ? 'Media Buyer Overview' : tab === 'meta-ads' ? '📈 Meta Ads Performance' : '🔗 Account Mappings'}</h2>
-                                        <p className="text-secondary text-sm">{tab === 'clients' ? 'All clients at a glance' : tab === 'meta-ads' ? 'Real-time ad performance from Meta Marketing API' : 'Link clients to their Meta ad accounts'}</p>
+                                        <h2 className="text-xl font-bold text-primary">{tab === 'clients' ? 'Media Buyer Overview' : tab === 'meta-ads' ? '📈 Meta Ads Performance' : tab === 'ai-briefing' ? '🧠 AI Briefing' : '🔗 Account Mappings'}</h2>
+                                        <p className="text-secondary text-sm">{tab === 'clients' ? 'All clients at a glance' : tab === 'meta-ads' ? 'Real-time ad performance from Meta Marketing API' : tab === 'ai-briefing' ? 'AI-powered daily analysis and Q&A for your ad accounts' : 'Link clients to their Meta ad accounts'}</p>
                                     </div>
                                     <button
                                         onClick={toggleTheme}
@@ -1074,6 +1568,7 @@
                                     {tab === 'clients' && <AllClientsView clients={clients} setupData={setupData} onClientClick={handleClientClick} />}
                                     {tab === 'meta-ads' && <MetaAdSettingsTab clients={clients} viewMode="performance" />}
                                     {tab === 'mappings' && <MetaAdSettingsTab clients={clients} viewMode="mappings" />}
+                                    {tab === 'ai-briefing' && <DailyBriefingView clients={clients} setupData={setupData} />}
                                 </div>
                             </main>
                         </div>
