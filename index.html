@@ -3328,6 +3328,19 @@ ${transcript}`;
             const [searchQuery, setSearchQuery] = useState('');
             const [filterClient, setFilterClient] = useState('');
 
+            // Sync state
+            const [syncing, setSyncing] = useState(false);
+            const [syncResult, setSyncResult] = useState(null);
+            const [syncLog, setSyncLog] = useState([]);
+            const [showSyncPanel, setShowSyncPanel] = useState(false);
+            const [syncLookback, setSyncLookback] = useState('30d');
+
+            // Domain mapping state
+            const [domainMappings, setDomainMappings] = useState([]);
+            const [showMappings, setShowMappings] = useState(false);
+            const [newDomain, setNewDomain] = useState('');
+            const [newClientName, setNewClientName] = useState('');
+
             // Month selector state — default to previous month
             const now = new Date();
             const defaultMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
@@ -3348,6 +3361,53 @@ ${transcript}`;
                 }
                 return opts;
             }, []);
+
+            // Load sync log + domain mappings on mount
+            useEffect(() => {
+                const loadSyncLog = async () => {
+                    const { data } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(30);
+                    if (data) setSyncLog(data);
+                };
+                const loadMappings = async () => {
+                    const { data } = await supabase.from('client_email_domains').select('*').order('client_name', { ascending: true });
+                    if (data) setDomainMappings(data);
+                };
+                loadSyncLog();
+                loadMappings();
+            }, []);
+
+            // Trigger Fathom sync
+            const runSync = async () => {
+                setSyncing(true);
+                setSyncResult(null);
+                const lookbackMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '3d': 259200000, '7d': 604800000, '30d': 2592000000, '90d': 7776000000 };
+                const createdAfter = new Date(Date.now() - (lookbackMs[syncLookback] || 2592000000)).toISOString();
+                try {
+                    const { data, error } = await supabase.functions.invoke('ingest-fathom', { body: { created_after: createdAfter } });
+                    if (error) { setSyncResult({ error: error.message }); }
+                    else { setSyncResult(data); }
+                    // Reload meetings + sync log
+                    const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
+                    if (mData) setMeetings(mData);
+                    const { data: logData } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(30);
+                    if (logData) setSyncLog(logData);
+                } catch (e) { setSyncResult({ error: e.message }); }
+                setSyncing(false);
+            };
+
+            // Add domain mapping
+            const addMapping = async () => {
+                if (!newDomain.trim() || !newClientName.trim()) return;
+                const { data, error } = await supabase.from('client_email_domains').insert({ domain: newDomain.trim().toLowerCase(), client_name: newClientName.trim() }).select().single();
+                if (data) { setDomainMappings([...domainMappings, data]); setNewDomain(''); setNewClientName(''); }
+                if (error) alert('Failed to add mapping: ' + error.message);
+            };
+
+            // Delete domain mapping
+            const removeMapping = async (id) => {
+                await supabase.from('client_email_domains').delete().eq('id', id);
+                setDomainMappings(domainMappings.filter(m => m.id !== id));
+            };
 
             // Fetch meetings for selected month
             useEffect(() => {
@@ -3588,8 +3648,105 @@ ${transcript}`;
                                 {monthOptions.map(o => <option key={o.label} value={`${o.year}-${o.month}`}>{o.label}</option>)}
                             </select>
                             <button onClick={() => { setLoading(true); supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false }).then(({ data }) => { setMeetings(data || []); setLoading(false); }); }} className="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm transition-colors">Refresh</button>
+                            <button onClick={() => setShowSyncPanel(!showSyncPanel)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${showSyncPanel ? 'bg-brand-cyan text-dark-900' : 'bg-brand-cyan/20 text-brand-cyan hover:bg-brand-cyan/30'}`}>Sync from Fathom</button>
+                            <button onClick={() => setShowMappings(!showMappings)} className={`px-3 py-2 rounded-lg text-sm transition-colors ${showMappings ? 'bg-brand-purple text-white' : 'bg-dark-800 hover:bg-dark-700 text-slate-300'}`}>Settings</button>
                         </div>
                     </div>
+
+                    {/* Sync Panel */}
+                    {showSyncPanel && (
+                        <div className="card p-6 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold text-white">Sync Meetings from Fathom</h3>
+                                <button onClick={() => setShowSyncPanel(false)} className="text-slate-500 hover:text-slate-300">✕</button>
+                            </div>
+                            <p className="text-slate-400 text-sm">Pull all meetings from your Fathom account. Meetings are matched to clients using your email domain mappings below. Already-synced meetings are skipped automatically.</p>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-slate-400 text-sm">Lookback period:</span>
+                                <div className="flex rounded-lg overflow-hidden border border-dark-700">
+                                    {[{ id: '1h', label: '1 Hour' }, { id: '24h', label: '24 Hours' }, { id: '7d', label: '7 Days' }, { id: '30d', label: '30 Days' }, { id: '90d', label: '90 Days' }].map(opt => (
+                                        <button key={opt.id} onClick={() => setSyncLookback(opt.id)} className={`px-3 py-1.5 text-xs font-medium transition-colors ${syncLookback === opt.id ? 'bg-brand-cyan/20 text-brand-cyan' : 'bg-dark-800 text-slate-400 hover:text-slate-300'}`}>{opt.label}</button>
+                                    ))}
+                                </div>
+                                <button onClick={runSync} disabled={syncing} className={`px-6 py-2 rounded-lg text-sm font-semibold transition-colors ${syncing ? 'bg-dark-700 text-slate-500 cursor-not-allowed' : 'bg-brand-cyan text-dark-900 hover:bg-brand-cyan/80'}`}>
+                                    {syncing ? 'Syncing...' : 'Sync Now'}
+                                </button>
+                            </div>
+
+                            {/* Sync Result */}
+                            {syncResult && (
+                                <div className={`p-4 rounded-lg ${syncResult.error ? 'bg-red-500/10 border border-red-500/20' : 'bg-emerald-500/10 border border-emerald-500/20'}`}>
+                                    {syncResult.error ? (
+                                        <div className="text-red-400 text-sm"><strong>Error:</strong> {syncResult.error}</div>
+                                    ) : (
+                                        <div>
+                                            <div className="text-emerald-400 text-sm font-medium">{syncResult.message}</div>
+                                            {syncResult.results && syncResult.results.length > 0 && (
+                                                <div className="mt-2 space-y-1 max-h-[200px] overflow-y-auto scrollbar">
+                                                    {syncResult.results.map((r, i) => (
+                                                        <div key={i} className="flex items-center gap-2 text-xs">
+                                                            <span className={`px-1.5 py-0.5 rounded ${r.status === 'processed' ? 'bg-emerald-500/20 text-emerald-400' : r.status === 'unmatched' ? 'bg-amber-500/20 text-amber-400' : r.status === 'skipped_duplicate' ? 'bg-slate-500/20 text-slate-400' : 'bg-red-500/20 text-red-400'}`}>{r.status}</span>
+                                                            <span className="text-slate-300 truncate">{r.title}</span>
+                                                            {r.client_name && <span className="text-brand-purple">→ {r.client_name}</span>}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Recent Sync Log */}
+                            {syncLog.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-slate-400 mb-2">Recent Sync History</h4>
+                                    <div className="space-y-1 max-h-[200px] overflow-y-auto scrollbar">
+                                        {syncLog.map(l => (
+                                            <div key={l.id} className="flex items-center gap-2 text-xs py-1">
+                                                <span className={`px-1.5 py-0.5 rounded ${l.status === 'processed' ? 'bg-emerald-500/20 text-emerald-400' : l.status === 'unmatched' ? 'bg-amber-500/20 text-amber-400' : l.status === 'pending' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>{l.status}</span>
+                                                <span className="text-slate-300 truncate flex-1">{l.fathom_title || l.fathom_recording_id}</span>
+                                                {l.client_name && <span className="text-brand-purple shrink-0">{l.client_name}</span>}
+                                                <span className="text-slate-600 shrink-0">{l.synced_at ? new Date(l.synced_at).toLocaleDateString() : ''}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Domain Mappings Panel */}
+                    {showMappings && (
+                        <div className="card p-6 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold text-white">Email Domain → Client Mappings</h3>
+                                <button onClick={() => setShowMappings(false)} className="text-slate-500 hover:text-slate-300">✕</button>
+                            </div>
+                            <p className="text-slate-400 text-sm">Map email domains (e.g. "acmecorp.com") or specific emails to client names. When Fathom syncs a meeting, it matches attendee emails against these mappings to assign the meeting to the correct client.</p>
+                            <div className="flex flex-wrap gap-2">
+                                <input value={newDomain} onChange={e => setNewDomain(e.target.value)} placeholder="Email or domain (e.g. acme.com)" className="flex-1 min-w-[180px] bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
+                                <input value={newClientName} onChange={e => setNewClientName(e.target.value)} placeholder="Client name" className="flex-1 min-w-[150px] bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
+                                <button onClick={addMapping} className="px-4 py-2 bg-brand-purple text-white rounded-lg text-sm font-medium hover:bg-brand-purple/80 transition-colors">Add Mapping</button>
+                            </div>
+                            {domainMappings.length === 0 ? (
+                                <p className="text-slate-500 text-sm text-center py-4">No mappings configured yet. Add email domains above to auto-match Fathom meetings to clients.</p>
+                            ) : (
+                                <div className="space-y-1">
+                                    {domainMappings.map(m => (
+                                        <div key={m.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-dark-800 rounded-lg">
+                                            <div className="flex items-center gap-3 text-sm">
+                                                <span className="text-brand-cyan font-mono">{m.domain}</span>
+                                                <span className="text-slate-600">→</span>
+                                                <span className="text-white">{m.client_name}</span>
+                                            </div>
+                                            <button onClick={() => removeMapping(m.id)} className="text-slate-500 hover:text-red-400 text-xs transition-colors">Remove</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* Stats */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
