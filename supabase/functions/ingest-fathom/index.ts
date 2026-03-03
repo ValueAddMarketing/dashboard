@@ -108,30 +108,18 @@ serve(async (req) => {
         )
       }
 
-      // Fetch recording details from Fathom API
-      const recResp = await fetch(
-        `https://api.fathom.ai/external/v1/recordings/${recording_id}`,
-        { headers: { 'X-Api-Key': FATHOM_API_KEY } }
-      )
+      // Get metadata from existing sync log entry (no single-recording GET endpoint exists)
+      const { data: syncEntry } = await supabase
+        .from('fathom_sync_log')
+        .select('*')
+        .eq('fathom_recording_id', recording_id)
+        .single()
 
-      if (!recResp.ok) {
-        const errText = await recResp.text()
-        return new Response(
-          JSON.stringify({ error: 'Failed to fetch recording from Fathom', details: errText }),
-          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      const recData = await recResp.json()
       const recording: FathomRecording = {
-        id: String(recData.recording_id || recData.id || recording_id),
-        title: (recData.meeting_title || recData.title) as string,
-        url: recData.url as string,
-        created_at: recData.created_at as string,
-        scheduled_at: (recData.scheduled_start_time || recData.scheduled_at) as string,
-        recording_start_at: (recData.recording_start_time || recData.recording_start_at) as string,
-        recording_end_at: (recData.recording_end_time || recData.recording_end_at) as string,
-        calendar_invitees: (recData.calendar_invitees || recData.invitees || []) as Array<{ email: string; name?: string }>,
+        id: recording_id,
+        title: syncEntry?.fathom_title || 'Unknown Meeting',
+        url: syncEntry?.fathom_url || '',
+        created_at: syncEntry?.synced_at || new Date().toISOString(),
       }
 
       // Process with forced client name (transcript fetch + AI analysis happen inside)
