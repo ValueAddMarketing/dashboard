@@ -165,9 +165,8 @@ serve(async (req) => {
     while (hasMore) {
       const fathomUrl = new URL('https://api.fathom.ai/external/v1/meetings')
       fathomUrl.searchParams.set('created_after', createdAfter)
-      fathomUrl.searchParams.set('limit', '100')
       if (cursor) {
-        fathomUrl.searchParams.set('starting_after', cursor)
+        fathomUrl.searchParams.set('cursor', cursor)
       }
 
       const fathomResponse = await fetch(fathomUrl.toString(), {
@@ -187,9 +186,9 @@ serve(async (req) => {
       const pageItems = Array.isArray(rawItems) ? rawItems : []
       allRawItems.push(...pageItems)
 
-      // Check for more pages via cursor-based pagination
-      hasMore = fathomData.has_more === true && !!fathomData.next_cursor
+      // Check for more pages — Fathom API uses next_cursor (no has_more field)
       cursor = fathomData.next_cursor || null
+      hasMore = !!cursor
 
       // Rate limit: 1s delay between pages to respect 60 calls/min
       if (hasMore) {
