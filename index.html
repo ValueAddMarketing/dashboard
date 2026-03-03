@@ -3441,13 +3441,32 @@ ${transcript}`;
                     const { data, error } = await supabase.functions.invoke('ingest-fathom', {
                         body: { assign_client: { recording_id: recordingId, client_name: clientName } }
                     });
-                    if (error) { alert('Assignment failed: ' + error.message); }
-                    else if (data?.error) { alert('Assignment failed: ' + data.error); }
-                    // Refresh sync log + meetings
+                    if (error) { alert('Assignment failed: ' + error.message); return setAssigningId(null); }
+                    else if (data?.error) { alert('Assignment failed: ' + data.error); return setAssigningId(null); }
+                    // Refresh sync log
                     const { data: logData } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(100);
                     if (logData) setSyncLog(logData);
-                    const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
-                    if (mData) setMeetings(mData);
+                    // Find the newly created meeting to determine its month
+                    const { data: newMeeting } = await supabase.from('meeting_notes').select('meeting_date').eq('external_id', recordingId).single();
+                    if (newMeeting?.meeting_date) {
+                        const md = new Date(newMeeting.meeting_date);
+                        const meetMonth = md.getMonth();
+                        const meetYear = md.getFullYear();
+                        // Switch month view if the meeting is in a different month
+                        if (meetMonth !== selMonth || meetYear !== selYear) {
+                            setSelMonth(meetMonth);
+                            setSelYear(meetYear);
+                            // useEffect will re-fetch meetings for the new month
+                        } else {
+                            // Same month — just refresh
+                            const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
+                            if (mData) setMeetings(mData);
+                        }
+                    } else {
+                        // Fallback: refresh current month
+                        const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
+                        if (mData) setMeetings(mData);
+                    }
                     // Update sync result entries in-place if present
                     if (syncResult?.results) {
                         setSyncResult(prev => ({

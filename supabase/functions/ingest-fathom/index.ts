@@ -115,11 +115,18 @@ serve(async (req) => {
         .eq('fathom_recording_id', recording_id)
         .single()
 
+      // Extract original meeting date from stored metadata
+      let origMeetingDate = syncEntry?.synced_at || new Date().toISOString()
+      try {
+        const errorMeta = JSON.parse(syncEntry?.error_message || '{}')
+        if (errorMeta.meeting_date) origMeetingDate = errorMeta.meeting_date
+      } catch { /* error_message may be plain text from older entries */ }
+
       const recording: FathomRecording = {
         id: recording_id,
         title: syncEntry?.fathom_title || 'Unknown Meeting',
         url: syncEntry?.fathom_url || '',
-        created_at: syncEntry?.synced_at || new Date().toISOString(),
+        created_at: origMeetingDate,
       }
 
       // Process with forced client name (transcript fetch + AI analysis happen inside)
@@ -205,22 +212,31 @@ serve(async (req) => {
       )
     }
 
-    // Filter out already-synced recordings
+    // Filter out already-processed recordings (but re-process unmatched ones)
     const recordingIds = recordings.map(r => r.id)
     const { data: existingSyncs } = await supabase
       .from('fathom_sync_log')
-      .select('fathom_recording_id')
+      .select('fathom_recording_id, status')
       .in('fathom_recording_id', recordingIds)
 
-    const alreadySynced = new Set((existingSyncs || []).map(s => s.fathom_recording_id))
-    const newRecordings = recordings.filter(r => !alreadySynced.has(r.id))
+    const syncStatusMap = new Map<string, string>()
+    for (const s of (existingSyncs || [])) {
+      syncStatusMap.set(s.fathom_recording_id, s.status)
+    }
+
+    // Skip processed/failed entries, but re-process unmatched ones (in case mappings were added)
+    const newRecordings = recordings.filter(r => {
+      const status = syncStatusMap.get(r.id)
+      return !status || status === 'unmatched'
+    })
 
     const skipped = recordings.length - newRecordings.length
     const results = await processRecordings(newRecordings, domainMap, supabase, ANTHROPIC_API_KEY, 'fathom', FATHOM_API_KEY)
 
-    // Add skip entries
+    // Add skip entries for processed/failed duplicates
     for (const r of recordings) {
-      if (alreadySynced.has(r.id)) {
+      const status = syncStatusMap.get(r.id)
+      if (status && status !== 'unmatched') {
         results.unshift({ recording_id: r.id, title: r.title, status: 'skipped_duplicate' })
       }
     }
@@ -279,12 +295,16 @@ async function processRecordings(
       const clientName = forceClientName || matchClient(recording, domainMap)
 
       if (!clientName) {
+        const origMeetingDate = recording.scheduled_at || recording.recording_start_at || recording.created_at
         await supabase.from('fathom_sync_log').upsert({
           fathom_recording_id: recording.id,
           status: 'unmatched',
           fathom_title: recording.title,
           fathom_url: recording.url,
-          error_message: 'Could not match to a client. Add email domain mapping in Fathom Settings.'
+          error_message: JSON.stringify({
+            reason: 'Could not match to a client. Add email domain mapping in Fathom Settings.',
+            meeting_date: origMeetingDate
+          })
         }, { onConflict: 'fathom_recording_id' })
         results.push({ recording_id: recording.id, title: recording.title, status: 'unmatched' })
         continue
