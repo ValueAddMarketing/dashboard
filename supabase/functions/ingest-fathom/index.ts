@@ -90,6 +90,62 @@ serve(async (req) => {
       )
     }
 
+    // ── Path C: Manual client assignment for unmatched meetings ──
+    if (body.assign_client) {
+      const { recording_id, client_name } = body.assign_client as { recording_id: string; client_name: string }
+
+      if (!recording_id || !client_name) {
+        return new Response(
+          JSON.stringify({ error: 'assign_client requires recording_id and client_name' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      if (!FATHOM_API_KEY) {
+        return new Response(
+          JSON.stringify({ error: 'FATHOM_API_KEY not configured' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Fetch recording details from Fathom API
+      const recResp = await fetch(
+        `https://api.fathom.ai/external/v1/recordings/${recording_id}`,
+        { headers: { 'X-Api-Key': FATHOM_API_KEY } }
+      )
+
+      if (!recResp.ok) {
+        const errText = await recResp.text()
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch recording from Fathom', details: errText }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const recData = await recResp.json()
+      const recording: FathomRecording = {
+        id: String(recData.recording_id || recData.id || recording_id),
+        title: (recData.meeting_title || recData.title) as string,
+        url: recData.url as string,
+        created_at: recData.created_at as string,
+        scheduled_at: (recData.scheduled_start_time || recData.scheduled_at) as string,
+        recording_start_at: (recData.recording_start_time || recData.recording_start_at) as string,
+        recording_end_at: (recData.recording_end_time || recData.recording_end_at) as string,
+        calendar_invitees: (recData.calendar_invitees || recData.invitees || []) as Array<{ email: string; name?: string }>,
+      }
+
+      // Process with forced client name (transcript fetch + AI analysis happen inside)
+      const results = await processRecordings(
+        [recording], domainMap, supabase, ANTHROPIC_API_KEY,
+        'fathom_manual_assign', FATHOM_API_KEY, client_name
+      )
+
+      return new Response(
+        JSON.stringify({ message: `Assigned recording to ${client_name}`, results }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // ── Path B: Poll Fathom API for recent meetings ────────────
     if (!FATHOM_API_KEY) {
       return new Response(
@@ -98,29 +154,51 @@ serve(async (req) => {
       )
     }
 
-    const defaultLookback = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const defaultLookback = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     const createdAfter = (body.created_after as string) || defaultLookback
 
-    const fathomUrl = new URL('https://api.fathom.ai/external/v1/meetings')
-    fathomUrl.searchParams.set('created_after', createdAfter)
+    // Fetch all meetings using cursor-based pagination
+    const allRawItems: Record<string, unknown>[] = []
+    let cursor: string | null = null
+    let hasMore = true
 
-    const fathomResponse = await fetch(fathomUrl.toString(), {
-      headers: { 'X-Api-Key': FATHOM_API_KEY }
-    })
+    while (hasMore) {
+      const fathomUrl = new URL('https://api.fathom.ai/external/v1/meetings')
+      fathomUrl.searchParams.set('created_after', createdAfter)
+      fathomUrl.searchParams.set('limit', '100')
+      if (cursor) {
+        fathomUrl.searchParams.set('starting_after', cursor)
+      }
 
-    if (!fathomResponse.ok) {
-      const errText = await fathomResponse.text()
-      return new Response(
-        JSON.stringify({ error: 'Fathom API error', details: errText, status: fathomResponse.status }),
-        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      const fathomResponse = await fetch(fathomUrl.toString(), {
+        headers: { 'X-Api-Key': FATHOM_API_KEY }
+      })
+
+      if (!fathomResponse.ok) {
+        const errText = await fathomResponse.text()
+        return new Response(
+          JSON.stringify({ error: 'Fathom API error', details: errText, status: fathomResponse.status }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const fathomData = await fathomResponse.json()
+      const rawItems = fathomData.items || fathomData.meetings || fathomData.recordings || fathomData.data || fathomData || []
+      const pageItems = Array.isArray(rawItems) ? rawItems : []
+      allRawItems.push(...pageItems)
+
+      // Check for more pages via cursor-based pagination
+      hasMore = fathomData.has_more === true && !!fathomData.next_cursor
+      cursor = fathomData.next_cursor || null
+
+      // Rate limit: 1s delay between pages to respect 60 calls/min
+      if (hasMore) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
     }
 
-    const fathomData = await fathomResponse.json()
-    const rawItems = fathomData.items || fathomData.meetings || fathomData.recordings || fathomData.data || fathomData || []
-
     // Map Fathom API fields to our expected format
-    const recordings: FathomRecording[] = (Array.isArray(rawItems) ? rawItems : []).map((item: Record<string, unknown>) => ({
+    const recordings: FathomRecording[] = allRawItems.map((item: Record<string, unknown>) => ({
       id: String(item.recording_id || item.id),
       title: (item.meeting_title || item.title) as string,
       url: item.url as string,
@@ -187,7 +265,8 @@ async function processRecordings(
   supabase: SupabaseClient,
   anthropicApiKey: string | undefined,
   source: string,
-  fathomApiKey?: string | null
+  fathomApiKey?: string | null,
+  forceClientName?: string | null
 ): Promise<ProcessingResult[]> {
   const results: ProcessingResult[] = []
 
@@ -210,7 +289,7 @@ async function processRecordings(
       }
 
       // ── Match to a client ────────────────────────────────────
-      const clientName = matchClient(recording, domainMap)
+      const clientName = forceClientName || matchClient(recording, domainMap)
 
       if (!clientName) {
         await supabase.from('fathom_sync_log').upsert({
