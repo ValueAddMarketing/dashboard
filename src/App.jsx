@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { useClients } from './hooks/useClients';
 import { Sidebar, Header, LoginPage, ErrorBoundary } from './components';
-import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage, ClientTimelinePage, MetaAdSettingsPage, FathomMeetingsPage } from './pages';
+import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage, ClientTimelinePage, MetaAdSettingsPage, FathomMeetingsPage, DealPipelinePage } from './pages';
 import { CLIENT_HUB_TABS } from './utils/constants';
 
 /**
@@ -32,7 +32,7 @@ const AppLayout = () => {
   const handleSelectClient = (client) => {
     setSelectedClient(client);
     // Navigate to health tab when selecting a client from overview or redflags
-    if (location.pathname.includes('redflags') || location.pathname.includes('overview')) {
+    if (location.pathname.includes('redflags') || location.pathname.includes('overview') || location.pathname.includes('pipeline')) {
       navigate('/client/health');
     }
   };
@@ -62,7 +62,7 @@ const AppLayout = () => {
 
   const setup = getSetupInfo(selectedClient);
   const currentTab = location.pathname.split('/').pop() || 'redflags';
-  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : currentTab === 'timeline' ? '📅 Renewals Timeline' : currentTab === 'meta-settings' ? '⚙️ Meta Ad Settings' : currentTab === 'fathom-meetings' ? '🎙️ Fathom Meetings' : undefined;
+  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : currentTab === 'timeline' ? '📅 Renewals Timeline' : currentTab === 'meta-settings' ? '⚙️ Meta Ad Settings' : currentTab === 'fathom-meetings' ? '🎙️ Fathom Meetings' : currentTab === 'pipeline' ? '🤝 Deal Pipeline' : undefined;
 
   return (
     <div className="flex min-h-screen">
@@ -140,6 +140,16 @@ const AppLayout = () => {
             <Route
               path="fathom-meetings"
               element={<FathomMeetingsPage />}
+            />
+            <Route
+              path="pipeline"
+              element={
+                <DealPipelinePage
+                  clients={clients}
+                  setupData={setupData}
+                  onSelectClient={handleSelectClient}
+                />
+              }
             />
             <Route path="*" element={<Navigate to="overview" replace />} />
           </Routes>

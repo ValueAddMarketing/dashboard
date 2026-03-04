@@ -5,3 +5,4 @@ export { OverviewPage } from './OverviewPage';
 export { ClientTimelinePage } from './ClientTimelinePage';
 export { MetaAdSettingsPage } from './MetaAdSettingsPage';
 export { FathomMeetingsPage } from './FathomMeetingsPage';
+export { DealPipelinePage } from './DealPipelinePage';

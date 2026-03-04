@@ -38,6 +38,7 @@ export const CLIENT_HUB_TABS = [
   { id: 'timeline', name: 'Renewals Timeline', icon: '📅', desc: 'Upcoming client contract renewals' },
   { id: 'meta-settings', name: 'Meta Ads', icon: '⚙️', desc: 'Configure Meta ad account mappings' },
   { id: 'fathom-meetings', name: 'Fathom Meetings', icon: '🎙️', desc: 'All meetings from the previous month' },
+  { id: 'pipeline', name: 'Deal Pipeline', icon: '🤝', desc: 'Deal closing progress for all clients' },
 ];
 
 // Severity colors for flags
