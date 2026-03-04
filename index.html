@@ -341,6 +341,7 @@
             { id: 'notes', name: 'Notes & Activity', icon: '📝', desc: 'Notes, meetings, and activity log' },
             { id: 'datagaps', name: 'Data Gaps', icon: '🔍', desc: 'Missing data across client records' },
             { id: 'fathom-meetings', name: 'Fathom Meetings', icon: '🎙️', desc: 'All meetings from the previous month' },
+            { id: 'pipeline', name: 'Deal Pipeline', icon: '🤝', desc: 'Deal closing progress for all clients' },
         ];
 
         // ========== LOGIN ==========
@@ -1771,181 +1772,6 @@ ${transcript}`;
                         )}
                     </div>
 
-                    {/* ===== MEETING TRANSCRIPT SECTION ===== */}
-                    <div className="card p-6">
-                        <h3 className="text-lg font-semibold text-white mb-4">🎙️ Meeting Transcript Summary</h3>
-                        <div className="flex flex-wrap gap-4 mb-4">
-                            <input type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white" />
-                            <input
-                                type="text"
-                                value={meetingTitle}
-                                onChange={e => setMeetingTitle(e.target.value)}
-                                placeholder="Meeting title (optional - AI will suggest)"
-                                className="flex-1 min-w-[200px] bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white"
-                            />
-                        </div>
-                        <textarea value={transcript} onChange={e => setTranscript(e.target.value)} placeholder="Paste transcript from Fathom, Otter, Zoom, etc..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[150px]" />
-                        <div className="flex flex-wrap gap-3 mt-3">
-                            <button onClick={processTranscript} disabled={!transcript.trim() || processing} className="px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50 flex items-center gap-2">
-                                {processing ? (<><span className="animate-spin">⚙️</span> Analyzing...</>) : '🤖 Analyze with AI'}
-                            </button>
-                            <button onClick={saveMeeting} disabled={!transcript.trim()} className="px-6 py-3 bg-emerald-500/20 text-emerald-400 rounded-xl disabled:opacity-50">💾 Save Meeting</button>
-                        </div>
-
-                        {/* Enhanced AI Analysis Display */}
-                        {summary && (
-                            <div className="mt-4 p-5 bg-dark-800 rounded-xl space-y-4">
-                                {/* Header with title and sentiment */}
-                                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-dark-700">
-                                    <div>
-                                        <h4 className="text-lg font-semibold text-white">{summary.title || 'Meeting Analysis'}</h4>
-                                        {summary.duration && <span className="text-slate-400 text-sm">Duration: {summary.duration}</span>}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        {summary.clientSentiment && (
-                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                                ['positive', 'excited'].includes(summary.clientSentiment) ? 'bg-emerald-500/20 text-emerald-400' :
-                                                ['negative', 'frustrated'].includes(summary.clientSentiment) ? 'bg-red-500/20 text-red-400' :
-                                                summary.clientSentiment === 'concerned' ? 'bg-amber-500/20 text-amber-400' :
-                                                'bg-slate-500/20 text-slate-400'
-                                            }`}>
-                                                {summary.clientSentiment === 'positive' ? '😊' : summary.clientSentiment === 'negative' ? '😟' : summary.clientSentiment === 'excited' ? '🎉' : summary.clientSentiment === 'frustrated' ? '😤' : summary.clientSentiment === 'concerned' ? '😟' : '😐'} {summary.clientSentiment}
-                                            </span>
-                                        )}
-                                        {summary.riskLevel && (
-                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${summary.riskLevel === 'high' ? 'bg-red-500/20 text-red-400' : summary.riskLevel === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                                                Risk: {summary.riskLevel}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Summary */}
-                                <div>
-                                    <span className="text-brand-cyan text-sm font-medium">Summary</span>
-                                    <p className="text-white mt-1">{summary.summary}</p>
-                                </div>
-
-                                {/* Participants & Topics Row */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {summary.participants?.length > 0 && (
-                                        <div>
-                                            <span className="text-brand-cyan text-sm font-medium">👥 Participants</span>
-                                            <div className="flex flex-wrap gap-2 mt-1">
-                                                {summary.participants.map((p, i) => (
-                                                    <span key={i} className="px-2 py-1 bg-dark-700 text-slate-300 text-sm rounded">{p}</span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {summary.topics?.length > 0 && (
-                                        <div>
-                                            <span className="text-brand-cyan text-sm font-medium">📋 Topics Discussed</span>
-                                            <div className="flex flex-wrap gap-2 mt-1">
-                                                {summary.topics.map((t, i) => (
-                                                    <span key={i} className="px-2 py-1 bg-brand-purple/20 text-brand-purple text-sm rounded">{t}</span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Key Points */}
-                                {summary.keyPoints?.length > 0 && (
-                                    <div>
-                                        <span className="text-brand-cyan text-sm font-medium">🔑 Key Points</span>
-                                        <ul className="mt-1 space-y-1">
-                                            {summary.keyPoints.map((kp, i) => <li key={i} className="text-slate-300 text-sm flex items-start gap-2"><span className="text-brand-cyan">•</span> {kp}</li>)}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Action Items */}
-                                {summary.actionItems?.length > 0 && (
-                                    <div>
-                                        <span className="text-brand-cyan text-sm font-medium">✅ Action Items</span>
-                                        <div className="mt-2 space-y-2">
-                                            {summary.actionItems.map((ai, i) => (
-                                                <div key={i} className={`p-3 rounded-lg ${ai.priority === 'high' ? 'bg-red-500/10 border border-red-500/30' : ai.priority === 'medium' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-dark-700'}`}>
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-white text-sm">{ai.task}</span>
-                                                        {ai.priority && <span className={`px-2 py-0.5 text-xs rounded ${ai.priority === 'high' ? 'bg-red-500/20 text-red-400' : ai.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>{ai.priority}</span>}
-                                                    </div>
-                                                    <div className="flex gap-4 mt-1 text-xs text-slate-400">
-                                                        <span>👤 {ai.owner}</span>
-                                                        {ai.dueDate && <span>📅 {ai.dueDate}</span>}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Decisions */}
-                                {summary.decisions?.length > 0 && (
-                                    <div>
-                                        <span className="text-brand-cyan text-sm font-medium">🎯 Decisions Made</span>
-                                        <ul className="mt-1 space-y-1">
-                                            {summary.decisions.map((d, i) => <li key={i} className="text-slate-300 text-sm flex items-start gap-2"><span className="text-emerald-400">✓</span> {d}</li>)}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Concerns & Warning Signals */}
-                                {(summary.concerns?.length > 0 || summary.warningSignals?.length > 0) && (
-                                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                                        <span className="text-red-400 text-sm font-medium">⚠️ Concerns & Warning Signals</span>
-                                        <ul className="mt-1 space-y-1">
-                                            {summary.concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-sm">• {c}</li>)}
-                                            {summary.warningSignals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-sm">• {w}</li>)}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Positive Signals */}
-                                {summary.positiveSignals?.length > 0 && (
-                                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                                        <span className="text-emerald-400 text-sm font-medium">✨ Positive Signals</span>
-                                        <ul className="mt-1 space-y-1">
-                                            {summary.positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-sm">• {p}</li>)}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Next Steps */}
-                                {summary.nextSteps?.length > 0 && (
-                                    <div>
-                                        <span className="text-brand-cyan text-sm font-medium">➡️ Next Steps</span>
-                                        <ul className="mt-1 space-y-1">
-                                            {summary.nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-sm">{i + 1}. {ns}</li>)}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Important Notes Alert */}
-                                {summary.importantNotes?.length > 0 && (
-                                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                                        <span className="text-amber-400 text-sm font-medium">📌 Important Notes (will be added to Notes History)</span>
-                                        <ul className="mt-1 space-y-1">
-                                            {summary.importantNotes.map((n, i) => <li key={i} className="text-amber-200 text-sm">• {n}</li>)}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Follow-up indicator */}
-                                {summary.followUpNeeded && (
-                                    <div className="flex items-center gap-2 p-2 bg-brand-purple/20 rounded-lg">
-                                        <span className="text-brand-purple">📞</span>
-                                        <span className="text-brand-purple text-sm font-medium">Follow-up Required</span>
-                                        {summary.followUpItems?.length > 0 && (
-                                            <span className="text-slate-400 text-sm">({summary.followUpItems.join(', ')})</span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
                     {/* ===== MEETING HISTORY ===== */}
                     <div className="card p-6">
                         <h3 className="text-lg font-semibold text-white mb-4">📅 Meeting History</h3>
@@ -2163,6 +1989,181 @@ ${transcript}`;
                                     </div>
                                     );
                                 })}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ===== MEETING TRANSCRIPT SECTION ===== */}
+                    <div className="card p-6">
+                        <h3 className="text-lg font-semibold text-white mb-4">🎙️ Meeting Transcript Summary</h3>
+                        <div className="flex flex-wrap gap-4 mb-4">
+                            <input type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white" />
+                            <input
+                                type="text"
+                                value={meetingTitle}
+                                onChange={e => setMeetingTitle(e.target.value)}
+                                placeholder="Meeting title (optional - AI will suggest)"
+                                className="flex-1 min-w-[200px] bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-white"
+                            />
+                        </div>
+                        <textarea value={transcript} onChange={e => setTranscript(e.target.value)} placeholder="Paste transcript from Fathom, Otter, Zoom, etc..." className="w-full bg-dark-800 border border-dark-700 rounded-xl p-4 text-white min-h-[150px]" />
+                        <div className="flex flex-wrap gap-3 mt-3">
+                            <button onClick={processTranscript} disabled={!transcript.trim() || processing} className="px-6 py-3 bg-gradient-to-r from-brand-cyan to-brand-purple text-white font-semibold rounded-xl disabled:opacity-50 flex items-center gap-2">
+                                {processing ? (<><span className="animate-spin">⚙️</span> Analyzing...</>) : '🤖 Analyze with AI'}
+                            </button>
+                            <button onClick={saveMeeting} disabled={!transcript.trim()} className="px-6 py-3 bg-emerald-500/20 text-emerald-400 rounded-xl disabled:opacity-50">💾 Save Meeting</button>
+                        </div>
+
+                        {/* Enhanced AI Analysis Display */}
+                        {summary && (
+                            <div className="mt-4 p-5 bg-dark-800 rounded-xl space-y-4">
+                                {/* Header with title and sentiment */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-dark-700">
+                                    <div>
+                                        <h4 className="text-lg font-semibold text-white">{summary.title || 'Meeting Analysis'}</h4>
+                                        {summary.duration && <span className="text-slate-400 text-sm">Duration: {summary.duration}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {summary.clientSentiment && (
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                                ['positive', 'excited'].includes(summary.clientSentiment) ? 'bg-emerald-500/20 text-emerald-400' :
+                                                ['negative', 'frustrated'].includes(summary.clientSentiment) ? 'bg-red-500/20 text-red-400' :
+                                                summary.clientSentiment === 'concerned' ? 'bg-amber-500/20 text-amber-400' :
+                                                'bg-slate-500/20 text-slate-400'
+                                            }`}>
+                                                {summary.clientSentiment === 'positive' ? '😊' : summary.clientSentiment === 'negative' ? '😟' : summary.clientSentiment === 'excited' ? '🎉' : summary.clientSentiment === 'frustrated' ? '😤' : summary.clientSentiment === 'concerned' ? '😟' : '😐'} {summary.clientSentiment}
+                                            </span>
+                                        )}
+                                        {summary.riskLevel && (
+                                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${summary.riskLevel === 'high' ? 'bg-red-500/20 text-red-400' : summary.riskLevel === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                                                Risk: {summary.riskLevel}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Summary */}
+                                <div>
+                                    <span className="text-brand-cyan text-sm font-medium">Summary</span>
+                                    <p className="text-white mt-1">{summary.summary}</p>
+                                </div>
+
+                                {/* Participants & Topics Row */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {summary.participants?.length > 0 && (
+                                        <div>
+                                            <span className="text-brand-cyan text-sm font-medium">👥 Participants</span>
+                                            <div className="flex flex-wrap gap-2 mt-1">
+                                                {summary.participants.map((p, i) => (
+                                                    <span key={i} className="px-2 py-1 bg-dark-700 text-slate-300 text-sm rounded">{p}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {summary.topics?.length > 0 && (
+                                        <div>
+                                            <span className="text-brand-cyan text-sm font-medium">📋 Topics Discussed</span>
+                                            <div className="flex flex-wrap gap-2 mt-1">
+                                                {summary.topics.map((t, i) => (
+                                                    <span key={i} className="px-2 py-1 bg-brand-purple/20 text-brand-purple text-sm rounded">{t}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Key Points */}
+                                {summary.keyPoints?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">🔑 Key Points</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.keyPoints.map((kp, i) => <li key={i} className="text-slate-300 text-sm flex items-start gap-2"><span className="text-brand-cyan">•</span> {kp}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Action Items */}
+                                {summary.actionItems?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">✅ Action Items</span>
+                                        <div className="mt-2 space-y-2">
+                                            {summary.actionItems.map((ai, i) => (
+                                                <div key={i} className={`p-3 rounded-lg ${ai.priority === 'high' ? 'bg-red-500/10 border border-red-500/30' : ai.priority === 'medium' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-dark-700'}`}>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-white text-sm">{ai.task}</span>
+                                                        {ai.priority && <span className={`px-2 py-0.5 text-xs rounded ${ai.priority === 'high' ? 'bg-red-500/20 text-red-400' : ai.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>{ai.priority}</span>}
+                                                    </div>
+                                                    <div className="flex gap-4 mt-1 text-xs text-slate-400">
+                                                        <span>👤 {ai.owner}</span>
+                                                        {ai.dueDate && <span>📅 {ai.dueDate}</span>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Decisions */}
+                                {summary.decisions?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">🎯 Decisions Made</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.decisions.map((d, i) => <li key={i} className="text-slate-300 text-sm flex items-start gap-2"><span className="text-emerald-400">✓</span> {d}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Concerns & Warning Signals */}
+                                {(summary.concerns?.length > 0 || summary.warningSignals?.length > 0) && (
+                                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                                        <span className="text-red-400 text-sm font-medium">⚠️ Concerns & Warning Signals</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.concerns?.map((c, i) => <li key={`c-${i}`} className="text-red-300 text-sm">• {c}</li>)}
+                                            {summary.warningSignals?.map((w, i) => <li key={`w-${i}`} className="text-amber-300 text-sm">• {w}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Positive Signals */}
+                                {summary.positiveSignals?.length > 0 && (
+                                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                                        <span className="text-emerald-400 text-sm font-medium">✨ Positive Signals</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.positiveSignals.map((p, i) => <li key={i} className="text-emerald-300 text-sm">• {p}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Next Steps */}
+                                {summary.nextSteps?.length > 0 && (
+                                    <div>
+                                        <span className="text-brand-cyan text-sm font-medium">➡️ Next Steps</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.nextSteps.map((ns, i) => <li key={i} className="text-slate-300 text-sm">{i + 1}. {ns}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Important Notes Alert */}
+                                {summary.importantNotes?.length > 0 && (
+                                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                                        <span className="text-amber-400 text-sm font-medium">📌 Important Notes (will be added to Notes History)</span>
+                                        <ul className="mt-1 space-y-1">
+                                            {summary.importantNotes.map((n, i) => <li key={i} className="text-amber-200 text-sm">• {n}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Follow-up indicator */}
+                                {summary.followUpNeeded && (
+                                    <div className="flex items-center gap-2 p-2 bg-brand-purple/20 rounded-lg">
+                                        <span className="text-brand-purple">📞</span>
+                                        <span className="text-brand-purple text-sm font-medium">Follow-up Required</span>
+                                        {summary.followUpItems?.length > 0 && (
+                                            <span className="text-slate-400 text-sm">({summary.followUpItems.join(', ')})</span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -3322,7 +3323,7 @@ ${transcript}`;
         };
 
         // ========== FATHOM MEETINGS DASHBOARD TAB ==========
-        const FathomMeetingsTab = ({ clients: clientsProp }) => {
+        const FathomMeetingsTab = ({ clients: clientsProp, user }) => {
             const [meetings, setMeetings] = useState([]);
             const [loading, setLoading] = useState(true);
             const [expandedId, setExpandedId] = useState(null);
@@ -3350,14 +3351,24 @@ ${transcript}`;
             const [customClientInput, setCustomClientInput] = useState({});
             const [dbClientNames, setDbClientNames] = useState([]);
 
-            // Fetch client names from database on mount
+            // Team member filter state
+            const [teamMembers, setTeamMembers] = useState([]);
+            const [selectedTeamMember, setSelectedTeamMember] = useState('');
+
+            // Fetch client names and team members from database on mount
             useEffect(() => {
                 const loadDbClients = async () => {
                     const { data } = await supabase.from('meeting_notes').select('client_name').not('client_name', 'is', null);
                     const names = [...new Set((data || []).map(d => d.client_name).filter(Boolean))];
                     setDbClientNames(names);
                 };
+                const loadTeamMembers = async () => {
+                    const { data } = await supabase.from('meeting_notes').select('user_email').not('user_email', 'is', null);
+                    const emails = [...new Set((data || []).map(d => d.user_email).filter(Boolean))];
+                    setTeamMembers(emails.map(email => ({ email, name: getDisplayName(email) })));
+                };
                 loadDbClients();
+                loadTeamMembers();
             }, []);
 
             const allClientNames = useMemo(() => {
@@ -3400,6 +3411,14 @@ ${transcript}`;
                 loadMappings();
             }, []);
 
+            // Helper: refresh meetings for current month (respects team member filter)
+            const refreshMeetings = async () => {
+                let query = supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate);
+                if (selectedTeamMember) query = query.eq('user_email', selectedTeamMember);
+                const { data: mData } = await query.order('meeting_date', { ascending: false });
+                if (mData) setMeetings(mData);
+            };
+
             // Trigger Fathom sync
             const runSync = async () => {
                 setSyncing(true);
@@ -3407,14 +3426,36 @@ ${transcript}`;
                 const lookbackMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '3d': 259200000, '7d': 604800000, '30d': 2592000000, '90d': 7776000000 };
                 const createdAfter = new Date(Date.now() - (lookbackMs[syncLookback] || 2592000000)).toISOString();
                 try {
-                    const { data, error } = await supabase.functions.invoke('ingest-fathom', { body: { created_after: createdAfter } });
+                    const { data, error } = await supabase.functions.invoke('ingest-fathom', { body: { created_after: createdAfter, user_email: user?.email, user_id: user?.id } });
                     if (error) { setSyncResult({ error: error.message }); }
                     else { setSyncResult(data); }
-                    // Reload meetings + sync log
-                    const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
-                    if (mData) setMeetings(mData);
+                    // Reload sync log
                     const { data: logData } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(100);
                     if (logData) setSyncLog(logData);
+                    // Switch to month of most recent processed meeting so it's visible in timeline
+                    const processed = (data?.results || []).filter(r => r.status === 'processed');
+                    if (processed.length > 0) {
+                        const { data: newest } = await supabase.from('meeting_notes').select('meeting_date').in('external_id', processed.map(r => r.recording_id)).order('meeting_date', { ascending: false }).limit(1);
+                        if (newest?.[0]?.meeting_date) {
+                            const md = new Date(newest[0].meeting_date);
+                            const newMonth = md.getMonth();
+                            const newYear = md.getFullYear();
+                            if (newMonth !== selMonth || newYear !== selYear) {
+                                // Different month — switch and useEffect will reload
+                                setSelMonth(newMonth);
+                                setSelYear(newYear);
+                            } else {
+                                // Same month — refresh current month to pick up new meetings
+                                await refreshMeetings();
+                            }
+                        } else {
+                            await refreshMeetings();
+                        }
+                    } else {
+                        // No processed meetings — refresh current month
+                        const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
+                        if (mData) setMeetings(mData);
+                    }
                 } catch (e) { setSyncResult({ error: e.message }); }
                 setSyncing(false);
             };
@@ -3433,66 +3474,117 @@ ${transcript}`;
                 setDomainMappings(domainMappings.filter(m => m.id !== id));
             };
 
-            // Assign client to unmatched recording
+            // Helper: parse participants from sync log error_message metadata
+            const getLogParticipants = (entry) => {
+                try { const meta = JSON.parse(entry?.error_message || '{}'); return (meta.participants || []).map(p => p.toLowerCase()); } catch { return []; }
+            };
+
+            // Assign client to unmatched recording (+ auto-assign similar meetings)
             const assignClient = async (recordingId, clientName) => {
                 if (!recordingId || !clientName) return;
                 setAssigningId(recordingId);
                 try {
                     const { data, error } = await supabase.functions.invoke('ingest-fathom', {
-                        body: { assign_client: { recording_id: recordingId, client_name: clientName } }
+                        body: { assign_client: { recording_id: recordingId, client_name: clientName }, user_email: user?.email, user_id: user?.id }
                     });
                     if (error) { alert('Assignment failed: ' + error.message); return setAssigningId(null); }
                     else if (data?.error) { alert('Assignment failed: ' + data.error); return setAssigningId(null); }
-                    // Refresh sync log
+
+                    // --- Auto-assign other unmatched meetings with same participants ---
+                    const assignedEntry = syncLog.find(l => l.fathom_recording_id === recordingId);
+                    const assignedParticipants = getLogParticipants(assignedEntry);
+                    // Remove the user's own email so we only match on external participants
+                    const userEmailLower = (user?.email || '').toLowerCase();
+                    const externalParticipants = assignedParticipants.filter(p => p !== userEmailLower);
+
+                    const autoAssignIds = [];
+                    if (externalParticipants.length > 0) {
+                        for (const entry of syncLog) {
+                            if (entry.fathom_recording_id === recordingId) continue;
+                            if (entry.status !== 'unmatched') continue;
+                            const entryParticipants = getLogParticipants(entry).filter(p => p !== userEmailLower);
+                            const hasOverlap = entryParticipants.some(p => externalParticipants.includes(p));
+                            if (hasOverlap) autoAssignIds.push(entry.fathom_recording_id);
+                        }
+                    }
+
+                    // Process auto-assignments in parallel
+                    if (autoAssignIds.length > 0) {
+                        await Promise.all(autoAssignIds.map(rid =>
+                            supabase.functions.invoke('ingest-fathom', {
+                                body: { assign_client: { recording_id: rid, client_name: clientName }, user_email: user?.email, user_id: user?.id }
+                            })
+                        ));
+                    }
+
+                    // Refresh sync log (picks up both manual + auto assignments)
                     const { data: logData } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(100);
                     if (logData) setSyncLog(logData);
-                    // Find the newly created meeting to determine its month
-                    const { data: newMeeting } = await supabase.from('meeting_notes').select('meeting_date').eq('external_id', recordingId).single();
-                    if (newMeeting?.meeting_date) {
-                        const md = new Date(newMeeting.meeting_date);
+
+                    // Find the newly created meeting — try multiple strategies
+                    let meetingDate = null;
+                    const updatedEntry = logData?.find(l => l.fathom_recording_id === recordingId);
+                    if (updatedEntry?.meeting_note_id) {
+                        const { data: m } = await supabase.from('meeting_notes').select('meeting_date').eq('id', updatedEntry.meeting_note_id).maybeSingle();
+                        if (m?.meeting_date) meetingDate = m.meeting_date;
+                    }
+                    if (!meetingDate) {
+                        const { data: matches } = await supabase.from('meeting_notes').select('meeting_date').eq('external_id', recordingId).order('created_at', { ascending: false }).limit(1);
+                        if (matches?.[0]?.meeting_date) meetingDate = matches[0].meeting_date;
+                    }
+                    if (!meetingDate) {
+                        const { data: recent } = await supabase.from('meeting_notes').select('meeting_date').eq('client_name', clientName).order('created_at', { ascending: false }).limit(1);
+                        if (recent?.[0]?.meeting_date) meetingDate = recent[0].meeting_date;
+                    }
+                    if (meetingDate) {
+                        const md = new Date(meetingDate);
                         const meetMonth = md.getMonth();
                         const meetYear = md.getFullYear();
-                        // Switch month view if the meeting is in a different month
                         if (meetMonth !== selMonth || meetYear !== selYear) {
                             setSelMonth(meetMonth);
                             setSelYear(meetYear);
-                            // useEffect will re-fetch meetings for the new month
                         } else {
-                            // Same month — just refresh
-                            const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
-                            if (mData) setMeetings(mData);
+                            await refreshMeetings();
                         }
                     } else {
-                        // Fallback: refresh current month
                         const { data: mData } = await supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false });
                         if (mData) setMeetings(mData);
                     }
                     // Update sync result entries in-place if present
+                    const allAssignedIds = [recordingId, ...autoAssignIds];
                     if (syncResult?.results) {
                         setSyncResult(prev => ({
                             ...prev,
-                            results: prev.results.map(r => r.recording_id === recordingId ? { ...r, status: 'processed', client_name: clientName } : r)
+                            results: prev.results.map(r => allAssignedIds.includes(r.recording_id) ? { ...r, status: 'processed', client_name: clientName } : r)
                         }));
+                    }
+                    // Notify user of auto-assignments
+                    if (autoAssignIds.length > 0) {
+                        const autoNames = autoAssignIds.map(rid => { const e = syncLog.find(l => l.fathom_recording_id === rid); return e?.fathom_title || rid; });
+                        alert(`Auto-assigned ${autoAssignIds.length} other meeting${autoAssignIds.length > 1 ? 's' : ''} with the same participants to ${clientName}:\n\n${autoNames.join('\n')}`);
                     }
                 } catch (e) { alert('Assignment failed: ' + e.message); }
                 setAssigningId(null);
             };
 
-            // Fetch meetings for selected month
+            // Fetch meetings for selected month (filtered by team member if selected)
             useEffect(() => {
                 const load = async () => {
                     setLoading(true);
-                    const { data } = await supabase
+                    let query = supabase
                         .from('meeting_notes')
                         .select('*')
                         .gte('meeting_date', startDate)
-                        .lte('meeting_date', endDate)
-                        .order('meeting_date', { ascending: false });
+                        .lte('meeting_date', endDate);
+                    if (selectedTeamMember) {
+                        query = query.eq('user_email', selectedTeamMember);
+                    }
+                    const { data } = await query.order('meeting_date', { ascending: false });
                     setMeetings(data || []);
                     setLoading(false);
                 };
                 load();
-            }, [startDate, endDate]);
+            }, [startDate, endDate, selectedTeamMember]);
 
             // Helpers
             const getExtra = (m) => {
@@ -3578,6 +3670,7 @@ ${transcript}`;
                                 </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500">
+                                {!selectedTeamMember && m.user_email && <span className="text-slate-400">{getDisplayName(m.user_email)}</span>}
                                 {source !== 'manual' && <span className="px-1.5 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan text-[10px] font-medium">Fathom</span>}
                                 {duration && <span>&#9201; {safe(duration)}</span>}
                                 {participants.length > 0 && <span>&#128101; {participants.length} participants</span>}
@@ -3716,7 +3809,7 @@ ${transcript}`;
                             <select value={`${selYear}-${selMonth}`} onChange={e => { const [y,m] = e.target.value.split('-').map(Number); setSelYear(y); setSelMonth(m); }} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-slate-300">
                                 {monthOptions.map(o => <option key={o.label} value={`${o.year}-${o.month}`}>{o.label}</option>)}
                             </select>
-                            <button onClick={() => { setLoading(true); supabase.from('meeting_notes').select('*').gte('meeting_date', startDate).lte('meeting_date', endDate).order('meeting_date', { ascending: false }).then(({ data }) => { setMeetings(data || []); setLoading(false); }); }} className="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm transition-colors">Refresh</button>
+                            <button onClick={async () => { setLoading(true); await refreshMeetings(); setLoading(false); }} className="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 rounded-lg text-sm transition-colors">Refresh</button>
                             <button onClick={() => setShowSyncPanel(!showSyncPanel)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${showSyncPanel ? 'bg-brand-cyan text-dark-900' : 'bg-brand-cyan/20 text-brand-cyan hover:bg-brand-cyan/30'}`}>Sync from Fathom</button>
                             <button onClick={() => setShowMappings(!showMappings)} className={`px-3 py-2 rounded-lg text-sm transition-colors ${showMappings ? 'bg-brand-purple text-white' : 'bg-dark-800 hover:bg-dark-700 text-slate-300'}`}>Settings</button>
                         </div>
@@ -3755,7 +3848,8 @@ ${transcript}`;
                                                     {syncResult.results.map((r, i) => (
                                                         <div key={i} className="flex items-center gap-2 text-xs">
                                                             <span className={`px-1.5 py-0.5 rounded shrink-0 ${r.status === 'processed' ? 'bg-emerald-500/20 text-emerald-400' : r.status === 'unmatched' ? 'bg-amber-500/20 text-amber-400' : r.status === 'skipped_duplicate' ? 'bg-slate-500/20 text-slate-400' : 'bg-red-500/20 text-red-400'}`}>{r.status}</span>
-                                                            <span className="text-slate-300 truncate">{r.title}</span>
+                                                            <span className="text-slate-300 truncate shrink-0" style={{maxWidth: '200px'}}>{r.title}</span>
+                                                            {r.participants && r.participants.length > 0 && <span className="text-brand-cyan truncate" style={{maxWidth: '300px'}}>{r.participants.join(', ')}</span>}
                                                             {r.client_name && <span className="text-brand-purple shrink-0">→ {r.client_name}</span>}
                                                             {r.status === 'unmatched' && (
                                                                 <div className="flex items-center gap-1 shrink-0 ml-auto">
@@ -3786,10 +3880,14 @@ ${transcript}`;
                                 <div>
                                     <h4 className="text-sm font-medium text-slate-400 mb-2">Recent Sync History</h4>
                                     <div className="space-y-1 max-h-[200px] overflow-y-auto scrollbar">
-                                        {syncLog.map(l => (
+                                        {syncLog.filter(l => !selectedTeamMember || l.user_email === selectedTeamMember).map(l => {
+                                            let logParticipants = [];
+                                            try { const meta = JSON.parse(l.error_message || '{}'); logParticipants = meta.participants || []; } catch {}
+                                            return (
                                             <div key={l.id} className="flex items-center gap-2 text-xs py-1">
                                                 <span className={`px-1.5 py-0.5 rounded shrink-0 ${l.status === 'processed' ? 'bg-emerald-500/20 text-emerald-400' : l.status === 'unmatched' ? 'bg-amber-500/20 text-amber-400' : l.status === 'pending' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>{l.status}</span>
-                                                <span className="text-slate-300 truncate flex-1">{l.fathom_title || l.fathom_recording_id}</span>
+                                                <span className="text-slate-300 truncate shrink-0" style={{maxWidth: '200px'}}>{l.fathom_title || l.fathom_recording_id}</span>
+                                                {logParticipants.length > 0 && <span className="text-brand-cyan truncate" style={{maxWidth: '300px'}}>{logParticipants.join(', ')}</span>}
                                                 {l.client_name && <span className="text-brand-purple shrink-0">{l.client_name}</span>}
                                                 {l.status === 'unmatched' && (
                                                     <div className="flex items-center gap-1 shrink-0">
@@ -3808,7 +3906,8 @@ ${transcript}`;
                                                 )}
                                                 <span className="text-slate-600 shrink-0">{l.synced_at ? new Date(l.synced_at).toLocaleDateString() : ''}</span>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -3870,6 +3969,13 @@ ${transcript}`;
                             <option value="">All Clients</option>
                             {clientNames.map(n => <option key={n} value={n}>{n}</option>)}
                         </select>
+                        {teamMembers.length > 1 && (
+                            <select value={selectedTeamMember} onChange={e => setSelectedTeamMember(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-slate-300">
+                                <option value="">All Team</option>
+                                {user?.email && <option value={user.email}>My Meetings</option>}
+                                {teamMembers.filter(tm => tm.email !== user?.email).map(tm => <option key={tm.email} value={tm.email}>{tm.name}</option>)}
+                            </select>
+                        )}
                     </div>
 
                     {/* Timeline View */}
@@ -3921,6 +4027,179 @@ ${transcript}`;
                             )}
                         </div>
                     )}
+                </div>
+            );
+        };
+
+        // ========== DEAL PIPELINE TAB ==========
+        const FUNNEL_STAGES = [
+            { key: 'leads', label: 'Leads', color: 'bg-blue-500' },
+            { key: 'appts', label: 'Appts', color: 'bg-cyan-500' },
+            { key: 'deals', label: 'Deals', color: 'bg-purple-500' },
+            { key: 'listings', label: 'Listings', color: 'bg-amber-500' },
+            { key: 'buyerSigned', label: 'Buyer Signed', color: 'bg-orange-500' },
+            { key: 'closings', label: 'Closings', color: 'bg-emerald-500' },
+        ];
+
+        const FunnelDots = ({ row }) => (
+            <div className="flex items-center gap-1">
+                {FUNNEL_STAGES.map(stage => {
+                    const val = row[stage.key] || 0;
+                    return <span key={stage.key} title={`${stage.label}: ${val}`} className={`w-2.5 h-2.5 rounded-full ${val > 0 ? stage.color : 'bg-dark-600'}`} />;
+                })}
+            </div>
+        );
+
+        const SortHeader = ({ label, sortKey, sortConfig, onSort, align = 'right' }) => {
+            const active = sortConfig.key === sortKey;
+            return (
+                <th className={`px-4 py-3 text-xs font-semibold text-slate-400 uppercase cursor-pointer hover:text-white select-none ${align === 'left' ? 'text-left' : 'text-right'}`} onClick={() => onSort(sortKey)}>
+                    <span className="inline-flex items-center gap-1">{label}{active && <span className="text-brand-cyan">{sortConfig.dir === 'asc' ? '▲' : '▼'}</span>}</span>
+                </th>
+            );
+        };
+
+        const DealPipelineTab = ({ clients, setupData, onSelectClient }) => {
+            const [searchFilter, setSearchFilter] = useState('');
+            const [filterStatus, setFilterStatus] = useState('');
+            const [filterTeamMember, setFilterTeamMember] = useState('');
+            const [filterCampaign, setFilterCampaign] = useState('');
+            const [sortConfig, setSortConfig] = useState({ key: 'closings', dir: 'desc' });
+
+            const getSetupInfo = (client) => {
+                const name = client.client.toLowerCase().trim();
+                return setupData.find(s => { const sn = (s.client || '').toLowerCase().trim(); return sn === name || sn.includes(name) || name.includes(sn); });
+            };
+
+            const enriched = useMemo(() => clients.map(c => {
+                const setup = getSetupInfo(c);
+                const effectiveLeads = c.adDataSource === 'meta' ? (c.weeklyLeads || 0) : c.leads;
+                const effectiveSpend = c.adDataSource === 'meta' ? (c.weeklySpend || 0) : c.spend;
+                const closings = setup ? pn(setup.closings) : 0;
+                const leadsPerDeal = c.deals > 0 ? effectiveLeads / c.deals : 0;
+                const spendPerDeal = c.deals > 0 ? effectiveSpend / c.deals : 0;
+                const cpl = effectiveLeads > 0 ? effectiveSpend / effectiveLeads : 0;
+                return { ...c, setup, effectiveLeads, effectiveSpend, closings, leadsPerDeal, spendPerDeal, effectiveCPL: cpl };
+            }), [clients, setupData]);
+
+            const uniqueVals = (key) => [...new Set(enriched.map(c => c[key]).filter(Boolean))].sort();
+            const statuses = useMemo(() => uniqueVals('status'), [enriched]);
+            const teamMembers = useMemo(() => uniqueVals('teamMember'), [enriched]);
+            const campaigns = useMemo(() => uniqueVals('campaign'), [enriched]);
+
+            const activeFilterCount = [filterStatus, filterTeamMember, filterCampaign].filter(Boolean).length;
+
+            const filtered = enriched.filter(c => {
+                const matchesSearch = !searchFilter || c.client.toLowerCase().includes(searchFilter.toLowerCase()) || (c.teamMember || '').toLowerCase().includes(searchFilter.toLowerCase());
+                return matchesSearch && (!filterStatus || c.status === filterStatus) && (!filterTeamMember || c.teamMember === filterTeamMember) && (!filterCampaign || c.campaign === filterCampaign);
+            });
+
+            const pipelineClients = filtered.filter(c => c.effectiveLeads > 0 || c.appts > 0 || c.deals > 0 || c.listings > 0 || c.buyerSigned > 0 || c.closings > 0);
+
+            const handleSort = (key) => setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
+
+            const sorted = useMemo(() => {
+                const arr = [...pipelineClients];
+                arr.sort((a, b) => {
+                    const valA = a[sortConfig.key] ?? 0;
+                    const valB = b[sortConfig.key] ?? 0;
+                    const cmp = typeof valA === 'string' ? valA.localeCompare(valB) : valA - valB;
+                    if (cmp !== 0) return sortConfig.dir === 'asc' ? cmp : -cmp;
+                    if (sortConfig.key !== 'deals') return b.deals - a.deals;
+                    return 0;
+                });
+                return arr;
+            }, [pipelineClients, sortConfig]);
+
+            const totals = pipelineClients.reduce((acc, c) => ({ leads: acc.leads + c.effectiveLeads, appts: acc.appts + c.appts, deals: acc.deals + c.deals, closings: acc.closings + c.closings }), { leads: 0, appts: 0, deals: 0, closings: 0 });
+
+            const clearAllFilters = () => { setSearchFilter(''); setFilterStatus(''); setFilterTeamMember(''); setFilterCampaign(''); };
+
+            const FilterSelect = ({ label, value, onChange, options }) => (
+                <div>
+                    <label className="block text-xs text-slate-500 mb-1">{label}</label>
+                    <select value={value} onChange={e => onChange(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white">
+                        <option value="">All</option>
+                        {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                </div>
+            );
+
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="card rounded-2xl p-6 text-center"><div className="text-3xl font-bold text-white">{pipelineClients.length}</div><div className="text-xs text-slate-400">Active Pipeline Clients</div></div>
+                        <div className="card rounded-2xl p-6 text-center"><div className="text-3xl font-bold text-blue-400">{fmtN(totals.leads)}</div><div className="text-xs text-slate-400">Total Leads</div></div>
+                        <div className="card rounded-2xl p-6 text-center"><div className="text-3xl font-bold text-cyan-400">{fmtN(totals.appts)}</div><div className="text-xs text-slate-400">Total Appts</div></div>
+                        <div className="card rounded-2xl p-6 text-center"><div className="text-3xl font-bold text-purple-400">{fmtN(totals.deals)}</div><div className="text-xs text-slate-400">Total Potential Deals</div></div>
+                        <div className="card rounded-2xl p-6 text-center"><div className="text-3xl font-bold text-emerald-400">{fmtN(totals.closings)}</div><div className="text-xs text-slate-400">Total Closings</div></div>
+                    </div>
+
+                    <div className="card rounded-2xl p-6">
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-3">
+                                <input type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Search clients..." className="w-64 input-field border rounded-xl px-3 py-2 text-sm" />
+                                {activeFilterCount > 0 && <button onClick={clearAllFilters} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20">Clear Filters ({activeFilterCount})</button>}
+                                {(activeFilterCount > 0 || searchFilter) && <span className="text-xs text-slate-500">Showing {pipelineClients.length} of {enriched.filter(c => c.effectiveLeads > 0 || c.appts > 0 || c.deals > 0 || c.listings > 0 || c.buyerSigned > 0 || c.closings > 0).length}</span>}
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                <FilterSelect label="Status" value={filterStatus} onChange={setFilterStatus} options={statuses} />
+                                <FilterSelect label="Team Member" value={filterTeamMember} onChange={setFilterTeamMember} options={teamMembers} />
+                                <FilterSelect label="Campaign" value={filterCampaign} onChange={setFilterCampaign} options={campaigns} />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 px-1">
+                        <span className="text-xs text-slate-500 font-medium">Funnel stages:</span>
+                        {FUNNEL_STAGES.map(stage => <div key={stage.key} className="flex items-center gap-1.5"><span className={`w-2.5 h-2.5 rounded-full ${stage.color}`} /><span className="text-xs text-slate-400">{stage.label}</span></div>)}
+                    </div>
+
+                    <div className="card rounded-2xl p-0 overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-dark-800">
+                                    <tr>
+                                        <SortHeader label="Client" sortKey="client" sortConfig={sortConfig} onSort={handleSort} align="left" />
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Funnel</th>
+                                        <SortHeader label="Status" sortKey="status" sortConfig={sortConfig} onSort={handleSort} align="left" />
+                                        <SortHeader label="Leads" sortKey="effectiveLeads" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Appts" sortKey="appts" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Deals" sortKey="deals" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Listings" sortKey="listings" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Buyer Signed" sortKey="buyerSigned" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Closings" sortKey="closings" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Leads/Deal" sortKey="leadsPerDeal" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="Spend/Deal" sortKey="spendPerDeal" sortConfig={sortConfig} onSort={handleSort} />
+                                        <SortHeader label="CPL" sortKey="effectiveCPL" sortConfig={sortConfig} onSort={handleSort} />
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-dark-700">
+                                    {sorted.length === 0 ? (
+                                        <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-500 text-sm">No clients with pipeline activity</td></tr>
+                                    ) : sorted.map(c => (
+                                        <tr key={c.client} className="hover:bg-dark-800 cursor-pointer transition-colors" onClick={() => onSelectClient(c)}>
+                                            <td className="px-4 py-3">
+                                                <div className="font-medium text-white">{c.client}</div>
+                                                <div className="text-xs text-slate-500">{c.teamMember || '—'}{c.adDataSource === 'meta' && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[10px] font-medium">META</span>}</div>
+                                            </td>
+                                            <td className="px-4 py-3"><FunnelDots row={c} /></td>
+                                            <td className="px-4 py-3">{c.status && <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.status.toLowerCase() === 'active' ? 'bg-emerald-500/20 text-emerald-400' : c.status.toLowerCase() === 'paused' ? 'bg-red-500/20 text-red-400' : 'bg-slate-500/20 text-slate-400'}`}>{c.status}</span>}</td>
+                                            <td className="px-4 py-3 text-right text-blue-400 font-medium">{fmtN(c.effectiveLeads)}</td>
+                                            <td className="px-4 py-3 text-right text-cyan-400">{fmtN(c.appts)}</td>
+                                            <td className="px-4 py-3 text-right text-purple-400 font-bold">{fmtN(c.deals)}</td>
+                                            <td className="px-4 py-3 text-right text-amber-400">{fmtN(c.listings)}</td>
+                                            <td className="px-4 py-3 text-right text-orange-400">{fmtN(c.buyerSigned)}</td>
+                                            <td className="px-4 py-3 text-right text-emerald-400 font-bold">{fmtN(c.closings)}</td>
+                                            <td className="px-4 py-3 text-right text-slate-300">{c.deals > 0 ? fmtN(c.leadsPerDeal) : '—'}</td>
+                                            <td className="px-4 py-3 text-right text-slate-300">{c.deals > 0 ? fmt(c.spendPerDeal) : '—'}</td>
+                                            <td className="px-4 py-3 text-right"><span className={`font-medium ${c.effectiveCPL <= 25 ? 'text-emerald-400' : c.effectiveCPL <= 50 ? 'text-amber-400' : c.effectiveCPL > 0 ? 'text-red-400' : 'text-slate-500'}`}>{c.effectiveCPL > 0 ? fmtD(c.effectiveCPL) : '—'}</span></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             );
         };
@@ -4046,7 +4325,8 @@ ${transcript}`;
                     case 'timeline': return <ClientTimelineTab clients={clients} setupData={setupData} />;
                     case 'datagaps': return <DataGapsTab clients={clients} setupData={setupData} />;
                     case 'meta-settings': return <MetaAdSettingsTab clients={clients} />;
-                    case 'fathom-meetings': return <FathomMeetingsTab clients={clients} />;
+                    case 'fathom-meetings': return <FathomMeetingsTab clients={clients} user={user} />;
+                    case 'pipeline': return <DealPipelineTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
@@ -4140,7 +4420,7 @@ ${transcript}`;
                                             {s && s.mrr && <span className="text-emerald-400 text-sm">MRR: {s.mrr}</span>}
                                         </div>
                                     ) : (
-                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : 'Select a client to get started'}</h2>
+                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : 'Select a client to get started'}</h2>
                                     )}
                                 </div>
                                 <button 
