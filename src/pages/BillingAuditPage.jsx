@@ -129,6 +129,13 @@ export const BillingAuditPage = ({ clients, setupData }) => {
     const spendData = dailySpend[c.client] || [];
     const hasMetaData = spendData.length > 0;
 
+    // First date with actual spend from Meta
+    const firstSpendEntry = spendData.find(d => d.spend > 0);
+    const firstSpendDate = firstSpendEntry ? parseDate(firstSpendEntry.date) : null;
+
+    // Launch setup days: first spend date minus paid date
+    const launchSetupDays = (firstSpendDate && paidDate) ? Math.max(0, daysBetween(paidDate, firstSpendDate)) : null;
+
     const activeDays = spendData.filter(d => d.spend > 0).length;
     const totalDaysSinceAdLive = adLiveDate ? daysBetween(adLiveDate, new Date()) : 0;
     const inactiveDays = hasMetaData ? Math.max(0, totalDaysSinceAdLive - activeDays) : 0;
@@ -146,7 +153,10 @@ export const BillingAuditPage = ({ clients, setupData }) => {
     return {
       ...c,
       setup,
+      paidDate,
       adLiveDate,
+      firstSpendDate,
+      launchSetupDays,
       setupDaysVal,
       activeDays,
       inactiveDays,
@@ -194,8 +204,12 @@ export const BillingAuditPage = ({ clients, setupData }) => {
       let valA, valB;
       if (sortConfig.key === 'client') {
         valA = a.client; valB = b.client;
+      } else if (sortConfig.key === 'paidDate') {
+        valA = a.paidDate?.getTime() || 0; valB = b.paidDate?.getTime() || 0;
       } else if (sortConfig.key === 'adLiveDate') {
         valA = a.adLiveDate?.getTime() || 0; valB = b.adLiveDate?.getTime() || 0;
+      } else if (sortConfig.key === 'firstSpendDate') {
+        valA = a.firstSpendDate?.getTime() || 0; valB = b.firstSpendDate?.getTime() || 0;
       } else if (sortConfig.key === 'correctedBillingStart') {
         valA = a.correctedBillingStart?.getTime() || 0; valB = b.correctedBillingStart?.getTime() || 0;
       } else {
@@ -308,8 +322,10 @@ export const BillingAuditPage = ({ clients, setupData }) => {
             <thead className="bg-dark-800">
               <tr>
                 <SortHeader label="Client" sortKey="client" sortConfig={sortConfig} onSort={handleSort} align="left" />
+                <SortHeader label="Paid Date" sortKey="paidDate" sortConfig={sortConfig} onSort={handleSort} align="left" />
+                <SortHeader label="First Spend Date" sortKey="firstSpendDate" sortConfig={sortConfig} onSort={handleSort} align="left" />
+                <SortHeader label="Setup Days" sortKey="launchSetupDays" sortConfig={sortConfig} onSort={handleSort} />
                 <SortHeader label="Ad Live Date" sortKey="adLiveDate" sortConfig={sortConfig} onSort={handleSort} align="left" />
-                <SortHeader label="Setup Days" sortKey="setupDaysVal" sortConfig={sortConfig} onSort={handleSort} />
                 <SortHeader label="Active Days" sortKey="activeDays" sortConfig={sortConfig} onSort={handleSort} />
                 <SortHeader label="Inactive Days" sortKey="inactiveDays" sortConfig={sortConfig} onSort={handleSort} />
                 <SortHeader label="Recorded Pause" sortKey="recordedOnPause" sortConfig={sortConfig} onSort={handleSort} />
@@ -321,7 +337,7 @@ export const BillingAuditPage = ({ clients, setupData }) => {
             <tbody className="divide-y divide-dark-700">
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={12} className="px-4 py-8 text-center text-slate-500 text-sm">
                     No clients match current filters
                   </td>
                 </tr>
@@ -336,10 +352,26 @@ export const BillingAuditPage = ({ clients, setupData }) => {
                       <div className="text-xs text-slate-500">{c.teamMember || '—'}</div>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-300">
-                      {formatDate(c.adLiveDate)}
+                      {formatDate(c.paidDate)}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm text-slate-300">
-                      {c.setupDaysVal || '—'}
+                    <td className="px-4 py-3 text-sm">
+                      {c.firstSpendDate ? (
+                        <span className="text-emerald-400 font-medium">{formatDate(c.firstSpendDate)}</span>
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {c.launchSetupDays != null ? (
+                        <span className={`font-medium ${c.launchSetupDays > 7 ? 'text-amber-400' : c.launchSetupDays > 3 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                          {c.launchSetupDays}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-300">
+                      {formatDate(c.adLiveDate)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {c.hasMetaData ? (
