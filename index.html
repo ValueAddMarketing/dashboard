@@ -4342,11 +4342,26 @@ ${transcript}`;
                 return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400">OK</span>;
             };
 
-            const SortHeader = ({ label, sortKey, align = 'right' }) => {
+            const SortHeader = ({ label, sortKey, align = 'right', formula }) => {
                 const active = sortConfig.key === sortKey;
+                const [showFormula, setShowFormula] = useState(false);
                 return (
-                    <th className={`px-4 py-3 text-xs font-semibold text-slate-400 uppercase cursor-pointer hover:text-white select-none ${align === 'left' ? 'text-left' : 'text-right'}`} onClick={() => handleSort(sortKey)}>
-                        <span className="inline-flex items-center gap-1">{label}{active && <span className="text-brand-cyan">{sortConfig.dir === 'asc' ? '▲' : '▼'}</span>}</span>
+                    <th className={`px-4 py-3 text-xs font-semibold text-slate-400 uppercase select-none ${align === 'left' ? 'text-left' : 'text-right'} relative`}>
+                        <span className="inline-flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => handleSort(sortKey)}>
+                            {label}
+                            {active && <span className="text-brand-cyan">{sortConfig.dir === 'asc' ? '▲' : '▼'}</span>}
+                        </span>
+                        {formula && (
+                            <span className="relative inline-block ml-1">
+                                <button onClick={(e) => { e.stopPropagation(); setShowFormula(!showFormula); }} className="text-slate-500 hover:text-brand-cyan text-xs align-middle">ⓘ</button>
+                                {showFormula && (
+                                    <div className="absolute z-50 top-full left-1/2 -translate-x-1/2 mt-1 w-64 bg-dark-900 border border-dark-600 rounded-lg shadow-xl p-3 text-left normal-case" onClick={(e) => e.stopPropagation()}>
+                                        <div className="text-xs text-slate-300 font-normal whitespace-normal">{formula}</div>
+                                        <button onClick={() => setShowFormula(false)} className="mt-2 text-xs text-slate-500 hover:text-white">Close</button>
+                                    </div>
+                                )}
+                            </span>
+                        )}
                     </th>
                 );
             };
@@ -4389,14 +4404,14 @@ ${transcript}`;
                                     <tr>
                                         <SortHeader label="Client" sortKey="client" align="left" />
                                         <SortHeader label="Paid Date" sortKey="paidDate" align="left" />
-                                        <SortHeader label="First Spend Date" sortKey="firstSpendDate" align="left" />
-                                        <SortHeader label="Setup Days" sortKey="launchSetupDays" />
+                                        <SortHeader label="First Spend Date (META)" sortKey="firstSpendDate" align="left" />
+                                        <SortHeader label="Setup Days" sortKey="launchSetupDays" formula="First Spend Date (META) − Paid Date = number of days from payment to first ad spend" />
                                         <SortHeader label="Ad Live Date" sortKey="adLiveDate" align="left" />
-                                        <SortHeader label="Active Days" sortKey="activeDays" />
-                                        <SortHeader label="Inactive Days" sortKey="inactiveDays" />
+                                        <SortHeader label="Active Days (META)" sortKey="activeDays" formula="Total number of days with ad spend > $0, pulled from Meta Ads Manager daily data" />
+                                        <SortHeader label="Inactive Days (META)" sortKey="inactiveDays" formula="(Days since First Spend Date) − Active Days (META) = days with no ad spend since launch" />
                                         <SortHeader label="Recorded Pause" sortKey="recordedOnPause" />
-                                        <SortHeader label="Discrepancy" sortKey="discrepancy" />
-                                        <SortHeader label="Corrected Billing Start" sortKey="correctedBillingStart" align="left" />
+                                        <SortHeader label="Discrepancy" sortKey="discrepancy" formula="Inactive Days (META) − Recorded Pause Days = unrecorded pause days that may need billing adjustment" />
+                                        <SortHeader label="Corrected Billing Start" sortKey="correctedBillingStart" align="left" formula="First Spend Date (META) + Inactive Days (META) = adjusted start date accounting for paused periods" />
                                         <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Sheet Billing</th>
                                     </tr>
                                 </thead>
