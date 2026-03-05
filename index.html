@@ -4239,14 +4239,12 @@ ${transcript}`;
 
             useEffect(() => {
                 const clientDates = {};
-                for (const c of clients) {
-                    const setup = getSetupInfo(c);
-                    if (setup) {
-                        const adLive = setup.adLiveDate || setup[' Ad Live date'] || setup['Ad Live date'] || '';
-                        const d = parseDate(adLive);
-                        const ymd = toYMD(d);
-                        if (ymd) clientDates[c.client] = ymd;
-                    }
+                for (const s of setupData) {
+                    if (!s.client) continue;
+                    const adLive = s.adLiveDate || s[' Ad Live date'] || s['Ad Live date'] || '';
+                    const d = parseDate(adLive);
+                    const ymd = toYMD(d);
+                    if (ymd) clientDates[s.client] = ymd;
                 }
                 if (Object.keys(clientDates).length > 0) {
                     // Check cache first (30 min)
@@ -4277,15 +4275,15 @@ ${transcript}`;
                 }
             }, [clients, setupData]);
 
-            const enriched = useMemo(() => clients.map(c => {
-                const setup = getSetupInfo(c);
-                const adLiveDate = parseDate(setup?.adLiveDate || setup?.[' Ad Live date'] || setup?.['Ad Live date'] || '');
-                const paidDate = parseDate(setup?.paidDate || '');
-                const billingCycle = setup?.billingCycle || '';
-                const recordedOnPause = pn(setup?.adsOnPauseDays);
-                let setupDaysVal = pn(setup?.setupDays || setup?.['Setup Days'] || setup?.['Setup days'] || '');
+            const enriched = useMemo(() => setupData.filter(s => s.client).map(s => {
+                const clientName = s.client;
+                const adLiveDate = parseDate(s.adLiveDate || s[' Ad Live date'] || s['Ad Live date'] || '');
+                const paidDate = parseDate(s.paidDate || '');
+                const billingCycle = s.billingCycle || '';
+                const recordedOnPause = pn(s.adsOnPauseDays);
+                let setupDaysVal = pn(s.setupDays || s['Setup Days'] || s['Setup days'] || '');
                 if (!setupDaysVal && adLiveDate && paidDate) setupDaysVal = Math.max(0, daysBetween(paidDate, adLiveDate));
-                const spendData = dailySpend[c.client] || [];
+                const spendData = dailySpend[clientName] || [];
                 const hasMetaData = spendData.length > 0;
                 const firstSpendEntry = spendData.find(d => d.spend > 0);
                 const firstSpendDate = firstSpendEntry ? parseDate(firstSpendEntry.date) : null;
@@ -4297,14 +4295,15 @@ ${transcript}`;
                 const discrepancy = hasMetaData ? inactiveDays - recordedOnPause : 0;
                 const absDisc = Math.abs(discrepancy);
                 const severity = absDisc >= 7 ? 'High' : absDisc >= 3 ? 'Medium' : 'OK';
-                return { ...c, setup, paidDate, adLiveDate, firstSpendDate, launchSetupDays, setupDaysVal, activeDays, inactiveDays, recordedOnPause, correctedBillingStart, billingCycle, discrepancy, severity, hasMetaData, teamMember: c.teamMember || setup?.csmRep || '' };
+                // Find matching client from ads performance sheet for extra data
+                const adsClient = clients.find(c => c.client.toLowerCase().trim() === clientName.toLowerCase().trim());
+                return { client: clientName, setup: s, paidDate, adLiveDate, firstSpendDate, launchSetupDays, setupDaysVal, activeDays, inactiveDays, recordedOnPause, correctedBillingStart, billingCycle, discrepancy, severity, hasMetaData, teamMember: adsClient?.teamMember || s.csmRep || '' };
             }), [clients, setupData, dailySpend]);
 
             const teamMembers = useMemo(() => [...new Set(enriched.map(c => c.teamMember).filter(Boolean))].sort(), [enriched]);
             const activeFilterCount = [filterSeverity, filterTeamMember].filter(Boolean).length;
 
             const filtered = enriched.filter(c => {
-                if (!c.adLiveDate) return false;
                 const matchesSearch = !searchFilter || c.client.toLowerCase().includes(searchFilter.toLowerCase()) || c.teamMember.toLowerCase().includes(searchFilter.toLowerCase());
                 const matchesSeverity = !filterSeverity || c.severity === filterSeverity;
                 const matchesTeamMember = !filterTeamMember || c.teamMember === filterTeamMember;
@@ -4375,7 +4374,7 @@ ${transcript}`;
                         <div className="flex items-center gap-3">
                             <input type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Search clients..." className="w-64 input-field border rounded-xl px-3 py-2 text-sm" />
                             {activeFilterCount > 0 && <button onClick={() => { setSearchFilter(''); setFilterSeverity(''); setFilterTeamMember(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20">Clear Filters ({activeFilterCount})</button>}
-                            {(activeFilterCount > 0 || searchFilter) && <span className="text-xs text-slate-500">Showing {filtered.length} of {enriched.filter(c => c.adLiveDate).length}</span>}
+                            {(activeFilterCount > 0 || searchFilter) && <span className="text-xs text-slate-500">Showing {filtered.length} of {enriched.length}</span>}
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div><label className="block text-xs text-slate-500 mb-1">Discrepancy Severity</label><select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white"><option value="">All</option><option value="High">High</option><option value="Medium">Medium</option><option value="OK">OK</option></select></div>
