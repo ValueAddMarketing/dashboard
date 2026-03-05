@@ -4566,7 +4566,7 @@ ${transcript}`;
                                         {clients.map(c => <option key={c.client} value={c.client}>{c.client}</option>)}
                                     </select>
                                 </div>
-                                <nav className="py-2 overflow-y-auto scrollbar">
+                                <nav className="py-2 flex-1 min-h-0 overflow-y-auto scrollbar">
                                     {tabs.map(t => (
                                         <button key={t.id} onClick={() => setTab(t.id)} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === t.id ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
                                             <span className="text-lg">{t.icon}</span>
@@ -4574,9 +4574,9 @@ ${transcript}`;
                                         </button>
                                     ))}
                                 </nav>
-                            
+
                             {/* Client Comparison Section */}
-                            <div className="flex-1 overflow-y-auto border-t border-dark-700">
+                            <div className="flex-1 min-h-0 overflow-y-auto border-t border-dark-700">
                                 <div className="p-4">
                                     <h3 className="text-xs font-semibold text-slate-500 uppercase mb-3">All Clients</h3>
                                     <div className="space-y-1 max-h-[400px] overflow-y-auto scrollbar">
