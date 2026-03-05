@@ -145,7 +145,78 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use "listAdAccounts" or "fetchAll".' });
+    if (action === 'fetchDailySpend') {
+      if (!SUPABASE_URL || !SUPABASE_KEY) {
+        return res.status(500).json({ error: 'Supabase not configured' });
+      }
+
+      const { clientDates } = req.body;
+      if (!clientDates || typeof clientDates !== 'object') {
+        return res.status(400).json({ error: 'clientDates map required' });
+      }
+
+      // Get mappings from Supabase
+      const mappingsRes = await fetch(`${SUPABASE_URL}/rest/v1/client_ad_accounts?select=*`, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+      const mappings = await mappingsRes.json();
+
+      if (!Array.isArray(mappings)) {
+        return res.json({ results: {}, errors: { _general: 'Failed to fetch mappings' } });
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const results = {};
+      const errors = {};
+
+      // Process in batches of 5 to avoid rate limits
+      const batchSize = 5;
+      const clientMappings = mappings.filter(m => clientDates[m.client_name]);
+
+      for (let i = 0; i < clientMappings.length; i += batchSize) {
+        const batch = clientMappings.slice(i, i + batchSize);
+        const settled = await Promise.allSettled(batch.map(async (mapping) => {
+          const since = clientDates[mapping.client_name];
+          const accountId = mapping.meta_ad_account_id;
+          const timeRange = JSON.stringify({ since, until: today });
+          let url = `https://graph.facebook.com/v21.0/act_${accountId}/insights?fields=spend&time_range=${encodeURIComponent(timeRange)}&time_increment=1&limit=500&access_token=${META_ACCESS_TOKEN}`;
+
+          const allDays = [];
+          while (url) {
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data.error) {
+              throw new Error(data.error.message);
+            }
+            if (data.data) {
+              for (const row of data.data) {
+                allDays.push({ date: row.date_start, spend: parseFloat(row.spend || 0) });
+              }
+            }
+            url = data.paging?.next || null;
+          }
+
+          return { clientName: mapping.client_name, days: allDays };
+        }));
+
+        for (const result of settled) {
+          if (result.status === 'fulfilled') {
+            results[result.value.clientName] = result.value.days;
+          } else {
+            // Find which mapping failed by checking the batch
+            const idx = settled.indexOf(result);
+            errors[batch[idx]?.client_name || 'unknown'] = result.reason?.message || 'Unknown error';
+          }
+        }
+      }
+
+      return res.json({ results, errors: Object.keys(errors).length > 0 ? errors : undefined });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use "listAdAccounts", "fetchAll", or "fetchDailySpend".' });
   } catch (error) {
     console.error('Meta API error:', error);
     return res.status(500).json({ error: error.message });

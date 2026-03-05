@@ -18,7 +18,9 @@ export const CACHE_KEYS = {
   setup: 'vam_setup',
   cacheTime: 'vam_cache_time',
   metaAds: 'vam_meta_ads',
-  metaAdsCacheTime: 'vam_meta_ads_cache_time'
+  metaAdsCacheTime: 'vam_meta_ads_cache_time',
+  dailySpend: 'vam_daily_spend',
+  dailySpendCacheTime: 'vam_daily_spend_cache_time'
 };
 
 // Health color mapping
@@ -39,6 +41,7 @@ export const CLIENT_HUB_TABS = [
   { id: 'meta-settings', name: 'Meta Ads', icon: '⚙️', desc: 'Configure Meta ad account mappings' },
   { id: 'fathom-meetings', name: 'Fathom Meetings', icon: '🎙️', desc: 'All meetings from the previous month' },
   { id: 'pipeline', name: 'Deal Pipeline', icon: '🤝', desc: 'Deal closing progress for all clients' },
+  { id: 'billing-audit', name: 'Billing Audit', icon: '💲', desc: 'Audit billing cycles against actual ad activity' },
 ];
 
 // Severity colors for flags

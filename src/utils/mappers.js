@@ -193,6 +193,7 @@ export const mapSetupTiming = (r) => ({
   closedOn: r['Closed on'] || '',
   commission: r['commision'] || '',
   setterCloser: r['Setter & Closer'] || '',
+  setupDays: r['Setup Days'] || r['Setup days'] || '',
 });
 
 /**

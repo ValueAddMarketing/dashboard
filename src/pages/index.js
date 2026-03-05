@@ -6,3 +6,4 @@ export { ClientTimelinePage } from './ClientTimelinePage';
 export { MetaAdSettingsPage } from './MetaAdSettingsPage';
 export { FathomMeetingsPage } from './FathomMeetingsPage';
 export { DealPipelinePage } from './DealPipelinePage';
+export { BillingAuditPage } from './BillingAuditPage';

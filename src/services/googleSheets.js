@@ -148,4 +148,6 @@ export const clearCache = () => {
   localStorage.removeItem(CACHE_KEYS.cacheTime);
   localStorage.removeItem(CACHE_KEYS.metaAds);
   localStorage.removeItem(CACHE_KEYS.metaAdsCacheTime);
+  localStorage.removeItem(CACHE_KEYS.dailySpend);
+  localStorage.removeItem(CACHE_KEYS.dailySpendCacheTime);
 };

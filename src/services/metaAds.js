@@ -80,6 +80,51 @@ export const fetchAdAccountsList = async () => {
 };
 
 /**
+ * Fetch daily spend data for billing audit (30-min cache)
+ */
+const DAILY_SPEND_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+export const fetchDailySpendData = async (clientDates) => {
+  // Check cache
+  try {
+    const cached = localStorage.getItem(CACHE_KEYS.dailySpend);
+    const cacheTime = localStorage.getItem(CACHE_KEYS.dailySpendCacheTime);
+    const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
+    if (cached && cacheAge < DAILY_SPEND_CACHE_DURATION) {
+      return JSON.parse(cached);
+    }
+  } catch (e) {
+    console.warn('Daily spend cache read error:', e);
+  }
+
+  try {
+    const response = await fetch(META_ADS_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fetchDailySpend', clientDates })
+    });
+
+    if (!response.ok) throw new Error('Daily spend fetch failed');
+
+    const data = await response.json();
+    const results = data.results || {};
+
+    // Cache results
+    try {
+      localStorage.setItem(CACHE_KEYS.dailySpend, JSON.stringify(results));
+      localStorage.setItem(CACHE_KEYS.dailySpendCacheTime, Date.now().toString());
+    } catch (e) {
+      console.warn('Daily spend cache write error:', e);
+    }
+
+    return results;
+  } catch (err) {
+    console.error('Error fetching daily spend data:', err);
+    return {};
+  }
+};
+
+/**
  * Clear Meta ads cache
  */
 export const clearMetaAdsCache = () => {

@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { useClients } from './hooks/useClients';
 import { Sidebar, Header, LoginPage, ErrorBoundary } from './components';
-import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage, ClientTimelinePage, MetaAdSettingsPage, FathomMeetingsPage, DealPipelinePage } from './pages';
+import { RedFlagsPage, ClientHealthPage, NotesActivityPage, OverviewPage, ClientTimelinePage, MetaAdSettingsPage, FathomMeetingsPage, DealPipelinePage, BillingAuditPage } from './pages';
 import { CLIENT_HUB_TABS } from './utils/constants';
 
 /**
@@ -62,7 +62,7 @@ const AppLayout = () => {
 
   const setup = getSetupInfo(selectedClient);
   const currentTab = location.pathname.split('/').pop() || 'redflags';
-  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : currentTab === 'timeline' ? '📅 Renewals Timeline' : currentTab === 'meta-settings' ? '⚙️ Meta Ad Settings' : currentTab === 'fathom-meetings' ? '🎙️ Fathom Meetings' : currentTab === 'pipeline' ? '🤝 Deal Pipeline' : undefined;
+  const headerTitle = currentTab === 'overview' ? '📊 Overview' : currentTab === 'redflags' ? '🚩 Red Flags Dashboard' : currentTab === 'timeline' ? '📅 Renewals Timeline' : currentTab === 'meta-settings' ? '⚙️ Meta Ad Settings' : currentTab === 'fathom-meetings' ? '🎙️ Fathom Meetings' : currentTab === 'pipeline' ? '🤝 Deal Pipeline' : currentTab === 'billing-audit' ? '💲 Billing Audit' : undefined;
 
   return (
     <div className="flex min-h-screen">
@@ -148,6 +148,15 @@ const AppLayout = () => {
                   clients={clients}
                   setupData={setupData}
                   onSelectClient={handleSelectClient}
+                />
+              }
+            />
+            <Route
+              path="billing-audit"
+              element={
+                <BillingAuditPage
+                  clients={clients}
+                  setupData={setupData}
                 />
               }
             />
