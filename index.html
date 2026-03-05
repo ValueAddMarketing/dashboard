@@ -4210,7 +4210,7 @@ ${transcript}`;
             const [searchFilter, setSearchFilter] = useState('');
             const [filterSeverity, setFilterSeverity] = useState('');
             const [filterTeamMember, setFilterTeamMember] = useState('');
-            const [sortConfig, setSortConfig] = useState({ key: 'discrepancy', dir: 'desc' });
+            const [sortConfig, setSortConfig] = useState({ key: null, dir: 'desc' });
             const [dailySpend, setDailySpend] = useState({});
             const [loading, setLoading] = useState(true);
 
@@ -4313,6 +4313,7 @@ ${transcript}`;
             const handleSort = (key) => setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
 
             const sorted = useMemo(() => {
+                if (!sortConfig.key) return filtered; // preserve sheet order
                 const arr = [...filtered];
                 arr.sort((a, b) => {
                     let valA, valB;
