@@ -4566,7 +4566,7 @@ ${transcript}`;
                                         {clients.map(c => <option key={c.client} value={c.client}>{c.client}</option>)}
                                     </select>
                                 </div>
-                                <nav className="py-2">
+                                <nav className="py-2 overflow-y-auto scrollbar">
                                     {tabs.map(t => (
                                         <button key={t.id} onClick={() => setTab(t.id)} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === t.id ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
                                             <span className="text-lg">{t.icon}</span>
