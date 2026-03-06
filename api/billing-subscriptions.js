@@ -11,20 +11,26 @@ export default async function handler(req, res) {
 
     const { action } = req.body;
 
+    const formatWhopDate = (val) => {
+        if (!val) return null;
+        if (typeof val === 'number') return new Date(val * 1000).toISOString().split('T')[0];
+        return String(val).split('T')[0];
+    };
+
     const mapWhopMembership = (m) => ({
         id: m.id,
         source: 'whop',
         customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
         customerEmail: m.user?.email || m.email || '',
         status: m.status || (m.valid ? 'active' : 'inactive'),
-        currentPeriodEnd: m.renewal_period_end || m.expires_at || m.next_renewal_date || null,
-        currentPeriodStart: m.renewal_period_start || m.created_at || null,
+        currentPeriodEnd: formatWhopDate(m.renewal_period_end || m.expires_at || m.next_renewal_date),
+        currentPeriodStart: formatWhopDate(m.renewal_period_start || m.created_at),
         cancelAtPeriodEnd: m.cancel_at_period_end || false,
         amount: m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null),
         currency: m.currency || 'usd',
         interval: m.plan?.renewal_period || m.renewal_period || null,
         productName: m.plan?.plan_name || m.product?.name || m.product_name || '',
-        created: m.created_at ? m.created_at.split('T')[0] : null
+        created: m.created_at ? (typeof m.created_at === 'number' ? new Date(m.created_at * 1000).toISOString().split('T')[0] : String(m.created_at).split('T')[0]) : null
     });
 
     // ========== FETCH ALL SUBSCRIPTIONS ==========
