@@ -78,11 +78,21 @@ serve(async (req) => {
       domainMap.set(mapping.domain.toLowerCase(), mapping.client_name)
     }
 
+    // Load participant name -> client mappings (learned from manual assignments)
+    const { data: nameMappings } = await supabase
+      .from('client_participant_names')
+      .select('participant_name, client_name')
+
+    const nameMap = new Map<string, string>()
+    for (const mapping of (nameMappings || [])) {
+      nameMap.set(mapping.participant_name.toLowerCase(), mapping.client_name)
+    }
+
     // ── Path A: Single recording from webhook ──────────────────
     if (body.single_recording) {
       const recording = body.single_recording as FathomRecording
       const source = (body.source as string) || 'fathom_webhook'
-      const results = await processRecordings([recording], domainMap, supabase, ANTHROPIC_API_KEY, source, FATHOM_API_KEY)
+      const results = await processRecordings([recording], domainMap, nameMap, supabase, ANTHROPIC_API_KEY, source, FATHOM_API_KEY)
 
       return new Response(
         JSON.stringify({ message: `Processed 1 recording`, results }),
@@ -131,9 +141,36 @@ serve(async (req) => {
 
       // Process with forced client name (transcript fetch + AI analysis happen inside)
       const results = await processRecordings(
-        [recording], domainMap, supabase, ANTHROPIC_API_KEY,
+        [recording], domainMap, nameMap, supabase, ANTHROPIC_API_KEY,
         'fathom_manual_assign', FATHOM_API_KEY, client_name
       )
+
+      // Save participant names from the meeting title as name mappings for future auto-matching
+      const titleNames = extractNamesFromTitle(recording.title)
+      // Also extract invitee names from stored metadata
+      let storedParticipants: string[] = []
+      try {
+        const errorMeta = JSON.parse(syncEntry?.error_message || '{}')
+        storedParticipants = (errorMeta.participant_names || []) as string[]
+      } catch { /* ignore */ }
+
+      const allNames = [...new Set([...titleNames, ...storedParticipants])]
+        .filter(n => n.length > 1)
+
+      // Ignore the user's own name (common patterns)
+      const ownerEmails = [(body.user_email as string) || ''].filter(Boolean)
+      const ownerNames = ownerEmails.map(e => e.split('@')[0].replace(/[._]/g, ' ').toLowerCase())
+
+      for (const name of allNames) {
+        const nameLower = name.toLowerCase()
+        if (ownerNames.some(on => nameLower.includes(on) || on.includes(nameLower))) continue
+        if (nameMap.has(nameLower)) continue // already mapped
+
+        await supabase.from('client_participant_names').upsert({
+          participant_name: nameLower,
+          client_name: client_name,
+        }, { onConflict: 'participant_name, client_name' })
+      }
 
       return new Response(
         JSON.stringify({ message: `Assigned recording to ${client_name}`, results }),
@@ -231,7 +268,7 @@ serve(async (req) => {
     })
 
     const skipped = recordings.length - newRecordings.length
-    const results = await processRecordings(newRecordings, domainMap, supabase, ANTHROPIC_API_KEY, 'fathom', FATHOM_API_KEY)
+    const results = await processRecordings(newRecordings, domainMap, nameMap, supabase, ANTHROPIC_API_KEY, 'fathom', FATHOM_API_KEY)
 
     // Add skip entries for processed/failed duplicates
     for (const r of recordings) {
@@ -265,6 +302,7 @@ serve(async (req) => {
 async function processRecordings(
   recordings: FathomRecording[],
   domainMap: Map<string, string>,
+  nameMap: Map<string, string>,
   supabase: SupabaseClient,
   anthropicApiKey: string | undefined,
   source: string,
@@ -292,10 +330,12 @@ async function processRecordings(
       }
 
       // ── Match to a client ────────────────────────────────────
-      const clientName = forceClientName || matchClient(recording, domainMap)
+      const clientName = forceClientName || matchClient(recording, domainMap, nameMap)
 
       if (!clientName) {
         const origMeetingDate = recording.scheduled_at || recording.recording_start_at || recording.created_at
+        // Extract participant names for future name-based matching
+        const participantNames = extractParticipantNames(recording)
         await supabase.from('fathom_sync_log').upsert({
           fathom_recording_id: recording.id,
           status: 'unmatched',
@@ -303,7 +343,9 @@ async function processRecordings(
           fathom_url: recording.url,
           error_message: JSON.stringify({
             reason: 'Could not match to a client. Add email domain mapping in Fathom Settings.',
-            meeting_date: origMeetingDate
+            meeting_date: origMeetingDate,
+            participant_names: participantNames,
+            participants: [...(recording.calendar_invitees || []).map(i => i.email).filter(Boolean), ...participantNames]
           })
         }, { onConflict: 'fathom_recording_id' })
         results.push({ recording_id: recording.id, title: recording.title, status: 'unmatched' })
@@ -475,7 +517,8 @@ async function processRecordings(
 // ════════════════════════════════════════════════════════════════
 function matchClient(
   recording: FathomRecording,
-  domainMap: Map<string, string>
+  domainMap: Map<string, string>,
+  nameMap: Map<string, string>
 ): string | null {
   // Strategy 1: Check calendar invitees against domain map
   const invitees = recording.calendar_invitees || []
@@ -504,12 +547,79 @@ function matchClient(
 
   // Strategy 3: Check if recording title contains a known client name
   const titleLower = (recording.title || '').toLowerCase()
-  const clientNames = new Set(domainMap.values())
-  for (const clientName of clientNames) {
+  const allClientNames = new Set([...domainMap.values(), ...nameMap.values()])
+  for (const clientName of allClientNames) {
     if (titleLower.includes(clientName.toLowerCase())) return clientName
   }
 
+  // Strategy 4: Check participant names against learned name mappings
+  if (nameMap.size > 0) {
+    // Check invitee names
+    for (const invitee of invitees) {
+      if (invitee.name) {
+        const nameLower = invitee.name.toLowerCase().trim()
+        if (nameMap.has(nameLower)) return nameMap.get(nameLower)!
+      }
+    }
+    // Check speaker names from transcript
+    if (recording.transcript) {
+      for (const entry of recording.transcript) {
+        const nameLower = (entry.speaker_name || '').toLowerCase().trim()
+        if (nameLower && nameMap.has(nameLower)) return nameMap.get(nameLower)!
+      }
+    }
+    // Check names extracted from title (e.g. "Jenny Caceres 1:1 | Accountability")
+    const titleNames = extractNamesFromTitle(recording.title)
+    for (const name of titleNames) {
+      const nameLower = name.toLowerCase()
+      if (nameMap.has(nameLower)) return nameMap.get(nameLower)!
+    }
+  }
+
   return null
+}
+
+// ════════════════════════════════════════════════════════════════
+// Helper: Extract participant names from a recording
+// ════════════════════════════════════════════════════════════════
+function extractParticipantNames(recording: FathomRecording): string[] {
+  const names: Set<string> = new Set()
+
+  // From calendar invitees
+  for (const invitee of (recording.calendar_invitees || [])) {
+    if (invitee.name) names.add(invitee.name.trim())
+  }
+
+  // From transcript speaker names
+  if (recording.transcript) {
+    for (const entry of recording.transcript) {
+      if (entry.speaker_name) names.add(entry.speaker_name.trim())
+    }
+  }
+
+  // From title (before separators like |)
+  const titleNames = extractNamesFromTitle(recording.title)
+  for (const n of titleNames) names.add(n)
+
+  return [...names].filter(n => n.length > 1)
+}
+
+// ════════════════════════════════════════════════════════════════
+// Helper: Extract human names from a meeting title
+// ════════════════════════════════════════════════════════════════
+function extractNamesFromTitle(title: string): string[] {
+  if (!title) return []
+  // Split on common separators: |
+  const beforeSep = title.split(/\s*[|]\s*/)[0] || title
+  // Remove common meeting type words
+  const cleaned = beforeSep
+    .replace(/\b(1:1|1on1|check-?in|meeting|call|sync|weekly|monthly|accountability|huddle|standup|review|retrospective|onboarding)\b/gi, '')
+    .trim()
+  // If what's left looks like a name (2-4 words, capitalized), return it
+  if (cleaned && /^[A-Za-z\s'-]+$/.test(cleaned) && cleaned.split(/\s+/).length <= 4 && cleaned.length > 2) {
+    return [cleaned.trim()]
+  }
+  return []
 }
 
 // ════════════════════════════════════════════════════════════════

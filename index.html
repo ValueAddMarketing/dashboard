@@ -3345,6 +3345,7 @@ ${transcript}`;
 
             // Domain mapping state
             const [domainMappings, setDomainMappings] = useState([]);
+            const [nameMappings, setNameMappings] = useState([]);
             const [showMappings, setShowMappings] = useState(false);
             const [newDomain, setNewDomain] = useState('');
             const [newClientName, setNewClientName] = useState('');
@@ -3411,8 +3412,13 @@ ${transcript}`;
                     const { data } = await supabase.from('client_email_domains').select('*').order('client_name', { ascending: true });
                     if (data) setDomainMappings(data);
                 };
+                const loadNameMappings = async () => {
+                    const { data } = await supabase.from('client_participant_names').select('*').order('client_name', { ascending: true });
+                    if (data) setNameMappings(data);
+                };
                 loadSyncLog();
                 loadMappings();
+                loadNameMappings();
             }, []);
 
             // Helper: refresh meetings for current month (respects team member filter)
@@ -3478,6 +3484,12 @@ ${transcript}`;
                 setDomainMappings(domainMappings.filter(m => m.id !== id));
             };
 
+            // Delete name mapping
+            const removeNameMapping = async (id) => {
+                await supabase.from('client_participant_names').delete().eq('id', id);
+                setNameMappings(nameMappings.filter(m => m.id !== id));
+            };
+
             // Helper: parse participants from sync log error_message metadata
             const getLogParticipants = (entry) => {
                 try { const meta = JSON.parse(entry?.error_message || '{}'); return (meta.participants || []).map(p => p.toLowerCase()); } catch { return []; }
@@ -3524,6 +3536,10 @@ ${transcript}`;
                     // Refresh sync log (picks up both manual + auto assignments)
                     const { data: logData } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(100);
                     if (logData) setSyncLog(logData);
+
+                    // Refresh name mappings (edge function saves new ones on assign)
+                    const { data: nmData } = await supabase.from('client_participant_names').select('*').order('client_name', { ascending: true });
+                    if (nmData) setNameMappings(nmData);
 
                     // Find the newly created meeting — try multiple strategies
                     let meetingDate = null;
@@ -3947,6 +3963,26 @@ ${transcript}`;
                                     ))}
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {/* Learned Name Mappings (shown alongside domain mappings) */}
+                    {showMappings && nameMappings.length > 0 && (
+                        <div className="card p-6 space-y-4">
+                            <h3 className="text-lg font-semibold text-white">Learned Name Mappings</h3>
+                            <p className="text-slate-400 text-sm">These name-to-client mappings were automatically learned when you manually assigned meetings. Future meetings with these participants will be auto-matched.</p>
+                            <div className="space-y-1">
+                                {nameMappings.map(m => (
+                                    <div key={m.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-dark-800 rounded-lg">
+                                        <div className="flex items-center gap-3 text-sm">
+                                            <span className="text-brand-purple font-mono">{m.participant_name}</span>
+                                            <span className="text-slate-600">&rarr;</span>
+                                            <span className="text-white">{m.client_name}</span>
+                                        </div>
+                                        <button onClick={() => removeNameMapping(m.id)} className="text-slate-500 hover:text-red-400 text-xs transition-colors">Remove</button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
 
