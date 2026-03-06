@@ -310,6 +310,7 @@
             paymentNotes: r['Payment notes'] || '', amountCollected: r['Amount collected'] || '', b2b: r['B2B'] || '',
             closedOn: r['Closed on'] || '', commission: r['commision'] || '', setterCloser: r['Setter & Closer'] || '',
             contractEndDate: r['Contract End Date'] || '', daysLeftForEndOfContract: r['Days left for end of Contract'] || '',
+            nextBillingDateSheet: r['Next Billing Date'] || '',
         });
 
         const getHealth = cpl => { if(!cpl) return 'gray'; if(cpl<=25) return 'green'; if(cpl<=50) return 'yellow'; return 'red'; };
@@ -4553,7 +4554,7 @@ Column definitions:
                 const adsClient = clients.find(c => c.client.toLowerCase().trim() === clientName.toLowerCase().trim());
                 const sub = matchSubscription(clientName);
                 const nextBillingDate = sub?.currentPeriodEnd ? parseDate(sub.currentPeriodEnd) : null;
-                const sheetBillingDate = parseDate(billingCycle) || parseDate(s.duePayment) || parseDate(s.contractEndDate);
+                const sheetBillingDate = parseDate(s.nextBillingDateSheet) || parseDate(billingCycle) || parseDate(s.duePayment) || parseDate(s.contractEndDate);
                 const billingDaysDiff = (nextBillingDate && sheetBillingDate) ? daysBetween(sheetBillingDate, nextBillingDate) : null;
                 const billingMatch = billingDaysDiff !== null ? (Math.abs(billingDaysDiff) <= 1 ? 'Match' : billingDaysDiff > 0 ? `+${billingDaysDiff}d` : `${billingDaysDiff}d`) : null;
                 return { client: clientName, setup: s, paidDate, adLiveDate, firstSpendDate, launchSetupDays, setupDaysVal, activeDays, inactiveDays, recordedOnPause, correctedBillingStart, billingCycle, sheetBillingDate, discrepancy, severity, hasMetaData, teamMember: adsClient?.teamMember || s.csmRep || '', subscription: sub, nextBillingDate, paymentSource: sub?.source || null, billingDaysDiff, billingMatch };
