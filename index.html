@@ -5161,6 +5161,96 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
             const sortArrow = (key) => sortConfig.key === key ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : '';
 
+            // Fuzzy name matching: returns a score 0-1 (1 = perfect match)
+            const fuzzyMatch = (clientName, locationName) => {
+                const normalize = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+                const a = normalize(clientName);
+                const b = normalize(locationName);
+                if (a === b) return 1;
+                if (a.includes(b) || b.includes(a)) return 0.9;
+                // Split into words and check overlap
+                const aWords = a.split(/\s+/).filter(w => w.length > 1);
+                const bWords = b.split(/\s+/).filter(w => w.length > 1);
+                let matchCount = 0;
+                for (const aw of aWords) {
+                    for (const bw of bWords) {
+                        if (aw === bw) { matchCount += 1; break; }
+                        if (aw.length > 3 && bw.length > 3 && (aw.includes(bw) || bw.includes(aw))) { matchCount += 0.7; break; }
+                        // Check first/last name partial
+                        if (aw.length >= 3 && bw.startsWith(aw.substring(0, 3))) { matchCount += 0.3; break; }
+                    }
+                }
+                const maxWords = Math.max(aWords.length, bWords.length);
+                return maxWords > 0 ? matchCount / maxWords : 0;
+            };
+
+            const [autoMatches, setAutoMatches] = useState([]);
+            const [autoMatchLoading, setAutoMatchLoading] = useState(false);
+
+            const runAutoMatch = async () => {
+                setAutoMatchLoading(true);
+                let locs = ghlLocations;
+                if (locs.length === 0) {
+                    locs = await loadLocations();
+                }
+                if (locs.length === 0) {
+                    setAutoMatchLoading(false);
+                    return;
+                }
+
+                const unmappedClients = setupData.filter(s => !mappings.find(m => m.client_name === s.client));
+                const usedLocationIds = new Set(mappings.map(m => m.ghl_location_id));
+                const availableLocs = locs.filter(l => !usedLocationIds.has(l.id));
+
+                const matches = [];
+                const claimedLocIds = new Set();
+
+                for (const client of unmappedClients) {
+                    let bestMatch = null;
+                    let bestScore = 0;
+                    for (const loc of availableLocs) {
+                        if (claimedLocIds.has(loc.id)) continue;
+                        const score = fuzzyMatch(client.client, loc.name);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestMatch = loc;
+                        }
+                    }
+                    if (bestMatch && bestScore >= 0.3) {
+                        matches.push({ clientName: client.client, location: bestMatch, score: bestScore, enabled: bestScore >= 0.5 });
+                        claimedLocIds.add(bestMatch.id);
+                    } else {
+                        matches.push({ clientName: client.client, location: null, score: 0, enabled: false });
+                    }
+                }
+                // Sort: best matches first
+                matches.sort((a, b) => b.score - a.score);
+                setAutoMatches(matches);
+                setAutoMatchLoading(false);
+            };
+
+            const toggleAutoMatch = (idx) => {
+                setAutoMatches(prev => prev.map((m, i) => i === idx ? { ...m, enabled: !m.enabled } : m));
+            };
+
+            const changeAutoMatchLocation = (idx, locationId) => {
+                setAutoMatches(prev => prev.map((m, i) => {
+                    if (i !== idx) return m;
+                    const loc = ghlLocations.find(l => l.id === locationId);
+                    return { ...m, location: loc || null, enabled: !!loc, score: loc ? 0.5 : 0 };
+                }));
+            };
+
+            const saveAutoMatches = async () => {
+                setSetupLoading(true);
+                const toSave = autoMatches.filter(m => m.enabled && m.location);
+                for (const m of toSave) {
+                    await saveMapping(m.clientName, m.location.id);
+                }
+                setAutoMatches([]);
+                setSetupLoading(false);
+            };
+
             // Setup / Mapping Modal
             if (showSetup) {
                 return (
@@ -5173,9 +5263,62 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                         </div>
                         <p className="text-slate-400 text-sm">Map your clients to their GoHighLevel sub-accounts (locations) to track speed-to-lead data.</p>
 
-                        {/* Add mapping form */}
+                        {/* Auto-Match Section */}
                         <div className="card p-4">
-                            <h3 className="text-sm font-semibold text-white mb-3">Add Mapping</h3>
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-semibold text-white">Auto-Match by Name</h3>
+                                <div className="flex gap-2">
+                                    <button onClick={runAutoMatch} disabled={autoMatchLoading} className="px-4 py-2 bg-gradient-to-r from-brand-cyan to-brand-purple text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                                        {autoMatchLoading ? 'Matching...' : 'Auto-Match All Clients'}
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-xs text-slate-500 mb-3">Fetches all GHL locations and matches them to clients by name. Review matches before saving.</p>
+
+                            {autoMatches.length > 0 && (
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-slate-400">{autoMatches.filter(m => m.enabled && m.location).length} of {autoMatches.length} clients matched</span>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setAutoMatches(prev => prev.map(m => ({ ...m, enabled: m.location ? true : false })))} className="text-xs text-brand-cyan hover:underline">Select All Matches</button>
+                                            <button onClick={() => setAutoMatches(prev => prev.map(m => ({ ...m, enabled: false })))} className="text-xs text-slate-500 hover:underline">Deselect All</button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1 max-h-96 overflow-y-auto scrollbar">
+                                        {autoMatches.map((match, idx) => {
+                                            const confidence = match.score >= 0.9 ? { label: 'Exact', color: 'text-emerald-400' } : match.score >= 0.5 ? { label: 'Likely', color: 'text-yellow-400' } : match.score >= 0.3 ? { label: 'Possible', color: 'text-orange-400' } : { label: 'No Match', color: 'text-red-400' };
+                                            return (
+                                                <div key={match.clientName} className={`flex items-center gap-3 px-3 py-2 rounded-lg ${match.enabled ? 'bg-dark-700' : 'bg-dark-800/50'}`}>
+                                                    <input type="checkbox" checked={match.enabled} onChange={() => toggleAutoMatch(idx)} className="rounded" disabled={!match.location} />
+                                                    <div style={{ minWidth: '180px' }} className="flex-shrink-0">
+                                                        <span className="text-sm text-white">{match.clientName}</span>
+                                                    </div>
+                                                    <span className="text-slate-600 text-xs">→</span>
+                                                    <select value={match.location?.id || ''} onChange={e => changeAutoMatchLocation(idx, e.target.value)} className="flex-1 input-field border rounded-lg px-2 py-1 text-xs" style={{ minWidth: '200px' }}>
+                                                        <option value="">No match found</option>
+                                                        {ghlLocations.map(l => (
+                                                            <option key={l.id} value={l.id}>{l.name} ({l.id.substring(0, 8)}...)</option>
+                                                        ))}
+                                                    </select>
+                                                    <span className={`text-xs font-semibold ${confidence.color}`} style={{ minWidth: '60px' }}>{confidence.label}</span>
+                                                    <span className="text-xs text-slate-600">{Math.round(match.score * 100)}%</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex gap-2 pt-2">
+                                        <button onClick={saveAutoMatches} disabled={setupLoading || autoMatches.filter(m => m.enabled && m.location).length === 0} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                                            {setupLoading ? 'Saving...' : `Save ${autoMatches.filter(m => m.enabled && m.location).length} Matches`}
+                                        </button>
+                                        <button onClick={() => setAutoMatches([])} className="px-4 py-2 bg-dark-700 text-slate-300 rounded-lg text-sm hover:bg-dark-600">Cancel</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Manual mapping form */}
+                        <div className="card p-4">
+                            <h3 className="text-sm font-semibold text-white mb-3">Manual Mapping</h3>
                             <div className="flex gap-3 items-end flex-wrap">
                                 <div style={{ minWidth: '200px' }}>
                                     <label className="text-xs text-slate-400 block mb-1">Client</label>
@@ -5187,8 +5330,13 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                     </select>
                                 </div>
                                 <div style={{ minWidth: '200px' }}>
-                                    <label className="text-xs text-slate-400 block mb-1">GHL Location ID</label>
-                                    <input type="text" value={mappingLocation} onChange={e => setMappingLocation(e.target.value)} placeholder="e.g. abc123xyz" className="w-full input-field border rounded-lg px-3 py-2 text-sm" />
+                                    <label className="text-xs text-slate-400 block mb-1">GHL Location</label>
+                                    <select value={mappingLocation} onChange={e => setMappingLocation(e.target.value)} className="w-full input-field border rounded-lg px-3 py-2 text-sm">
+                                        <option value="">Select location...</option>
+                                        {ghlLocations.map(l => (
+                                            <option key={l.id} value={l.id}>{l.name}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <button onClick={async () => {
                                     if (mappingClient && mappingLocation) {
@@ -5201,27 +5349,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                 }} disabled={!mappingClient || !mappingLocation || setupLoading} className="px-4 py-2 bg-brand-purple text-white rounded-lg text-sm font-semibold disabled:opacity-40">
                                     {setupLoading ? 'Saving...' : 'Add'}
                                 </button>
-                                <button onClick={async () => {
-                                    setSetupLoading(true);
-                                    await loadLocations();
-                                    setSetupLoading(false);
-                                }} className="px-4 py-2 bg-dark-700 text-slate-300 rounded-lg text-sm hover:bg-dark-600">
-                                    Fetch GHL Locations
-                                </button>
                             </div>
-                            {ghlLocations.length > 0 && (
-                                <div className="mt-3 p-3 bg-dark-800 rounded-lg">
-                                    <p className="text-xs text-slate-400 mb-2">Available GHL Locations:</p>
-                                    <div className="space-y-1 max-h-40 overflow-y-auto scrollbar">
-                                        {ghlLocations.map(l => (
-                                            <div key={l.id} className="flex items-center justify-between text-xs py-1">
-                                                <span className="text-white">{l.name}</span>
-                                                <span className="text-slate-500 font-mono">{l.id}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                         </div>
 
                         {/* Current mappings */}
@@ -5229,20 +5357,21 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             <div className="card p-4">
                                 <h3 className="text-sm font-semibold text-white mb-3">Current Mappings ({mappings.length})</h3>
                                 <div className="space-y-2">
-                                    {mappings.map(m => (
-                                        <div key={m.client_name} className="flex items-center justify-between bg-dark-800 rounded-lg px-3 py-2">
-                                            <div>
-                                                <span className="text-sm text-white">{m.client_name}</span>
-                                                <span className="text-xs text-slate-500 ml-2 font-mono">{m.ghl_location_id}</span>
+                                    {mappings.map(m => {
+                                        const locName = ghlLocations.find(l => l.id === m.ghl_location_id)?.name;
+                                        return (
+                                            <div key={m.client_name} className="flex items-center justify-between bg-dark-800 rounded-lg px-3 py-2">
+                                                <div>
+                                                    <span className="text-sm text-white">{m.client_name}</span>
+                                                    <span className="text-xs text-slate-500 ml-2">{locName || m.ghl_location_id}</span>
+                                                </div>
+                                                <button onClick={async () => { await saveMapping(m.client_name, null); }} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                                             </div>
-                                            <button onClick={async () => { await saveMapping(m.client_name, null); }} className="text-xs text-red-400 hover:text-red-300">Remove</button>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
-
-                        <p className="text-xs text-slate-500">To find Location IDs: Go to GHL → Sub-Account → Settings → Business Profile → the URL contains the location ID, or use "Fetch GHL Locations" above.</p>
                     </div>
                 );
             }

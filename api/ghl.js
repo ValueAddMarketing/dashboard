@@ -35,13 +35,21 @@ export default async function handler(req, res) {
     try {
         // List all locations (sub-accounts) under the agency
         if (action === 'listLocations') {
-            const data = await ghlFetch(`${GHL_BASE}/locations/search`, {
-                method: 'GET'
-            });
-            // The search endpoint may need query params
-            // Try the company-based approach
-            const locations = data.locations || [];
-            return res.json({ locations: locations.map(l => ({ id: l.id, name: l.name, email: l.email, phone: l.phone })) });
+            const allLocations = [];
+            let skip = 0;
+            const limit = 100;
+            let hasMore = true;
+
+            while (hasMore) {
+                const data = await ghlFetch(`${GHL_BASE}/locations/search?skip=${skip}&limit=${limit}`);
+                const locations = data.locations || [];
+                allLocations.push(...locations);
+                if (locations.length < limit) hasMore = false;
+                else skip += limit;
+                if (allLocations.length > 500) hasMore = false;
+            }
+
+            return res.json({ locations: allLocations.map(l => ({ id: l.id, name: l.name, email: l.email, phone: l.phone })) });
         }
 
         // Get contacts for a specific location with date filter
