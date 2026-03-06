@@ -345,6 +345,7 @@
             { id: 'pipeline', name: 'Deal Pipeline', icon: '🤝', desc: 'Deal closing progress for all clients' },
             { id: 'billing-audit', name: 'Billing Audit', icon: '💲', desc: 'Audit billing cycles against actual ad activity' },
             { id: 'client-map', name: 'Client Map', icon: '🗺️', desc: 'US map view of all clients by state' },
+            { id: 'speed-to-lead', name: 'Speed to Lead', icon: '⚡', desc: 'Track call response times from GHL' },
         ];
 
         // ========== LOGIN ==========
@@ -4909,6 +4910,586 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             );
         };
 
+        // ========== SPEED TO LEAD AI CHAT ==========
+        const SpeedToLeadAIChat = ({ allData }) => {
+            const [messages, setMessages] = useState([]);
+            const [input, setInput] = useState('');
+            const [loading, setLoading] = useState(false);
+            const chatEndRef = useRef(null);
+
+            useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+            const handleSend = async () => {
+                if (!input.trim() || loading) return;
+                const userMsg = input.trim();
+                setInput('');
+                setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+                setLoading(true);
+
+                const summary = Object.entries(allData).map(([client, d]) => {
+                    const s = d.stats || {};
+                    return `${client}: ${s.totalLeads} leads, ${s.totalCalled} called, ${s.totalUncalled} uncalled, avg speed ${s.avgSpeedMinutes != null ? s.avgSpeedMinutes + ' min' : 'N/A'}, median ${s.medianSpeedMinutes != null ? s.medianSpeedMinutes + ' min' : 'N/A'}, ${s.pctWithin5Min}% within 5 min, fastest ${s.fastestMinutes != null ? s.fastestMinutes + ' min' : 'N/A'}, slowest ${s.slowestMinutes != null ? s.slowestMinutes + ' min' : 'N/A'}`;
+                }).join('\n');
+
+                try {
+                    const resp = await fetch('/api/analyze', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: userMsg,
+                            context: `You are a speed-to-lead analyst for a real estate ad agency. Here is the current speed-to-lead data by client:\n${summary}\n\nAnswer questions about which clients are responding fastest/slowest, who has uncalled leads, trends, and recommendations. Be concise and actionable.`
+                        })
+                    });
+                    const data = await resp.json();
+                    setMessages(prev => [...prev, { role: 'assistant', content: data.response || data.error || 'No response' }]);
+                } catch (err) {
+                    setMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + err.message }]);
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="card flex flex-col" style={{ height: '400px' }}>
+                    <div className="p-3 border-b border-dark-700 flex items-center gap-2">
+                        <span className="text-brand-purple font-semibold text-sm">AI Speed-to-Lead Analyst</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar">
+                        {messages.length === 0 && <p className="text-xs text-slate-500 italic">Ask about speed-to-lead performance, e.g. "Which client has the worst response time?"</p>}
+                        {messages.map((m, i) => (
+                            <div key={i} className={`text-sm ${m.role === 'user' ? 'text-right' : ''}`}>
+                                <div className={`inline-block px-3 py-2 rounded-lg max-w-[85%] ${m.role === 'user' ? 'bg-brand-purple/20 text-white' : 'bg-dark-800 text-slate-300'}`} style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                            </div>
+                        ))}
+                        {loading && <div className="text-xs text-slate-500 animate-pulse">Analyzing...</div>}
+                        <div ref={chatEndRef} />
+                    </div>
+                    <div className="p-3 border-t border-dark-700">
+                        <div className="flex gap-2">
+                            <input type="text" value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} placeholder="Ask about speed to lead..." className="flex-1 bg-dark-900 border border-dark-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-purple" disabled={loading} />
+                            <button onClick={handleSend} disabled={loading || !input.trim()} className="px-3 py-2 bg-brand-purple text-white rounded-lg text-sm font-semibold hover:bg-brand-purple/80 disabled:opacity-40">Send</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========== SPEED TO LEAD TAB ==========
+        const SpeedToLeadTab = ({ clients, setupData }) => {
+            const [ghlData, setGhlData] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [dateRange, setDateRange] = useState('last_30d');
+            const [selectedClient, setSelectedClient] = useState(null);
+            const [searchFilter, setSearchFilter] = useState('');
+            const [sortConfig, setSortConfig] = useState({ key: 'avgSpeed', dir: 'desc' });
+            const [ghlLocations, setGhlLocations] = useState([]);
+            const [mappings, setMappings] = useState([]);
+            const [showSetup, setShowSetup] = useState(false);
+            const [setupLoading, setSetupLoading] = useState(false);
+            const [mappingClient, setMappingClient] = useState('');
+            const [mappingLocation, setMappingLocation] = useState('');
+
+            const dateRangeOptions = [
+                { value: 'last_7d', label: 'Last 7 Days', days: 7 },
+                { value: 'last_14d', label: 'Last 14 Days', days: 14 },
+                { value: 'last_30d', label: 'Last 30 Days', days: 30 },
+                { value: 'last_60d', label: 'Last 60 Days', days: 60 },
+                { value: 'last_90d', label: 'Last 90 Days', days: 90 },
+            ];
+
+            const getDateRange = () => {
+                const opt = dateRangeOptions.find(o => o.value === dateRange);
+                const days = opt ? opt.days : 30;
+                const end = new Date();
+                const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+                return { startDate: start.toISOString(), endDate: end.toISOString() };
+            };
+
+            const loadMappings = async () => {
+                try {
+                    const { data, error } = await supabase.from('client_ghl_locations').select('*').order('client_name', { ascending: true });
+                    if (error) throw error;
+                    setMappings(data || []);
+                    return data || [];
+                } catch (err) {
+                    console.error('Failed to load GHL mappings:', err);
+                    setMappings([]);
+                    return [];
+                }
+            };
+
+            const loadLocations = async () => {
+                try {
+                    const resp = await fetch('/api/ghl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'listLocations' })
+                    });
+                    const data = await resp.json();
+                    if (data.error) throw new Error(data.error);
+                    setGhlLocations(data.locations || []);
+                    return data.locations || [];
+                } catch (err) {
+                    console.error('Failed to load GHL locations:', err);
+                    return [];
+                }
+            };
+
+            const saveMapping = async (clientName, locationId) => {
+                if (!locationId) {
+                    await supabase.from('client_ghl_locations').delete().eq('client_name', clientName);
+                } else {
+                    await supabase.from('client_ghl_locations').upsert({ client_name: clientName, ghl_location_id: locationId }, { onConflict: 'client_name' });
+                }
+                await loadMappings();
+            };
+
+            const fetchSpeedData = async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                    // Check cache
+                    const cacheKey = 'vam_speed_to_lead_' + dateRange;
+                    const cacheTimeKey = 'vam_speed_to_lead_time_' + dateRange;
+                    const cached = localStorage.getItem(cacheKey);
+                    const cacheTime = localStorage.getItem(cacheTimeKey);
+                    if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 600000) {
+                        setGhlData(JSON.parse(cached));
+                        setLoading(false);
+                        return;
+                    }
+
+                    const { startDate, endDate } = getDateRange();
+                    const resp = await fetch('/api/ghl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'getAllSpeedToLead', startDate, endDate })
+                    });
+                    const data = await resp.json();
+                    if (data.error && !data.results) throw new Error(data.error);
+
+                    const results = data.results || {};
+                    setGhlData(results);
+                    localStorage.setItem(cacheKey, JSON.stringify(results));
+                    localStorage.setItem(cacheTimeKey, Date.now().toString());
+                } catch (err) {
+                    setError(err.message);
+                }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                loadMappings().then(m => {
+                    if (m.length > 0) fetchSpeedData();
+                    else { setLoading(false); setShowSetup(true); }
+                });
+            }, []);
+
+            useEffect(() => {
+                if (mappings.length > 0) fetchSpeedData();
+            }, [dateRange]);
+
+            const formatSpeed = (minutes) => {
+                if (minutes === null || minutes === undefined) return '—';
+                if (minutes < 1) return '< 1 min';
+                if (minutes < 60) return minutes + ' min';
+                if (minutes < 1440) return Math.round(minutes / 60) + ' hr ' + (minutes % 60) + ' min';
+                return Math.round(minutes / 1440) + ' days';
+            };
+
+            const getSpeedColor = (minutes) => {
+                if (minutes === null || minutes === undefined) return 'text-slate-500';
+                if (minutes <= 1) return 'text-emerald-400';
+                if (minutes <= 5) return 'text-green-400';
+                if (minutes <= 30) return 'text-yellow-400';
+                if (minutes <= 60) return 'text-orange-400';
+                return 'text-red-400';
+            };
+
+            const getSpeedBadge = (minutes) => {
+                if (minutes === null || minutes === undefined) return { label: 'No Data', color: 'bg-slate-700 text-slate-400' };
+                if (minutes <= 1) return { label: 'Elite', color: 'bg-emerald-500/20 text-emerald-400' };
+                if (minutes <= 5) return { label: 'Great', color: 'bg-green-500/20 text-green-400' };
+                if (minutes <= 30) return { label: 'OK', color: 'bg-yellow-500/20 text-yellow-400' };
+                if (minutes <= 60) return { label: 'Slow', color: 'bg-orange-500/20 text-orange-400' };
+                return { label: 'Critical', color: 'bg-red-500/20 text-red-400' };
+            };
+
+            // Aggregate stats across all clients
+            const allStats = useMemo(() => {
+                const entries = Object.values(ghlData);
+                if (entries.length === 0) return null;
+                const totalLeads = entries.reduce((s, e) => s + (e.stats?.totalLeads || 0), 0);
+                const totalCalled = entries.reduce((s, e) => s + (e.stats?.totalCalled || 0), 0);
+                const totalUncalled = entries.reduce((s, e) => s + (e.stats?.totalUncalled || 0), 0);
+                const allSpeeds = entries.flatMap(e => (e.leads || []).filter(l => l.called && l.speedMinutes != null).map(l => l.speedMinutes));
+                const avgSpeed = allSpeeds.length > 0 ? Math.round(allSpeeds.reduce((a, b) => a + b, 0) / allSpeeds.length) : null;
+                const within5 = allSpeeds.filter(s => s <= 5).length;
+                return { totalLeads, totalCalled, totalUncalled, avgSpeed, pctWithin5Min: totalLeads > 0 ? Math.round((within5 / totalLeads) * 100) : 0, pctCalled: totalLeads > 0 ? Math.round((totalCalled / totalLeads) * 100) : 0 };
+            }, [ghlData]);
+
+            // Leaderboard data
+            const leaderboard = useMemo(() => {
+                return Object.entries(ghlData).map(([client, d]) => ({
+                    client,
+                    ...d.stats,
+                    leads: d.leads || []
+                })).filter(c => {
+                    if (!searchFilter) return true;
+                    return c.client.toLowerCase().includes(searchFilter.toLowerCase());
+                }).sort((a, b) => {
+                    const { key, dir } = sortConfig;
+                    if (!key) return 0;
+                    let aVal, bVal;
+                    switch (key) {
+                        case 'client': aVal = a.client; bVal = b.client; return dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                        case 'avgSpeed': aVal = a.avgSpeedMinutes ?? 99999; bVal = b.avgSpeedMinutes ?? 99999; break;
+                        case 'median': aVal = a.medianSpeedMinutes ?? 99999; bVal = b.medianSpeedMinutes ?? 99999; break;
+                        case 'leads': aVal = a.totalLeads || 0; bVal = b.totalLeads || 0; break;
+                        case 'called': aVal = a.pctCalled || 0; bVal = b.pctCalled || 0; break;
+                        case 'within5': aVal = a.pctWithin5Min || 0; bVal = b.pctWithin5Min || 0; break;
+                        case 'uncalled': aVal = a.totalUncalled || 0; bVal = b.totalUncalled || 0; break;
+                        default: aVal = 0; bVal = 0;
+                    }
+                    return dir === 'asc' ? aVal - bVal : bVal - aVal;
+                });
+            }, [ghlData, searchFilter, sortConfig]);
+
+            const handleSort = (key) => {
+                setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'client' ? 'asc' : 'desc' });
+            };
+
+            const sortArrow = (key) => sortConfig.key === key ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : '';
+
+            // Setup / Mapping Modal
+            if (showSetup) {
+                return (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-2xl font-bold text-white">GHL Location Setup</h2>
+                            {mappings.length > 0 && (
+                                <button onClick={() => { setShowSetup(false); fetchSpeedData(); }} className="px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm font-semibold">Done - View Data</button>
+                            )}
+                        </div>
+                        <p className="text-slate-400 text-sm">Map your clients to their GoHighLevel sub-accounts (locations) to track speed-to-lead data.</p>
+
+                        {/* Add mapping form */}
+                        <div className="card p-4">
+                            <h3 className="text-sm font-semibold text-white mb-3">Add Mapping</h3>
+                            <div className="flex gap-3 items-end flex-wrap">
+                                <div style={{ minWidth: '200px' }}>
+                                    <label className="text-xs text-slate-400 block mb-1">Client</label>
+                                    <select value={mappingClient} onChange={e => setMappingClient(e.target.value)} className="w-full input-field border rounded-lg px-3 py-2 text-sm">
+                                        <option value="">Select client...</option>
+                                        {setupData.filter(s => !mappings.find(m => m.client_name === s.client)).map(s => (
+                                            <option key={s.client} value={s.client}>{s.client}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div style={{ minWidth: '200px' }}>
+                                    <label className="text-xs text-slate-400 block mb-1">GHL Location ID</label>
+                                    <input type="text" value={mappingLocation} onChange={e => setMappingLocation(e.target.value)} placeholder="e.g. abc123xyz" className="w-full input-field border rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                                <button onClick={async () => {
+                                    if (mappingClient && mappingLocation) {
+                                        setSetupLoading(true);
+                                        await saveMapping(mappingClient, mappingLocation);
+                                        setMappingClient('');
+                                        setMappingLocation('');
+                                        setSetupLoading(false);
+                                    }
+                                }} disabled={!mappingClient || !mappingLocation || setupLoading} className="px-4 py-2 bg-brand-purple text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                                    {setupLoading ? 'Saving...' : 'Add'}
+                                </button>
+                                <button onClick={async () => {
+                                    setSetupLoading(true);
+                                    await loadLocations();
+                                    setSetupLoading(false);
+                                }} className="px-4 py-2 bg-dark-700 text-slate-300 rounded-lg text-sm hover:bg-dark-600">
+                                    Fetch GHL Locations
+                                </button>
+                            </div>
+                            {ghlLocations.length > 0 && (
+                                <div className="mt-3 p-3 bg-dark-800 rounded-lg">
+                                    <p className="text-xs text-slate-400 mb-2">Available GHL Locations:</p>
+                                    <div className="space-y-1 max-h-40 overflow-y-auto scrollbar">
+                                        {ghlLocations.map(l => (
+                                            <div key={l.id} className="flex items-center justify-between text-xs py-1">
+                                                <span className="text-white">{l.name}</span>
+                                                <span className="text-slate-500 font-mono">{l.id}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Current mappings */}
+                        {mappings.length > 0 && (
+                            <div className="card p-4">
+                                <h3 className="text-sm font-semibold text-white mb-3">Current Mappings ({mappings.length})</h3>
+                                <div className="space-y-2">
+                                    {mappings.map(m => (
+                                        <div key={m.client_name} className="flex items-center justify-between bg-dark-800 rounded-lg px-3 py-2">
+                                            <div>
+                                                <span className="text-sm text-white">{m.client_name}</span>
+                                                <span className="text-xs text-slate-500 ml-2 font-mono">{m.ghl_location_id}</span>
+                                            </div>
+                                            <button onClick={async () => { await saveMapping(m.client_name, null); }} className="text-xs text-red-400 hover:text-red-300">Remove</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <p className="text-xs text-slate-500">To find Location IDs: Go to GHL → Sub-Account → Settings → Business Profile → the URL contains the location ID, or use "Fetch GHL Locations" above.</p>
+                    </div>
+                );
+            }
+
+            if (loading) {
+                return (
+                    <div className="flex items-center justify-center py-20">
+                        <div className="text-center">
+                            <div className="text-4xl mb-4 animate-pulse">⚡</div>
+                            <p className="text-slate-400">Loading speed-to-lead data from GHL...</p>
+                            <p className="text-xs text-slate-600 mt-2">This may take a moment for the first load</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (error) {
+                return (
+                    <div className="space-y-4">
+                        <div className="card p-6 text-center">
+                            <p className="text-red-400 mb-2">Error loading GHL data</p>
+                            <p className="text-xs text-slate-500 mb-4">{error}</p>
+                            <div className="flex gap-2 justify-center">
+                                <button onClick={fetchSpeedData} className="px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm">Retry</button>
+                                <button onClick={() => setShowSetup(true)} className="px-4 py-2 bg-dark-700 text-slate-300 rounded-lg text-sm">Setup Mappings</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Selected client drill-down
+            if (selectedClient && ghlData[selectedClient]) {
+                const clientData = ghlData[selectedClient];
+                const stats = clientData.stats || {};
+                const leads = (clientData.leads || []).sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
+                const badge = getSpeedBadge(stats.avgSpeedMinutes);
+
+                return (
+                    <div className="space-y-6">
+                        <div className="flex items-center gap-4">
+                            <button onClick={() => setSelectedClient(null)} className="text-brand-cyan hover:text-brand-cyan/80 text-sm">← Back to Leaderboard</button>
+                            <h2 className="text-xl font-bold text-white">{selectedClient}</h2>
+                            <span className={`px-2 py-1 rounded text-xs font-semibold ${badge.color}`}>{badge.label}</span>
+                        </div>
+
+                        {/* Client stats cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Avg Speed to Call</p>
+                                <p className={`text-2xl font-bold ${getSpeedColor(stats.avgSpeedMinutes)}`}>{formatSpeed(stats.avgSpeedMinutes)}</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Median Speed</p>
+                                <p className={`text-2xl font-bold ${getSpeedColor(stats.medianSpeedMinutes)}`}>{formatSpeed(stats.medianSpeedMinutes)}</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Total Leads</p>
+                                <p className="text-2xl font-bold text-white">{stats.totalLeads || 0}</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Uncalled Leads</p>
+                                <p className={`text-2xl font-bold ${stats.totalUncalled > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{stats.totalUncalled || 0}</p>
+                            </div>
+                        </div>
+
+                        {/* Speed distribution */}
+                        <div className="card p-4">
+                            <h3 className="text-sm font-semibold text-white mb-3">Response Time Distribution</h3>
+                            <div className="grid grid-cols-4 gap-3">
+                                {[
+                                    { label: '< 1 min', count: stats.within1Min || 0, color: 'bg-emerald-500' },
+                                    { label: '< 5 min', count: stats.within5Min || 0, color: 'bg-green-500' },
+                                    { label: '< 1 hr', count: stats.within1Hr || 0, color: 'bg-yellow-500' },
+                                    { label: '< 24 hr', count: stats.within24Hr || 0, color: 'bg-orange-500' },
+                                ].map(b => (
+                                    <div key={b.label} className="text-center">
+                                        <div className={`${b.color} text-white rounded-lg py-3 text-lg font-bold`}>{b.count}</div>
+                                        <p className="text-xs text-slate-400 mt-1">{b.label}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Individual leads table */}
+                        <div className="card overflow-hidden">
+                            <div className="p-4 border-b border-dark-700">
+                                <h3 className="text-sm font-semibold text-white">All Leads ({leads.length})</h3>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="text-xs text-slate-500 border-b border-dark-700">
+                                            <th className="text-left px-4 py-3">Lead</th>
+                                            <th className="text-left px-4 py-3">Source</th>
+                                            <th className="text-left px-4 py-3">Date Added</th>
+                                            <th className="text-left px-4 py-3">First Call</th>
+                                            <th className="text-left px-4 py-3">Speed to Call</th>
+                                            <th className="text-left px-4 py-3">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {leads.map(lead => {
+                                            const speedBadge = lead.called ? getSpeedBadge(lead.speedMinutes) : { label: 'Not Called', color: 'bg-red-500/20 text-red-400' };
+                                            return (
+                                                <tr key={lead.id} className="border-b border-dark-800 hover:bg-dark-800/50">
+                                                    <td className="px-4 py-3">
+                                                        <div className="text-sm text-white">{lead.name}</div>
+                                                        <div className="text-xs text-slate-500">{lead.email || lead.phone || '—'}</div>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-xs text-slate-400">{lead.source || '—'}</td>
+                                                    <td className="px-4 py-3 text-xs text-slate-400">{lead.dateAdded ? new Date(lead.dateAdded).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</td>
+                                                    <td className="px-4 py-3 text-xs text-slate-400">{lead.firstCallTime ? new Date(lead.firstCallTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</td>
+                                                    <td className={`px-4 py-3 text-sm font-semibold ${getSpeedColor(lead.speedMinutes)}`}>{lead.called ? formatSpeed(lead.speedMinutes) : '—'}</td>
+                                                    <td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-semibold ${speedBadge.color}`}>{speedBadge.label}</span></td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Main view: overview + leaderboard
+            return (
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                        <h2 className="text-2xl font-bold text-white">Speed to Lead</h2>
+                        <div className="flex gap-2 items-center">
+                            <select value={dateRange} onChange={e => { setDateRange(e.target.value); }} className="input-field border rounded-lg px-3 py-2 text-sm">
+                                {dateRangeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                            <button onClick={() => { localStorage.removeItem('vam_speed_to_lead_' + dateRange); localStorage.removeItem('vam_speed_to_lead_time_' + dateRange); fetchSpeedData(); }} className="px-3 py-2 bg-dark-700 hover:bg-dark-600 text-slate-300 rounded-lg text-sm">Refresh</button>
+                            <button onClick={() => setShowSetup(true)} className="px-3 py-2 bg-dark-700 hover:bg-dark-600 text-slate-300 rounded-lg text-sm">Setup</button>
+                        </div>
+                    </div>
+
+                    {/* Agency Overview Cards */}
+                    {allStats && (
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Agency Avg Speed</p>
+                                <p className={`text-2xl font-bold ${getSpeedColor(allStats.avgSpeed)}`}>{formatSpeed(allStats.avgSpeed)}</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Total Leads</p>
+                                <p className="text-2xl font-bold text-white">{allStats.totalLeads}</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Leads Called</p>
+                                <p className="text-2xl font-bold text-emerald-400">{allStats.pctCalled}%</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Within 5 Min</p>
+                                <p className={`text-2xl font-bold ${allStats.pctWithin5Min >= 80 ? 'text-emerald-400' : allStats.pctWithin5Min >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{allStats.pctWithin5Min}%</p>
+                            </div>
+                            <div className="card p-4 text-center">
+                                <p className="text-xs text-slate-400 mb-1">Uncalled Leads</p>
+                                <p className={`text-2xl font-bold ${allStats.totalUncalled > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{allStats.totalUncalled}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {Object.keys(ghlData).length === 0 && !loading && (
+                        <div className="card p-8 text-center">
+                            <p className="text-slate-400 mb-2">No speed-to-lead data found</p>
+                            <p className="text-xs text-slate-600 mb-4">Make sure your clients are mapped to GHL locations and have recent leads.</p>
+                            <button onClick={() => setShowSetup(true)} className="px-4 py-2 bg-brand-purple text-white rounded-lg text-sm">Setup GHL Mappings</button>
+                        </div>
+                    )}
+
+                    {/* Search */}
+                    {Object.keys(ghlData).length > 0 && (
+                        <div className="flex gap-3">
+                            <input type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Search clients..." className="input-field border rounded-lg px-4 py-2 text-sm flex-1" style={{ maxWidth: '300px' }} />
+                        </div>
+                    )}
+
+                    {/* Leaderboard Table */}
+                    {leaderboard.length > 0 && (
+                        <div className="card overflow-hidden">
+                            <div className="p-4 border-b border-dark-700">
+                                <h3 className="text-sm font-semibold text-white">Client Leaderboard</h3>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="text-xs text-slate-500 border-b border-dark-700">
+                                            <th className="text-left px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('client')}>Client{sortArrow('client')}</th>
+                                            <th className="text-left px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('avgSpeed')}>Avg Speed{sortArrow('avgSpeed')}</th>
+                                            <th className="text-left px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('median')}>Median{sortArrow('median')}</th>
+                                            <th className="text-center px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('leads')}>Leads{sortArrow('leads')}</th>
+                                            <th className="text-center px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('called')}>% Called{sortArrow('called')}</th>
+                                            <th className="text-center px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('within5')}>% < 5 min{sortArrow('within5')}</th>
+                                            <th className="text-center px-4 py-3 cursor-pointer hover:text-white" onClick={() => handleSort('uncalled')}>Uncalled{sortArrow('uncalled')}</th>
+                                            <th className="text-left px-4 py-3">Fastest</th>
+                                            <th className="text-left px-4 py-3">Slowest</th>
+                                            <th className="text-left px-4 py-3">Rating</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {leaderboard.map((row, idx) => {
+                                            const badge = getSpeedBadge(row.avgSpeedMinutes);
+                                            return (
+                                                <tr key={row.client} className="border-b border-dark-800 hover:bg-dark-800/50 cursor-pointer" onClick={() => setSelectedClient(row.client)}>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-lg">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : ''}</span>
+                                                            <span className="text-sm text-white font-medium">{row.client}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className={`px-4 py-3 text-sm font-semibold ${getSpeedColor(row.avgSpeedMinutes)}`}>{formatSpeed(row.avgSpeedMinutes)}</td>
+                                                    <td className={`px-4 py-3 text-sm ${getSpeedColor(row.medianSpeedMinutes)}`}>{formatSpeed(row.medianSpeedMinutes)}</td>
+                                                    <td className="px-4 py-3 text-sm text-center text-white">{row.totalLeads || 0}</td>
+                                                    <td className="px-4 py-3 text-sm text-center">
+                                                        <span className={row.pctCalled >= 90 ? 'text-emerald-400' : row.pctCalled >= 70 ? 'text-yellow-400' : 'text-red-400'}>{row.pctCalled || 0}%</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-center">
+                                                        <span className={row.pctWithin5Min >= 80 ? 'text-emerald-400' : row.pctWithin5Min >= 50 ? 'text-yellow-400' : 'text-red-400'}>{row.pctWithin5Min || 0}%</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-center">
+                                                        <span className={row.totalUncalled > 0 ? 'text-red-400 font-semibold' : 'text-emerald-400'}>{row.totalUncalled || 0}</span>
+                                                    </td>
+                                                    <td className={`px-4 py-3 text-xs ${getSpeedColor(row.fastestMinutes)}`}>{formatSpeed(row.fastestMinutes)}</td>
+                                                    <td className={`px-4 py-3 text-xs ${getSpeedColor(row.slowestMinutes)}`}>{formatSpeed(row.slowestMinutes)}</td>
+                                                    <td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-semibold ${badge.color}`}>{badge.label}</span></td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AI Chat */}
+                    {Object.keys(ghlData).length > 0 && (
+                        <SpeedToLeadAIChat allData={ghlData} />
+                    )}
+                </div>
+            );
+        };
+
         // ========== CLIENT MAP TAB ==========
         const ClientMapTab = ({ clients, setupData, onSelectClient }) => {
             const [hoveredState, setHoveredState] = useState(null);
@@ -5364,6 +5945,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     case 'pipeline': return <DealPipelineTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                     case 'billing-audit': return <BillingAuditTab clients={clients} setupData={setupData} />;
                     case 'client-map': return <ClientMapTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
+                    case 'speed-to-lead': return <SpeedToLeadTab clients={clients} setupData={setupData} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
@@ -5457,7 +6039,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                             {s && s.mrr && <span className="text-emerald-400 text-sm">MRR: {s.mrr}</span>}
                                         </div>
                                     ) : (
-                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : tab === 'billing-audit' ? '💲 Billing Audit' : tab === 'client-map' ? '🗺️ Client Map' : 'Select a client to get started'}</h2>
+                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : tab === 'billing-audit' ? '💲 Billing Audit' : tab === 'client-map' ? '🗺️ Client Map' : tab === 'speed-to-lead' ? '⚡ Speed to Lead' : 'Select a client to get started'}</h2>
                                     )}
                                 </div>
                                 <button 
