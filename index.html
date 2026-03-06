@@ -4492,6 +4492,40 @@ Column definitions:
                 setShowMappingModal(null);
             };
 
+            const fmtD = (date) => date ? date.toISOString().split('T')[0] : '';
+
+            const exportCSV = (rows) => {
+                const headers = ['Client','Team Member','Paid Date','First Spend Date (META)','Setup Days','Ad Live Date','Active Days (META)','Inactive Days (META)','Recorded Pause','Discrepancy','Severity','Corrected Billing Start','Sheet Billing','Next Billing Date','Payment Source'];
+                const csvRows = [headers.join(',')];
+                for (const c of rows) {
+                    const row = [
+                        '"' + (c.client || '').replace(/"/g, '""') + '"',
+                        '"' + (c.teamMember || '').replace(/"/g, '""') + '"',
+                        fmtD(c.paidDate),
+                        fmtD(c.firstSpendDate),
+                        c.launchSetupDays != null ? c.launchSetupDays : '',
+                        fmtD(c.adLiveDate),
+                        c.hasMetaData ? c.activeDays : '',
+                        c.hasMetaData ? c.inactiveDays : '',
+                        c.recordedOnPause || 0,
+                        c.hasMetaData ? c.discrepancy : '',
+                        c.severity || '',
+                        fmtD(c.correctedBillingStart),
+                        '"' + (c.billingCycle || '').replace(/"/g, '""') + '"',
+                        fmtD(c.nextBillingDate),
+                        c.paymentSource || ''
+                    ];
+                    csvRows.push(row.join(','));
+                }
+                const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'billing_audit_' + new Date().toISOString().split('T')[0] + '.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
             const enriched = useMemo(() => setupData.filter(s => s.client).map(s => {
                 const clientName = s.client;
                 const adLiveDate = parseDate(s.adLiveDate || s[' Ad Live date'] || s['Ad Live date'] || '');
@@ -4612,6 +4646,7 @@ Column definitions:
                             {activeFilterCount > 0 && <button onClick={() => { setSearchFilter(''); setFilterSeverity(''); setFilterTeamMember(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20">Clear Filters ({activeFilterCount})</button>}
                             {sortConfig.key && <button onClick={() => setSortConfig({ key: null, dir: 'desc' })} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Reset to Sheet Order</button>}
                             {(activeFilterCount > 0 || searchFilter) && <span className="text-xs text-slate-500">Showing {filtered.length} of {enriched.length}</span>}
+                            <button onClick={() => exportCSV(sorted)} className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 ml-auto">Export CSV</button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div><label className="block text-xs text-slate-500 mb-1">Discrepancy Severity</label><select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white"><option value="">All</option><option value="High">High</option><option value="Medium">Medium</option><option value="OK">OK</option></select></div>
