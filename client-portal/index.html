@@ -291,8 +291,10 @@
                         const portal = await portalResp.json();
                         if (portalResp.ok) setClientData(portal);
 
-                        // Parse sheets and find this client (fuzzy: exact, then includes, then last name)
-                        const allClients = parseCSV(sheetsResp);
+                        // Parse sheets — Client Ads Performance has headers in row 2 (skip row 1)
+                        const adsLines = sheetsResp.split('\n');
+                        const adsCsv = adsLines.length > 2 ? [adsLines[1], ...adsLines.slice(2)].join('\n') : sheetsResp;
+                        const allClients = parseCSV(adsCsv);
                         const clientLower = clientName.toLowerCase();
                         const clientParts = clientLower.split(/\s+/);
                         const findClient = (rows, nameKey) => {
@@ -317,7 +319,10 @@
                         const myData = findClient(allClients, 'Client') || findClient(allClients, 'VAM');
                         if (myData) setSheetData(myData);
 
-                        const allSetup = parseCSV(setupResp);
+                        // Setup Timing — headers in row 1, skip row 2 (summary row)
+                        const setupLines = setupResp.split('\n');
+                        const setupCsv = setupLines.length > 2 ? [setupLines[0], ...setupLines.slice(2)].join('\n') : setupResp;
+                        const allSetup = parseCSV(setupCsv);
                         const mySetup = findClient(allSetup, 'VAM');
                         if (mySetup) setSetupData(mySetup);
 
@@ -356,7 +361,7 @@
                 const buyerLeads = pn(r['Lifetime Buyer Leads']);
                 const listingLeads = pn(r['Listing Leads']);
                 const totalLeads = sellerLeads + buyerLeads + listingLeads;
-                const spend = pn(r['Lifetime Ad Spend']);
+                const spend = pn(r['Total Ad Spend']) || pn(r['Lifetime Ad Spend']);
                 const cpl = totalLeads > 0 ? spend / totalLeads : 0;
 
                 return {
