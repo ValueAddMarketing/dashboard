@@ -4537,6 +4537,7 @@ Column definitions:
                         <div className="flex items-center gap-3">
                             <input type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Search clients..." className="w-64 input-field border rounded-xl px-3 py-2 text-sm" />
                             {activeFilterCount > 0 && <button onClick={() => { setSearchFilter(''); setFilterSeverity(''); setFilterTeamMember(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20">Clear Filters ({activeFilterCount})</button>}
+                            {sortConfig.key && <button onClick={() => setSortConfig({ key: null, dir: 'desc' })} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Reset to Sheet Order</button>}
                             {(activeFilterCount > 0 || searchFilter) && <span className="text-xs text-slate-500">Showing {filtered.length} of {enriched.length}</span>}
                         </div>
                         <div className="grid grid-cols-2 gap-3">
