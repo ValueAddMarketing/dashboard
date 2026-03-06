@@ -3507,18 +3507,29 @@ ${transcript}`;
                     else if (data?.error) { alert('Assignment failed: ' + data.error); return setAssigningId(null); }
 
                     // --- Auto-assign other unmatched meetings with same participants ---
+                    // IMPORTANT: Filter out ALL internal team emails/names, not just the current user
+                    const INTERNAL_DOMAINS = ['valueaddmarketing.com'];
+                    const isInternalParticipant = (p) => {
+                        const lower = p.toLowerCase();
+                        if (lower.includes('@')) {
+                            const domain = lower.split('@')[1];
+                            return INTERNAL_DOMAINS.some(d => domain === d);
+                        }
+                        return false;
+                    };
+
                     const assignedEntry = syncLog.find(l => l.fathom_recording_id === recordingId);
                     const assignedParticipants = getLogParticipants(assignedEntry);
-                    // Remove the user's own email so we only match on external participants
                     const userEmailLower = (user?.email || '').toLowerCase();
-                    const externalParticipants = assignedParticipants.filter(p => p !== userEmailLower);
+                    // Remove internal team + current user — only keep truly external participants
+                    const externalParticipants = assignedParticipants.filter(p => p !== userEmailLower && !isInternalParticipant(p));
 
                     const autoAssignIds = [];
                     if (externalParticipants.length > 0) {
                         for (const entry of syncLog) {
                             if (entry.fathom_recording_id === recordingId) continue;
                             if (entry.status !== 'unmatched') continue;
-                            const entryParticipants = getLogParticipants(entry).filter(p => p !== userEmailLower);
+                            const entryParticipants = getLogParticipants(entry).filter(p => p !== userEmailLower && !isInternalParticipant(p));
                             const hasOverlap = entryParticipants.some(p => externalParticipants.includes(p));
                             if (hasOverlap) autoAssignIds.push(entry.fathom_recording_id);
                         }

@@ -146,24 +146,54 @@ serve(async (req) => {
       )
 
       // Save participant names from the meeting title as name mappings for future auto-matching
-      const titleNames = extractNamesFromTitle(recording.title)
-      // Also extract invitee names from stored metadata
+      // IMPORTANT: Filter out internal team members so they don't get mapped to clients
+      const INTERNAL_DOMAINS = ['valueaddmarketing.com']
+
+      // Build set of internal team member names by checking invitee/speaker emails
+      const internalNames = new Set<string>()
+      let storedParticipantEmails: string[] = []
       let storedParticipants: string[] = []
       try {
         const errorMeta = JSON.parse(syncEntry?.error_message || '{}')
         storedParticipants = (errorMeta.participant_names || []) as string[]
+        storedParticipantEmails = ((errorMeta.participants || []) as string[]).filter((p: string) => p.includes('@'))
       } catch { /* ignore */ }
 
+      // Mark names as internal if their email is from an internal domain
+      const invitees = (syncEntry?.calendar_invitees || []) as Array<{ email?: string; name?: string }>
+      for (const inv of invitees) {
+        if (inv.email) {
+          const domain = inv.email.split('@')[1]?.toLowerCase()
+          if (domain && INTERNAL_DOMAINS.includes(domain)) {
+            if (inv.name) internalNames.add(inv.name.toLowerCase().trim())
+          }
+        }
+      }
+      // Also check stored participant emails
+      for (const email of storedParticipantEmails) {
+        const domain = email.split('@')[1]?.toLowerCase()
+        if (domain && INTERNAL_DOMAINS.includes(domain)) {
+          // Try to find the name associated with this email from invitees
+          const inv = invitees.find(i => i.email?.toLowerCase() === email.toLowerCase())
+          if (inv?.name) internalNames.add(inv.name.toLowerCase().trim())
+          // Also add email prefix as a name variant (e.g. "josh.dong" -> "josh dong")
+          const prefix = email.split('@')[0].replace(/[._]/g, ' ').toLowerCase()
+          internalNames.add(prefix)
+        }
+      }
+
+      const titleNames = extractNamesFromTitle(recording.title)
       const allNames = [...new Set([...titleNames, ...storedParticipants])]
         .filter(n => n.length > 1)
 
-      // Ignore the user's own name (common patterns)
+      // Ignore the user's own name
       const ownerEmails = [(body.user_email as string) || ''].filter(Boolean)
       const ownerNames = ownerEmails.map(e => e.split('@')[0].replace(/[._]/g, ' ').toLowerCase())
 
       for (const name of allNames) {
         const nameLower = name.toLowerCase()
         if (ownerNames.some(on => nameLower.includes(on) || on.includes(nameLower))) continue
+        if (internalNames.has(nameLower)) continue // skip internal team members
         if (nameMap.has(nameLower)) continue // already mapped
 
         await supabase.from('client_participant_names').upsert({
@@ -553,17 +583,28 @@ function matchClient(
   }
 
   // Strategy 4: Check participant names against learned name mappings
+  // IMPORTANT: Only match on names that are NOT from internal team domains
+  const INTERNAL_DOMAINS_MATCH = ['valueaddmarketing.com']
   if (nameMap.size > 0) {
-    // Check invitee names
+    // Check invitee names — but skip invitees with internal email domains
     for (const invitee of invitees) {
       if (invitee.name) {
+        // Skip if this invitee has an internal email
+        if (invitee.email) {
+          const domain = invitee.email.split('@')[1]?.toLowerCase()
+          if (domain && INTERNAL_DOMAINS_MATCH.includes(domain)) continue
+        }
         const nameLower = invitee.name.toLowerCase().trim()
         if (nameMap.has(nameLower)) return nameMap.get(nameLower)!
       }
     }
-    // Check speaker names from transcript
+    // Check speaker names from transcript — skip speakers with internal emails
     if (recording.transcript) {
       for (const entry of recording.transcript) {
+        if (entry.speaker_email) {
+          const domain = entry.speaker_email.split('@')[1]?.toLowerCase()
+          if (domain && INTERNAL_DOMAINS_MATCH.includes(domain)) continue
+        }
         const nameLower = (entry.speaker_name || '').toLowerCase().trim()
         if (nameLower && nameMap.has(nameLower)) return nameMap.get(nameLower)!
       }
