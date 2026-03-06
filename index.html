@@ -5358,7 +5358,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             ) : (
                                 <div className="space-y-2">
                                     <p className="text-xs text-slate-500">Install the GHL OAuth app to auto-generate tokens for all sub-accounts. This is the easiest way — one install covers all clients.</p>
-                                    <p className="text-xs text-slate-400">Steps: 1) Create app in GHL Developer Marketplace 2) Set redirect URL to <code className="text-brand-cyan">{typeof window !== 'undefined' ? window.location.origin : ''}/api/ghl-oauth-callback</code> 3) Add GHL_CLIENT_ID and GHL_CLIENT_SECRET to Vercel 4) Install the app from GHL</p>
+                                    <p className="text-xs text-slate-400">Steps: 1) Create app in GHL Developer Marketplace 2) Set redirect URL to <code className="text-brand-cyan">{typeof window !== 'undefined' ? window.location.origin : ''}/api/oauth-callback</code> 3) Add GHL_CLIENT_ID and GHL_CLIENT_SECRET to Vercel 4) Install the app from GHL</p>
                                 </div>
                             )}
                         </div>

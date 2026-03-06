@@ -36,7 +36,7 @@ export default async function handler(req, res) {
                 grant_type: 'authorization_code',
                 code,
                 user_type: 'Company',
-                redirect_uri: `${getBaseUrl(req)}/api/ghl-oauth-callback`
+                redirect_uri: `${getBaseUrl(req)}/api/oauth-callback`
             }).toString()
         });
 
