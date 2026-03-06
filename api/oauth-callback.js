@@ -35,7 +35,7 @@ export default async function handler(req, res) {
                 client_secret: GHL_CLIENT_SECRET,
                 grant_type: 'authorization_code',
                 code,
-                user_type: 'Company',
+                user_type: 'Location',
                 redirect_uri: `${getBaseUrl(req)}/api/oauth-callback`
             }).toString()
         });
