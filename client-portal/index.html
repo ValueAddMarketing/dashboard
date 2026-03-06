@@ -268,6 +268,8 @@
             const [sheetData, setSheetData] = useState(null);
             const [setupData, setSetupData] = useState(null);
             const [ghlData, setGhlData] = useState(null);
+            const [ghlLoaded, setGhlLoaded] = useState(false);
+            const [ghlError, setGhlError] = useState(null);
             const [loading, setLoading] = useState(true);
             const [activeSection, setActiveSection] = useState('overview');
             const [lastUpdated, setLastUpdated] = useState(null);
@@ -333,18 +335,28 @@
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ action: 'getAllSpeedToLead', startDate: new Date(Date.now() - 30 * 86400000).toISOString(), endDate: new Date().toISOString() })
                             });
-                            if (ghlResp.ok) {
-                                const ghlAll = await ghlResp.json();
-                                // Find this client's GHL data (fuzzy match)
-                                const results = ghlAll.results || {};
-                                const ghlKey = Object.keys(results).find(k => {
+                            const ghlAll = await ghlResp.json();
+                            console.log('GHL response:', ghlAll);
+                            if (ghlResp.ok && ghlAll.results) {
+                                const results = ghlAll.results;
+                                const allKeys = Object.keys(results);
+                                console.log('GHL clients available:', allKeys);
+                                const ghlKey = allKeys.find(k => {
                                     const kl = k.toLowerCase();
                                     return kl === clientLower || kl.includes(clientLower) || clientLower.includes(kl) ||
                                         clientParts.some(p => p.length > 2 && kl.includes(p));
                                 });
-                                if (ghlKey) setGhlData(results[ghlKey]);
+                                if (ghlKey) {
+                                    console.log('GHL matched client:', ghlKey);
+                                    setGhlData(results[ghlKey]);
+                                } else {
+                                    setGhlError('no_mapping');
+                                }
+                            } else {
+                                setGhlError(ghlAll.error || 'api_error');
                             }
-                        } catch (e) { console.error('GHL fetch error:', e); }
+                        } catch (e) { console.error('GHL fetch error:', e); setGhlError(e.message); }
+                        setGhlLoaded(true);
 
                         setLastUpdated(new Date());
                     } catch (err) { console.error('Load error:', err); }
@@ -494,7 +506,7 @@
 
                     {/* Main Content */}
                     <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-                        {activeSection === 'overview' && <OverviewSection metrics={metrics} setupInfo={setupInfo} recentMeetings={recentMeetings} clientData={clientData} ghlData={ghlData} />}
+                        {activeSection === 'overview' && <OverviewSection metrics={metrics} setupInfo={setupInfo} recentMeetings={recentMeetings} clientData={clientData} ghlData={ghlData} ghlLoaded={ghlLoaded} ghlError={ghlError} />}
                         {activeSection === 'leads' && <LeadsSection metrics={metrics} ghlData={ghlData} />}
                         {activeSection === 'meetings' && <MeetingsSection meetings={recentMeetings} />}
                         {activeSection === 'resources' && <ResourcesSection setupInfo={setupInfo} clientName={clientName} />}
@@ -504,7 +516,7 @@
                     <footer className="border-t border-dark-800 mt-12 py-6">
                         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between">
                             <p className="text-xs text-slate-600">Value Add Marketing · Client Dashboard</p>
-                            <p className="text-xs text-slate-600">Need help? Message us on Slack</p>
+                            <a href="https://slack.com/open" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-600 hover:text-brand-cyan transition-colors">Need help? Message us on Slack →</a>
                         </div>
                     </footer>
                 </div>
@@ -514,7 +526,7 @@
         // ═══════════════════════════════════════════
         // OVERVIEW SECTION
         // ═══════════════════════════════════════════
-        const OverviewSection = ({ metrics, setupInfo, recentMeetings, clientData, ghlData }) => {
+        const OverviewSection = ({ metrics, setupInfo, recentMeetings, clientData, ghlData, ghlLoaded, ghlError }) => {
             if (!metrics) {
                 return (
                     <div className="glass rounded-2xl p-12 text-center">
@@ -597,11 +609,23 @@
                         </div>
                     ) : (
                         <div className="glass rounded-2xl p-6 border border-dark-600 fade-up">
-                            <div className="flex items-center gap-3">
-                                <span className="text-2xl">⚡</span>
+                            <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 rounded-2xl bg-dark-700 flex items-center justify-center shrink-0">
+                                    <span className="text-2xl">⚡</span>
+                                </div>
                                 <div>
-                                    <h3 className="text-white font-semibold">Speed to Lead</h3>
-                                    <p className="text-slate-400 text-sm">Loading your lead response data...</p>
+                                    <h3 className="text-white font-semibold text-lg">Speed to Lead</h3>
+                                    {!ghlLoaded ? (
+                                        <p className="text-slate-400 text-sm mt-1 flex items-center gap-2">
+                                            <svg className="animate-spin h-4 w-4 text-brand-cyan" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                            Loading your lead response data...
+                                        </p>
+                                    ) : (
+                                        <div>
+                                            <p className="text-slate-400 text-sm mt-1">Speed to lead data is being set up for your account. Your team is connecting your CRM so we can track how fast you're responding to leads.</p>
+                                            <p className="text-xs text-slate-500 mt-2">💡 In the meantime, aim to call every new lead within 5 minutes!</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -697,9 +721,9 @@
                             <h3 className="text-white font-semibold text-sm">💬 Stay Connected</h3>
                             <p className="text-slate-400 text-sm mt-1">Check your Slack channel for the latest updates, questions, and communication from your team.</p>
                         </div>
-                        <div className="px-4 py-2 rounded-xl bg-brand-cyan/10 text-brand-cyan text-sm font-medium whitespace-nowrap">
-                            Open Slack
-                        </div>
+                        <a href="https://slack.com/open" target="_blank" rel="noopener noreferrer" className="px-4 py-2 rounded-xl bg-brand-cyan/10 text-brand-cyan text-sm font-medium whitespace-nowrap hover:bg-brand-cyan/20 transition-colors cursor-pointer">
+                            Open Slack →
+                        </a>
                     </div>
 
                     {/* Lead Funnel + Deals */}
