@@ -267,6 +267,7 @@
             const [clientData, setClientData] = useState(null);
             const [sheetData, setSheetData] = useState(null);
             const [setupData, setSetupData] = useState(null);
+            const [ghlData, setGhlData] = useState(null);
             const [loading, setLoading] = useState(true);
             const [activeSection, setActiveSection] = useState('overview');
             const [lastUpdated, setLastUpdated] = useState(null);
@@ -290,20 +291,55 @@
                         const portal = await portalResp.json();
                         if (portalResp.ok) setClientData(portal);
 
-                        // Parse sheets and find this client
+                        // Parse sheets and find this client (fuzzy: exact, then includes, then last name)
                         const allClients = parseCSV(sheetsResp);
-                        const myData = allClients.find(r => {
-                            const name = (r['Client'] || r['VAM'] || '').trim();
-                            return name.toLowerCase() === clientName.toLowerCase();
-                        });
+                        const clientLower = clientName.toLowerCase();
+                        const clientParts = clientLower.split(/\s+/);
+                        const findClient = (rows, nameKey) => {
+                            // Exact match
+                            let match = rows.find(r => (r[nameKey] || '').trim().toLowerCase() === clientLower);
+                            if (match) return match;
+                            // Includes match (sheet name contains client name or vice versa)
+                            match = rows.find(r => {
+                                const n = (r[nameKey] || '').trim().toLowerCase();
+                                return n && (n.includes(clientLower) || clientLower.includes(n));
+                            });
+                            if (match) return match;
+                            // Last name match (if client has 2+ words)
+                            if (clientParts.length >= 2) {
+                                match = rows.find(r => {
+                                    const n = (r[nameKey] || '').trim().toLowerCase();
+                                    return n && clientParts.some(p => p.length > 2 && n.includes(p));
+                                });
+                            }
+                            return match || null;
+                        };
+                        const myData = findClient(allClients, 'Client') || findClient(allClients, 'VAM');
                         if (myData) setSheetData(myData);
 
                         const allSetup = parseCSV(setupResp);
-                        const mySetup = allSetup.find(r => {
-                            const name = (r['VAM'] || '').trim();
-                            return name.toLowerCase() === clientName.toLowerCase();
-                        });
+                        const mySetup = findClient(allSetup, 'VAM');
                         if (mySetup) setSetupData(mySetup);
+
+                        // Fetch GHL speed-to-lead data (non-blocking)
+                        try {
+                            const ghlResp = await fetch('/api/ghl', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'getAllSpeedToLead', startDate: new Date(Date.now() - 30 * 86400000).toISOString(), endDate: new Date().toISOString() })
+                            });
+                            if (ghlResp.ok) {
+                                const ghlAll = await ghlResp.json();
+                                // Find this client's GHL data (fuzzy match)
+                                const results = ghlAll.results || {};
+                                const ghlKey = Object.keys(results).find(k => {
+                                    const kl = k.toLowerCase();
+                                    return kl === clientLower || kl.includes(clientLower) || clientLower.includes(kl) ||
+                                        clientParts.some(p => p.length > 2 && kl.includes(p));
+                                });
+                                if (ghlKey) setGhlData(results[ghlKey]);
+                            }
+                        } catch (e) { console.error('GHL fetch error:', e); }
 
                         setLastUpdated(new Date());
                     } catch (err) { console.error('Load error:', err); }
@@ -453,8 +489,8 @@
 
                     {/* Main Content */}
                     <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-                        {activeSection === 'overview' && <OverviewSection metrics={metrics} setupInfo={setupInfo} recentMeetings={recentMeetings} clientData={clientData} />}
-                        {activeSection === 'leads' && <LeadsSection metrics={metrics} />}
+                        {activeSection === 'overview' && <OverviewSection metrics={metrics} setupInfo={setupInfo} recentMeetings={recentMeetings} clientData={clientData} ghlData={ghlData} />}
+                        {activeSection === 'leads' && <LeadsSection metrics={metrics} ghlData={ghlData} />}
                         {activeSection === 'meetings' && <MeetingsSection meetings={recentMeetings} />}
                         {activeSection === 'resources' && <ResourcesSection setupInfo={setupInfo} clientName={clientName} />}
                     </main>
@@ -473,7 +509,7 @@
         // ═══════════════════════════════════════════
         // OVERVIEW SECTION
         // ═══════════════════════════════════════════
-        const OverviewSection = ({ metrics, setupInfo, recentMeetings, clientData }) => {
+        const OverviewSection = ({ metrics, setupInfo, recentMeetings, clientData, ghlData }) => {
             if (!metrics) {
                 return (
                     <div className="glass rounded-2xl p-12 text-center">
@@ -597,6 +633,44 @@
                         </div>
                     </div>
 
+                    {/* Speed to Lead */}
+                    {ghlData?.stats && (
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-4">
+                            <h3 className="text-white font-semibold mb-5">⚡ Speed to Lead (Last 30 Days)</h3>
+                            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                                <div className="bg-dark-800/50 rounded-xl p-4 text-center">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Avg Response</p>
+                                    <p className="text-2xl font-bold text-white">
+                                        {ghlData.stats.avgSpeedMinutes !== null ? (
+                                            ghlData.stats.avgSpeedMinutes < 60 ? `${ghlData.stats.avgSpeedMinutes}m` : `${Math.round(ghlData.stats.avgSpeedMinutes / 60)}h`
+                                        ) : '—'}
+                                    </p>
+                                </div>
+                                <div className="bg-dark-800/50 rounded-xl p-4 text-center">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Total Leads</p>
+                                    <p className="text-2xl font-bold text-brand-cyan">{ghlData.stats.totalLeads}</p>
+                                </div>
+                                <div className="bg-dark-800/50 rounded-xl p-4 text-center">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Called</p>
+                                    <p className="text-2xl font-bold text-brand-green">{ghlData.stats.pctCalled}%</p>
+                                </div>
+                                <div className="bg-dark-800/50 rounded-xl p-4 text-center">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Within 5 Min</p>
+                                    <p className={`text-2xl font-bold ${ghlData.stats.pctWithin5Min >= 50 ? 'text-brand-green' : ghlData.stats.pctWithin5Min >= 25 ? 'text-amber-400' : 'text-red-400'}`}>{ghlData.stats.pctWithin5Min}%</p>
+                                </div>
+                                <div className="bg-dark-800/50 rounded-xl p-4 text-center">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Uncalled</p>
+                                    <p className={`text-2xl font-bold ${ghlData.stats.totalUncalled === 0 ? 'text-brand-green' : 'text-red-400'}`}>{ghlData.stats.totalUncalled}</p>
+                                </div>
+                            </div>
+                            {ghlData.stats.pctWithin5Min < 50 && (
+                                <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                                    <p className="text-xs text-amber-400">💡 <strong>Tip:</strong> Responding within 5 minutes increases conversion rates by up to 400%. Try to call new leads as soon as they come in!</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Recent Meetings + Activity */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         {/* Recent Meetings */}
@@ -659,7 +733,7 @@
         // ═══════════════════════════════════════════
         // LEADS & ADS SECTION
         // ═══════════════════════════════════════════
-        const LeadsSection = ({ metrics }) => {
+        const LeadsSection = ({ metrics, ghlData }) => {
             if (!metrics) {
                 return <div className="glass rounded-2xl p-12 text-center"><p className="text-slate-400">No ad data available yet.</p></div>;
             }
@@ -782,6 +856,52 @@
                             })}
                         </div>
                     </div>
+
+                    {/* Recent Leads from GHL */}
+                    {ghlData?.leads?.length > 0 && (
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-4">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-white font-semibold">Recent Leads (Last 30 Days)</h3>
+                                <span className="text-xs text-slate-500">{ghlData.leads.length} leads</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="text-left text-[10px] text-slate-500 uppercase tracking-wider">
+                                            <th className="pb-3 pr-4">Name</th>
+                                            <th className="pb-3 pr-4">Date</th>
+                                            <th className="pb-3 pr-4">Source</th>
+                                            <th className="pb-3 pr-4">Response Time</th>
+                                            <th className="pb-3">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-dark-700/50">
+                                        {ghlData.leads.slice(0, 20).map(lead => (
+                                            <tr key={lead.id} className="hover:bg-dark-800/30">
+                                                <td className="py-2.5 pr-4 text-white font-medium">{lead.name}</td>
+                                                <td className="py-2.5 pr-4 text-slate-400">{lead.dateAdded ? new Date(lead.dateAdded).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
+                                                <td className="py-2.5 pr-4 text-slate-400">{lead.source || '—'}</td>
+                                                <td className="py-2.5 pr-4">
+                                                    {lead.speedMinutes !== null ? (
+                                                        <span className={`font-medium ${lead.speedMinutes <= 5 ? 'text-brand-green' : lead.speedMinutes <= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                                                            {lead.speedMinutes < 60 ? `${lead.speedMinutes}m` : `${Math.round(lead.speedMinutes / 60)}h`}
+                                                        </span>
+                                                    ) : <span className="text-slate-500">—</span>}
+                                                </td>
+                                                <td className="py-2.5">
+                                                    {lead.called ? (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/20 text-emerald-400">Called</span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/20 text-red-400">Not Called</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
