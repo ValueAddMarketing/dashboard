@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Client Dashboard | Value Add Marketing</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        dark: { 900: '#0a0a0f', 850: '#0f1019', 800: '#141420', 750: '#1a1a2e', 700: '#22223a', 600: '#2d2d4a' },
+                        brand: { cyan: '#22d3ee', purple: '#a78bfa', blue: '#3b82f6', green: '#34d399', orange: '#fb923c', pink: '#f472b6' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        body { background: #0a0a0f; }
+        .glass { background: rgba(20, 20, 32, 0.7); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.06); }
+        .glass-hover:hover { background: rgba(26, 26, 46, 0.8); border-color: rgba(255,255,255,0.1); }
+        .glow-cyan { box-shadow: 0 0 20px rgba(34, 211, 238, 0.15); }
+        .glow-purple { box-shadow: 0 0 20px rgba(167, 139, 250, 0.15); }
+        .glow-green { box-shadow: 0 0 20px rgba(52, 211, 153, 0.15); }
+        .gradient-border { background: linear-gradient(135deg, rgba(34,211,238,0.2), rgba(167,139,250,0.2)); padding: 1px; border-radius: 1rem; }
+        .gradient-border > div { background: #141420; border-radius: calc(1rem - 1px); }
+        .stat-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .stat-card:hover { transform: translateY(-2px); }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes countUp { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(1.4); opacity: 0; } }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        .fade-up { animation: fadeUp 0.6s ease-out forwards; opacity: 0; }
+        .fade-up-1 { animation-delay: 0.05s; }
+        .fade-up-2 { animation-delay: 0.1s; }
+        .fade-up-3 { animation-delay: 0.15s; }
+        .fade-up-4 { animation-delay: 0.2s; }
+        .fade-up-5 { animation-delay: 0.25s; }
+        .fade-up-6 { animation-delay: 0.3s; }
+        .shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent); background-size: 200% 100%; animation: shimmer 2s infinite; }
+        .scrollbar::-webkit-scrollbar { width: 4px; }
+        .scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar::-webkit-scrollbar-thumb { background: #404050; border-radius: 4px; }
+        .progress-ring { transition: stroke-dashoffset 1s ease-out; }
+        .login-bg { background: radial-gradient(ellipse at top, rgba(34,211,238,0.08) 0%, transparent 50%), radial-gradient(ellipse at bottom right, rgba(167,139,250,0.08) 0%, transparent 50%); }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+        const SUPABASE_URL = 'https://ecmhhonjazfbletyvncw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbWhob25qYXpmYmxldHl2bmN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5NDMwMjYsImV4cCI6MjA4MTUxOTAyNn0.3LZ4dAOX_ZpoUNkgY_jSeC10SaCknfPfBaZsDRjFt7c';
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const SHEETS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=964722332&single=true&output=csv';
+        const SETUP_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv';
+
+        // ── Helpers ──
+        const pn = v => parseFloat(String(v||'0').replace(/[$,%]/g,'').replace(/,/g,''))||0;
+        const fmt = v => '$'+(pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+        const fmtD = v => '$'+(pn(v)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
+
+        const parseCSV = (text) => {
+            const lines = text.split('\n');
+            if (lines.length < 2) return [];
+            const headers = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < lines[0].length; i++) {
+                const ch = lines[0][i];
+                if (ch === '"') { inQuotes = !inQuotes; }
+                else if (ch === ',' && !inQuotes) { headers.push(current.trim()); current = ''; }
+                else { current += ch; }
+            }
+            headers.push(current.trim());
+
+            return lines.slice(1).filter(l => l.trim()).map(line => {
+                const values = [];
+                let val = '';
+                let inQ = false;
+                for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (ch === '"') { inQ = !inQ; }
+                    else if (ch === ',' && !inQ) { values.push(val.trim()); val = ''; }
+                    else { val += ch; }
+                }
+                values.push(val.trim());
+                const row = {};
+                headers.forEach((h, i) => { row[h] = values[i] || ''; });
+                return row;
+            });
+        };
+
+        const toArr = (v) => {
+            if (v == null) return [];
+            if (Array.isArray(v)) return v;
+            if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } }
+            return [];
+        };
+
+        const getExtra = (m) => {
+            if (!m.ad_performance_notes) return {};
+            try { return typeof m.ad_performance_notes === 'string' ? JSON.parse(m.ad_performance_notes) : m.ad_performance_notes; } catch { return {}; }
+        };
+
+        // ── Animated Counter ──
+        const AnimatedNumber = ({ value, prefix = '', suffix = '', duration = 1200 }) => {
+            const [display, setDisplay] = useState(0);
+            const numVal = typeof value === 'number' ? value : pn(value);
+            useEffect(() => {
+                if (numVal === 0) { setDisplay(0); return; }
+                const start = Date.now();
+                const tick = () => {
+                    const elapsed = Date.now() - start;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const eased = 1 - Math.pow(1 - progress, 3);
+                    setDisplay(Math.round(numVal * eased * 100) / 100);
+                    if (progress < 1) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            }, [numVal]);
+            const formatted = numVal >= 100 ? Math.round(display).toLocaleString() : display.toFixed(numVal % 1 !== 0 ? 2 : 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            return <span>{prefix}{formatted}{suffix}</span>;
+        };
+
+        // ── Donut Chart ──
+        const DonutChart = ({ value, max, color, size = 80, strokeWidth = 6 }) => {
+            const radius = (size - strokeWidth) / 2;
+            const circumference = 2 * Math.PI * radius;
+            const pct = max > 0 ? Math.min(value / max, 1) : 0;
+            const offset = circumference * (1 - pct);
+            return (
+                <svg width={size} height={size} className="transform -rotate-90">
+                    <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={strokeWidth} />
+                    <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={color} strokeWidth={strokeWidth}
+                        strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="progress-ring" />
+                </svg>
+            );
+        };
+
+        // ── Sparkline ──
+        const Sparkline = ({ data, color = '#22d3ee', height = 40, width = 120 }) => {
+            if (!data || data.length < 2) return null;
+            const max = Math.max(...data);
+            const min = Math.min(...data);
+            const range = max - min || 1;
+            const points = data.map((v, i) => `${(i / (data.length - 1)) * width},${height - ((v - min) / range) * (height - 4) - 2}`).join(' ');
+            return (
+                <svg width={width} height={height} className="opacity-60">
+                    <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+                </svg>
+            );
+        };
+
+        // ── Sentiment Badge ──
+        const SentimentBadge = ({ sentiment }) => {
+            const colors = {
+                positive: 'bg-emerald-500/20 text-emerald-400',
+                excited: 'bg-emerald-500/20 text-emerald-400',
+                neutral: 'bg-slate-500/20 text-slate-400',
+                negative: 'bg-red-500/20 text-red-400',
+                frustrated: 'bg-red-500/20 text-red-400',
+                concerned: 'bg-amber-500/20 text-amber-400',
+            };
+            const icons = { positive: '😊', excited: '🎉', neutral: '😐', negative: '😟', frustrated: '😤', concerned: '🤔' };
+            const s = (sentiment || 'neutral').toLowerCase();
+            return (
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${colors[s] || colors.neutral}`}>
+                    {icons[s] || '😐'} {s.charAt(0).toUpperCase() + s.slice(1)}
+                </span>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // LOGIN SCREEN
+        // ═══════════════════════════════════════════
+        const LoginScreen = ({ onLogin }) => {
+            const [code, setCode] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                if (!code.trim()) return;
+                setLoading(true);
+                setError('');
+                try {
+                    const resp = await fetch('/api/client-portal-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'verify', access_code: code.trim() })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok) { setError(data.error || 'Invalid access code'); setLoading(false); return; }
+                    localStorage.setItem('cp_access_code', code.trim());
+                    localStorage.setItem('cp_client_name', data.client_name);
+                    onLogin(data.client_name, code.trim());
+                } catch (err) { setError('Connection error. Please try again.'); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center login-bg p-4">
+                    <div className="w-full max-w-md">
+                        <div className="text-center mb-10 fade-up">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-cyan/20 to-brand-purple/20 mb-6">
+                                <span className="text-3xl">📊</span>
+                            </div>
+                            <h1 className="text-3xl font-bold text-white mb-2">Client Dashboard</h1>
+                            <p className="text-slate-400">Value Add Marketing</p>
+                        </div>
+
+                        <form onSubmit={handleLogin} className="glass rounded-2xl p-8 space-y-6 fade-up fade-up-2">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Access Code</label>
+                                <input
+                                    type="text"
+                                    value={code}
+                                    onChange={e => setCode(e.target.value)}
+                                    placeholder="Enter your access code"
+                                    className="w-full px-4 py-3 bg-dark-900 border border-dark-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan focus:ring-1 focus:ring-brand-cyan/30 transition-all text-lg tracking-wider text-center"
+                                    autoFocus
+                                />
+                            </div>
+
+                            {error && (
+                                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg px-4 py-2">
+                                    <span>⚠️</span> {error}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={loading || !code.trim()}
+                                className="w-full py-3 rounded-xl font-semibold text-dark-900 bg-gradient-to-r from-brand-cyan to-brand-blue hover:opacity-90 disabled:opacity-40 transition-all text-lg"
+                            >
+                                {loading ? (
+                                    <span className="inline-flex items-center gap-2"><svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Verifying...</span>
+                                ) : 'Access Dashboard'}
+                            </button>
+
+                            <p className="text-slate-500 text-xs text-center">Your access code was provided by your account manager.<br/>Contact us if you need help logging in.</p>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // MAIN DASHBOARD
+        // ═══════════════════════════════════════════
+        const Dashboard = ({ clientName, accessCode, onLogout }) => {
+            const [clientData, setClientData] = useState(null);
+            const [sheetData, setSheetData] = useState(null);
+            const [setupData, setSetupData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [activeSection, setActiveSection] = useState('overview');
+            const [lastUpdated, setLastUpdated] = useState(null);
+
+            // Fetch all data
+            useEffect(() => {
+                const loadAll = async () => {
+                    setLoading(true);
+                    try {
+                        // Fetch from API + Google Sheets in parallel
+                        const [portalResp, sheetsResp, setupResp] = await Promise.all([
+                            fetch('/api/client-portal-data', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'getData', access_code: accessCode, client_name: clientName })
+                            }),
+                            fetch(SHEETS_URL).then(r => r.text()),
+                            fetch(SETUP_URL).then(r => r.text()),
+                        ]);
+
+                        const portal = await portalResp.json();
+                        if (portalResp.ok) setClientData(portal);
+
+                        // Parse sheets and find this client
+                        const allClients = parseCSV(sheetsResp);
+                        const myData = allClients.find(r => {
+                            const name = (r['Client'] || r['VAM'] || '').trim();
+                            return name.toLowerCase() === clientName.toLowerCase();
+                        });
+                        if (myData) setSheetData(myData);
+
+                        const allSetup = parseCSV(setupResp);
+                        const mySetup = allSetup.find(r => {
+                            const name = (r['VAM'] || '').trim();
+                            return name.toLowerCase() === clientName.toLowerCase();
+                        });
+                        if (mySetup) setSetupData(mySetup);
+
+                        setLastUpdated(new Date());
+                    } catch (err) { console.error('Load error:', err); }
+                    setLoading(false);
+                };
+                loadAll();
+            }, [clientName, accessCode]);
+
+            // Parse sheet data into usable metrics
+            const metrics = useMemo(() => {
+                if (!sheetData) return null;
+                const r = sheetData;
+                const sellerLeads = pn(r['Lifetime Seller Leads']);
+                const buyerLeads = pn(r['Lifetime Buyer Leads']);
+                const listingLeads = pn(r['Listing Leads']);
+                const totalLeads = sellerLeads + buyerLeads + listingLeads;
+                const spend = pn(r['Lifetime Ad Spend']);
+                const cpl = totalLeads > 0 ? spend / totalLeads : 0;
+
+                return {
+                    totalLeads,
+                    sellerLeads,
+                    buyerLeads,
+                    listingLeads,
+                    spend,
+                    cpl,
+                    sellerAppts: pn(r['Total Seller Appts']),
+                    buyerAppts: pn(r['Total Buyer Appts']),
+                    totalAppts: pn(r['Total Appts (Seller + Buyers)']),
+                    deals: pn(r['Potential Deals']),
+                    listings: pn(r['Listing']),
+                    buyerSigned: pn(r['Buyer Signed']),
+                    last3DayLeads: pn(r['Last 3 Day Seller Leads']) + pn(r['Last 3 Day Buyer Leads']),
+                    last7DayLeads: pn(r['Last 7 Day Seller Leads']) + pn(r['Last 7 Day Buyer Leads']),
+                    last3DaySpend: pn(r['Last 3 Days Seller Ad Spend']) + pn(r['Last 3 Days Buyer Ad Spend']),
+                    last7DaySpend: pn(r['Last 7 Day Seller Spend']) + pn(r['Last 7 Day Buyer Spend']),
+                    sellerCPL: pn(r['Lifetime Seller CPL']),
+                    buyerCPL: pn(r['Lifetime Buyer CPL']),
+                    last7SellerCPL: pn(r['Last 7 Days Seller CPL']),
+                    last7BuyerCPL: pn(r['Last 7 Days Buyer CPL']),
+                    sellerSpend: pn(r['Lifetime Seller Ad Spend']),
+                    buyerSpend: pn(r['Lifetime Buyer Ad Spend']),
+                    sellerLeadToAppt: r['Seller Lead To Appt Ratio'] || '—',
+                    buyerLeadToAppt: r['Buyer Lead To Appt Ratio'] || '—',
+                    costPerSellerAppt: pn(r['Total Ad Spend Cost Per Seller Appts']),
+                    costPerBuyerAppt: pn(r['Ad Spend Cost Per Buyer Appts']),
+                    avgSellerApptsWeek: pn(r['Avg Seller Appts per Week']),
+                    avgBuyerApptsWeek: pn(r['Avg Buyer Appts per Week']),
+                    leadsPerDeal: r['Leads/Potential Deal'] || '—',
+                    leadsPerListing: r['Leads/Listing'] || '—',
+                };
+            }, [sheetData]);
+
+            const setupInfo = useMemo(() => {
+                if (!setupData) return null;
+                return {
+                    csmRep: setupData['CSM'] || '',
+                    status: setupData['Status'] || '',
+                    campaign: setupData['Campaign'] || '',
+                    paidDate: setupData['Paid date'] || '',
+                    adLiveDate: setupData[' Ad Live date'] || setupData['Ad Live date'] || '',
+                    platform: setupData['Platform'] || '',
+                    timezone: setupData['Timezone'] || '',
+                    calling: setupData['Calling'] || '',
+                    dialer: setupData['Dialer'] || '',
+                };
+            }, [setupData]);
+
+            // Parse recent meetings
+            const recentMeetings = useMemo(() => {
+                if (!clientData?.meetings) return [];
+                return clientData.meetings.map(m => {
+                    const extra = getExtra(m);
+                    return {
+                        ...m,
+                        extra,
+                        sentiment: m.client_sentiment || extra.clientSentiment || 'neutral',
+                        actionItems: toArr(m.action_items).length > 0 ? toArr(m.action_items) : toArr(extra.actionItems),
+                        keyPoints: toArr(m.key_points).length > 0 ? toArr(m.key_points) : toArr(extra.keyPoints),
+                        nextSteps: toArr(extra.nextSteps),
+                    };
+                });
+            }, [clientData]);
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center login-bg">
+                        <div className="text-center fade-up">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-cyan/20 to-brand-purple/20 mb-6 animate-pulse">
+                                <span className="text-3xl">📊</span>
+                            </div>
+                            <p className="text-slate-400 text-lg">Loading your dashboard...</p>
+                            <div className="mt-4 w-48 h-1 bg-dark-700 rounded-full mx-auto overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-brand-cyan to-brand-purple rounded-full" style={{width: '60%', animation: 'shimmer 1.5s infinite'}}></div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            const firstName = clientName.split(' ')[0] || clientName;
+
+            return (
+                <div className="min-h-screen bg-dark-900">
+                    {/* Header */}
+                    <header className="sticky top-0 z-50 glass border-b border-dark-700">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-cyan to-brand-purple flex items-center justify-center text-white font-bold text-lg">
+                                    {firstName[0]}
+                                </div>
+                                <div>
+                                    <h1 className="text-lg font-semibold text-white">Welcome back, {firstName}</h1>
+                                    <p className="text-xs text-slate-500">
+                                        {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : 'Loading...'}
+                                        {setupInfo?.csmRep && <span className="ml-2">· CSM: {setupInfo.csmRep}</span>}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => window.location.reload()} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700 transition-colors" title="Refresh">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                </button>
+                                <button onClick={onLogout} className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-3 py-1.5 rounded-lg hover:bg-dark-700">
+                                    Log out
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Nav Tabs */}
+                    <nav className="border-b border-dark-800 bg-dark-900/80">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto scrollbar py-2">
+                            {[
+                                { id: 'overview', label: 'Overview', icon: '📊' },
+                                { id: 'leads', label: 'Leads & Ads', icon: '🎯' },
+                                { id: 'meetings', label: 'Meetings', icon: '🎙️' },
+                                { id: 'resources', label: 'Resources', icon: '📚' },
+                            ].map(tab => (
+                                <button key={tab.id} onClick={() => setActiveSection(tab.id)}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${activeSection === tab.id ? 'bg-brand-cyan/15 text-brand-cyan' : 'text-slate-400 hover:text-slate-200 hover:bg-dark-800'}`}>
+                                    <span className="text-base">{tab.icon}</span> {tab.label}
+                                </button>
+                            ))}
+                        </div>
+                    </nav>
+
+                    {/* Main Content */}
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+                        {activeSection === 'overview' && <OverviewSection metrics={metrics} setupInfo={setupInfo} recentMeetings={recentMeetings} clientData={clientData} />}
+                        {activeSection === 'leads' && <LeadsSection metrics={metrics} />}
+                        {activeSection === 'meetings' && <MeetingsSection meetings={recentMeetings} />}
+                        {activeSection === 'resources' && <ResourcesSection setupInfo={setupInfo} clientName={clientName} />}
+                    </main>
+
+                    {/* Footer */}
+                    <footer className="border-t border-dark-800 mt-12 py-6">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between">
+                            <p className="text-xs text-slate-600">Value Add Marketing · Client Dashboard</p>
+                            <p className="text-xs text-slate-600">Need help? Message us on Slack</p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // OVERVIEW SECTION
+        // ═══════════════════════════════════════════
+        const OverviewSection = ({ metrics, setupInfo, recentMeetings, clientData }) => {
+            if (!metrics) {
+                return (
+                    <div className="glass rounded-2xl p-12 text-center">
+                        <p className="text-slate-400 text-lg">We're setting up your data. Check back soon!</p>
+                    </div>
+                );
+            }
+
+            const totalDeals = metrics.deals + metrics.listings + metrics.buyerSigned;
+
+            return (
+                <div className="space-y-6">
+                    {/* Quick Action Banner */}
+                    <div className="glass rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 border-l-4 border-brand-cyan fade-up">
+                        <div className="flex-1">
+                            <h3 className="text-white font-semibold text-sm">💬 Stay Connected</h3>
+                            <p className="text-slate-400 text-sm mt-1">Check your Slack channel for the latest updates, questions, and communication from your team.</p>
+                        </div>
+                        <div className="px-4 py-2 rounded-xl bg-brand-cyan/10 text-brand-cyan text-sm font-medium whitespace-nowrap">
+                            Open Slack
+                        </div>
+                    </div>
+
+                    {/* KPI Cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="stat-card glass rounded-2xl p-5 glow-cyan fade-up fade-up-1">
+                            <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-3">Total Leads</p>
+                            <p className="text-3xl font-bold text-white"><AnimatedNumber value={metrics.totalLeads} /></p>
+                            <div className="flex items-center gap-2 mt-3">
+                                <span className="text-brand-cyan text-xs font-medium">+{fmtN(metrics.last7DayLeads)}</span>
+                                <span className="text-slate-600 text-xs">last 7 days</span>
+                            </div>
+                        </div>
+
+                        <div className="stat-card glass rounded-2xl p-5 glow-purple fade-up fade-up-2">
+                            <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-3">Ad Spend</p>
+                            <p className="text-3xl font-bold text-white"><AnimatedNumber value={metrics.spend} prefix="$" /></p>
+                            <div className="flex items-center gap-2 mt-3">
+                                <span className="text-brand-purple text-xs font-medium">{fmt(metrics.last7DaySpend)}</span>
+                                <span className="text-slate-600 text-xs">last 7 days</span>
+                            </div>
+                        </div>
+
+                        <div className="stat-card glass rounded-2xl p-5 glow-green fade-up fade-up-3">
+                            <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-3">Cost Per Lead</p>
+                            <p className="text-3xl font-bold text-white"><AnimatedNumber value={metrics.cpl} prefix="$" /></p>
+                            <div className="flex items-center gap-2 mt-3">
+                                <span className="text-xs text-slate-500">Seller: {fmtD(metrics.sellerCPL)}</span>
+                                <span className="text-slate-700">·</span>
+                                <span className="text-xs text-slate-500">Buyer: {fmtD(metrics.buyerCPL)}</span>
+                            </div>
+                        </div>
+
+                        <div className="stat-card glass rounded-2xl p-5 fade-up fade-up-4" style={{boxShadow: '0 0 20px rgba(251,146,60,0.12)'}}>
+                            <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-3">Appointments</p>
+                            <p className="text-3xl font-bold text-white"><AnimatedNumber value={metrics.totalAppts} /></p>
+                            <div className="flex items-center gap-2 mt-3">
+                                <span className="text-xs text-slate-500">{fmtN(metrics.sellerAppts)} seller</span>
+                                <span className="text-slate-700">·</span>
+                                <span className="text-xs text-slate-500">{fmtN(metrics.buyerAppts)} buyer</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Lead Funnel + Deals */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        {/* Lead Breakdown */}
+                        <div className="lg:col-span-2 glass rounded-2xl p-6 fade-up fade-up-3">
+                            <h3 className="text-white font-semibold mb-5">Lead Breakdown</h3>
+                            <div className="space-y-4">
+                                {[
+                                    { label: 'Seller Leads', value: metrics.sellerLeads, total: metrics.totalLeads, color: '#22d3ee', cpl: metrics.sellerCPL },
+                                    { label: 'Buyer Leads', value: metrics.buyerLeads, total: metrics.totalLeads, color: '#a78bfa', cpl: metrics.buyerCPL },
+                                    { label: 'Listing Leads', value: metrics.listingLeads, total: metrics.totalLeads, color: '#34d399', cpl: null },
+                                ].filter(item => item.value > 0).map(item => (
+                                    <div key={item.label}>
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="text-sm text-slate-300">{item.label}</span>
+                                            <div className="flex items-center gap-3">
+                                                {item.cpl > 0 && <span className="text-xs text-slate-500">{fmtD(item.cpl)} CPL</span>}
+                                                <span className="text-sm font-semibold text-white">{fmtN(item.value)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="h-2 bg-dark-800 rounded-full overflow-hidden">
+                                            <div className="h-full rounded-full transition-all duration-1000" style={{width: `${item.total > 0 ? (item.value / item.total) * 100 : 0}%`, backgroundColor: item.color}}></div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Deals & Conversions */}
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-4">
+                            <h3 className="text-white font-semibold mb-5">Conversions</h3>
+                            <div className="flex flex-col items-center">
+                                <div className="relative">
+                                    <DonutChart value={totalDeals} max={Math.max(totalDeals, 5)} color="#34d399" size={120} strokeWidth={8} />
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span className="text-2xl font-bold text-white">{totalDeals}</span>
+                                        <span className="text-[10px] text-slate-500 uppercase">Total</span>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-4 mt-5 w-full">
+                                    {[
+                                        { label: 'Deals', value: metrics.deals, color: 'text-brand-green' },
+                                        { label: 'Listings', value: metrics.listings, color: 'text-brand-cyan' },
+                                        { label: 'Signed', value: metrics.buyerSigned, color: 'text-brand-purple' },
+                                    ].map(d => (
+                                        <div key={d.label} className="text-center">
+                                            <p className={`text-xl font-bold ${d.color}`}>{d.value}</p>
+                                            <p className="text-[10px] text-slate-500 mt-0.5">{d.label}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                                {metrics.leadsPerDeal !== '—' && (
+                                    <div className="mt-4 pt-4 border-t border-dark-700 w-full text-center">
+                                        <p className="text-xs text-slate-500">Leads per Deal: <span className="text-slate-300 font-medium">{metrics.leadsPerDeal}</span></p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Recent Meetings + Activity */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Recent Meetings */}
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-5">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-white font-semibold">Recent Meetings</h3>
+                                <span className="text-xs text-slate-500">{recentMeetings.length} total</span>
+                            </div>
+                            {recentMeetings.length === 0 ? (
+                                <p className="text-slate-500 text-sm py-4 text-center">No meetings recorded yet.</p>
+                            ) : (
+                                <div className="space-y-3 max-h-[320px] overflow-y-auto scrollbar pr-1">
+                                    {recentMeetings.slice(0, 5).map(m => (
+                                        <div key={m.id} className="p-3 rounded-xl bg-dark-800/50 hover:bg-dark-750 transition-colors">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-white truncate">{m.meeting_type || m.extra?.title || 'Meeting'}</p>
+                                                    <p className="text-xs text-slate-500 mt-0.5">{new Date(m.meeting_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                                </div>
+                                                <SentimentBadge sentiment={m.sentiment} />
+                                            </div>
+                                            {m.summary && <p className="text-xs text-slate-400 mt-2 line-clamp-2">{m.summary}</p>}
+                                            {m.actionItems.length > 0 && (
+                                                <div className="mt-2 flex items-center gap-1.5">
+                                                    <span className="text-amber-400 text-[10px]">⚡</span>
+                                                    <span className="text-[10px] text-amber-400/80">{m.actionItems.length} action item{m.actionItems.length > 1 ? 's' : ''}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Activity Feed */}
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-6">
+                            <h3 className="text-white font-semibold mb-4">Recent Activity</h3>
+                            {!clientData?.activity?.length ? (
+                                <p className="text-slate-500 text-sm py-4 text-center">No recent activity.</p>
+                            ) : (
+                                <div className="space-y-3 max-h-[320px] overflow-y-auto scrollbar pr-1">
+                                    {clientData.activity.slice(0, 10).map(a => (
+                                        <div key={a.id} className="flex items-start gap-3">
+                                            <div className="w-2 h-2 rounded-full bg-brand-cyan mt-1.5 shrink-0"></div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-slate-300">{a.action}</p>
+                                                {a.details && <p className="text-xs text-slate-500 mt-0.5 truncate">{a.details}</p>}
+                                                <p className="text-[10px] text-slate-600 mt-1">{new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // LEADS & ADS SECTION
+        // ═══════════════════════════════════════════
+        const LeadsSection = ({ metrics }) => {
+            if (!metrics) {
+                return <div className="glass rounded-2xl p-12 text-center"><p className="text-slate-400">No ad data available yet.</p></div>;
+            }
+
+            return (
+                <div className="space-y-6">
+                    {/* Period Comparison */}
+                    <div className="glass rounded-2xl p-6 fade-up">
+                        <h3 className="text-white font-semibold mb-5">Performance Snapshot</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            {[
+                                { label: 'Last 3 Days', leads: metrics.last3DayLeads, spend: metrics.last3DaySpend },
+                                { label: 'Last 7 Days', leads: metrics.last7DayLeads, spend: metrics.last7DaySpend },
+                                { label: 'Lifetime', leads: metrics.totalLeads, spend: metrics.spend },
+                                { label: 'Cost Per Lead', leads: null, spend: null, cpl: metrics.cpl },
+                            ].map(p => (
+                                <div key={p.label} className="bg-dark-800/50 rounded-xl p-4">
+                                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-3">{p.label}</p>
+                                    {p.cpl !== undefined ? (
+                                        <p className="text-2xl font-bold text-brand-green">{fmtD(p.cpl)}</p>
+                                    ) : (
+                                        <div>
+                                            <p className="text-2xl font-bold text-white">{fmtN(p.leads)}</p>
+                                            <p className="text-xs text-slate-500 mt-1">{fmt(p.spend)} spent</p>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Seller vs Buyer Breakdown */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Seller */}
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-1">
+                            <div className="flex items-center gap-2 mb-5">
+                                <div className="w-3 h-3 rounded-full bg-brand-cyan"></div>
+                                <h3 className="text-white font-semibold">Seller Performance</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                {[
+                                    { label: 'Leads', value: fmtN(metrics.sellerLeads) },
+                                    { label: 'Ad Spend', value: fmt(metrics.sellerSpend) },
+                                    { label: 'Cost Per Lead', value: fmtD(metrics.sellerCPL) },
+                                    { label: 'Appointments', value: fmtN(metrics.sellerAppts) },
+                                    { label: 'Avg Appts/Week', value: metrics.avgSellerApptsWeek.toFixed(1) },
+                                    { label: 'Cost/Appt', value: metrics.costPerSellerAppt > 0 ? fmtD(metrics.costPerSellerAppt) : '—' },
+                                ].map(s => (
+                                    <div key={s.label} className="bg-dark-800/50 rounded-lg p-3">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-wider">{s.label}</p>
+                                        <p className="text-lg font-semibold text-white mt-1">{s.value}</p>
+                                    </div>
+                                ))}
+                            </div>
+                            {metrics.sellerLeadToAppt !== '—' && (
+                                <div className="mt-4 pt-3 border-t border-dark-700 flex items-center justify-between">
+                                    <span className="text-xs text-slate-500">Lead to Appt Ratio</span>
+                                    <span className="text-sm font-medium text-brand-cyan">{metrics.sellerLeadToAppt}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Buyer */}
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-2">
+                            <div className="flex items-center gap-2 mb-5">
+                                <div className="w-3 h-3 rounded-full bg-brand-purple"></div>
+                                <h3 className="text-white font-semibold">Buyer Performance</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                {[
+                                    { label: 'Leads', value: fmtN(metrics.buyerLeads) },
+                                    { label: 'Ad Spend', value: fmt(metrics.buyerSpend) },
+                                    { label: 'Cost Per Lead', value: fmtD(metrics.buyerCPL) },
+                                    { label: 'Appointments', value: fmtN(metrics.buyerAppts) },
+                                    { label: 'Avg Appts/Week', value: metrics.avgBuyerApptsWeek.toFixed(1) },
+                                    { label: 'Cost/Appt', value: metrics.costPerBuyerAppt > 0 ? fmtD(metrics.costPerBuyerAppt) : '—' },
+                                ].map(s => (
+                                    <div key={s.label} className="bg-dark-800/50 rounded-lg p-3">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-wider">{s.label}</p>
+                                        <p className="text-lg font-semibold text-white mt-1">{s.value}</p>
+                                    </div>
+                                ))}
+                            </div>
+                            {metrics.buyerLeadToAppt !== '—' && (
+                                <div className="mt-4 pt-3 border-t border-dark-700 flex items-center justify-between">
+                                    <span className="text-xs text-slate-500">Lead to Appt Ratio</span>
+                                    <span className="text-sm font-medium text-brand-purple">{metrics.buyerLeadToAppt}</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Recent Trend Callout */}
+                    <div className="glass rounded-2xl p-6 fade-up fade-up-3">
+                        <h3 className="text-white font-semibold mb-4">7-Day Trend</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            {[
+                                { label: '7-Day Seller CPL', value: fmtD(metrics.last7SellerCPL), compare: metrics.sellerCPL, better: 'lower' },
+                                { label: '7-Day Buyer CPL', value: fmtD(metrics.last7BuyerCPL), compare: metrics.buyerCPL, better: 'lower' },
+                                { label: '7-Day Leads', value: fmtN(metrics.last7DayLeads), sub: `of ${fmtN(metrics.totalLeads)} total` },
+                                { label: '7-Day Spend', value: fmt(metrics.last7DaySpend), sub: `of ${fmt(metrics.spend)} total` },
+                            ].map(t => {
+                                let trendColor = 'text-slate-400';
+                                let trendIcon = '';
+                                if (t.compare) {
+                                    const current = pn(t.value);
+                                    if (t.better === 'lower') {
+                                        trendColor = current <= t.compare ? 'text-emerald-400' : 'text-red-400';
+                                        trendIcon = current <= t.compare ? '↓' : '↑';
+                                    }
+                                }
+                                return (
+                                    <div key={t.label} className="bg-dark-800/50 rounded-xl p-4">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">{t.label}</p>
+                                        <p className={`text-xl font-bold ${trendColor}`}>{trendIcon} {t.value}</p>
+                                        {t.sub && <p className="text-[10px] text-slate-600 mt-1">{t.sub}</p>}
+                                        {t.compare > 0 && <p className="text-[10px] text-slate-600 mt-1">vs {fmtD(t.compare)} lifetime</p>}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // MEETINGS SECTION
+        // ═══════════════════════════════════════════
+        const MeetingsSection = ({ meetings }) => {
+            const [expandedId, setExpandedId] = useState(null);
+
+            if (meetings.length === 0) {
+                return (
+                    <div className="glass rounded-2xl p-12 text-center fade-up">
+                        <span className="text-4xl mb-4 block">🎙️</span>
+                        <p className="text-slate-400 text-lg">No meetings recorded yet.</p>
+                        <p className="text-slate-500 text-sm mt-2">Your meeting summaries and action items will appear here.</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-semibold text-white">Your Meetings</h2>
+                        <span className="text-xs text-slate-500">{meetings.length} meetings (last 90 days)</span>
+                    </div>
+                    {meetings.map((m, idx) => {
+                        const isExpanded = expandedId === m.id;
+                        return (
+                            <div key={m.id} className={`glass rounded-2xl overflow-hidden transition-all fade-up`} style={{animationDelay: `${idx * 0.05}s`}}>
+                                <button onClick={() => setExpandedId(isExpanded ? null : m.id)} className="w-full p-5 flex items-start gap-4 text-left hover:bg-dark-750/50 transition-colors">
+                                    <div className="w-12 h-12 rounded-xl bg-dark-800 flex flex-col items-center justify-center shrink-0">
+                                        <span className="text-xs font-bold text-brand-cyan">{new Date(m.meeting_date).toLocaleDateString('en-US', {month: 'short'})}</span>
+                                        <span className="text-lg font-bold text-white leading-none">{new Date(m.meeting_date).getDate()}</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <h3 className="text-sm font-semibold text-white">{m.meeting_type || m.extra?.title || 'Meeting'}</h3>
+                                            <SentimentBadge sentiment={m.sentiment} />
+                                        </div>
+                                        {m.summary && <p className="text-xs text-slate-400 mt-1.5 line-clamp-2">{m.summary}</p>}
+                                    </div>
+                                    <svg className={`w-5 h-5 text-slate-500 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                </button>
+
+                                {isExpanded && (
+                                    <div className="px-5 pb-5 space-y-4 border-t border-dark-700/50">
+                                        {/* Summary */}
+                                        {m.summary && (
+                                            <div className="pt-4">
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Summary</h4>
+                                                <p className="text-sm text-slate-300 leading-relaxed">{m.summary}</p>
+                                            </div>
+                                        )}
+
+                                        {/* Key Points */}
+                                        {m.keyPoints.length > 0 && (
+                                            <div>
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Key Points</h4>
+                                                <ul className="space-y-1.5">
+                                                    {m.keyPoints.map((kp, i) => (
+                                                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                                                            <span className="text-brand-cyan mt-0.5">•</span>
+                                                            <span>{typeof kp === 'string' ? kp : kp.point || JSON.stringify(kp)}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+
+                                        {/* Action Items */}
+                                        {m.actionItems.length > 0 && (
+                                            <div>
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Action Items</h4>
+                                                <div className="space-y-2">
+                                                    {m.actionItems.map((ai, i) => (
+                                                        <div key={i} className="flex items-start gap-2 p-2.5 rounded-lg bg-dark-800/50">
+                                                            <span className="text-amber-400 mt-0.5">⚡</span>
+                                                            <div className="flex-1">
+                                                                <p className="text-sm text-white">{typeof ai === 'string' ? ai : ai.task || ai.description || JSON.stringify(ai)}</p>
+                                                                {ai.owner && <p className="text-[10px] text-slate-500 mt-0.5">Owner: {ai.owner}</p>}
+                                                            </div>
+                                                            {ai.priority && (
+                                                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${ai.priority === 'high' ? 'bg-red-500/20 text-red-400' : ai.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                                                                    {ai.priority}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Next Steps */}
+                                        {m.nextSteps.length > 0 && (
+                                            <div>
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Next Steps</h4>
+                                                <ul className="space-y-1.5">
+                                                    {m.nextSteps.map((ns, i) => (
+                                                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                                                            <span className="text-brand-green mt-0.5">→</span>
+                                                            <span>{typeof ns === 'string' ? ns : JSON.stringify(ns)}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // RESOURCES SECTION
+        // ═══════════════════════════════════════════
+        const ResourcesSection = ({ setupInfo, clientName }) => {
+            return (
+                <div className="space-y-6">
+                    {/* Communication */}
+                    <div className="glass rounded-2xl p-6 fade-up border-l-4 border-brand-cyan">
+                        <h3 className="text-white font-semibold text-lg mb-3">💬 Communication</h3>
+                        <div className="space-y-4">
+                            <div className="bg-dark-800/50 rounded-xl p-4">
+                                <h4 className="text-sm font-medium text-white mb-1">Slack Channel</h4>
+                                <p className="text-xs text-slate-400">Your Slack channel is the fastest way to communicate with your team. Check it regularly for updates, questions about leads, and strategy adjustments.</p>
+                            </div>
+                            <div className="bg-dark-800/50 rounded-xl p-4">
+                                <h4 className="text-sm font-medium text-white mb-1">Response Time</h4>
+                                <p className="text-xs text-slate-400">We aim to respond to all Slack messages within 24 hours during business days. For urgent items, tag your CSM directly.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Skool Coaching */}
+                    <div className="glass rounded-2xl p-6 fade-up fade-up-1">
+                        <h3 className="text-white font-semibold text-lg mb-3">🎓 Skool Community & Coaching</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="bg-dark-800/50 rounded-xl p-4">
+                                <div className="text-2xl mb-2">📹</div>
+                                <h4 className="text-sm font-medium text-white mb-1">Weekly Group Coaching</h4>
+                                <p className="text-xs text-slate-400">Join our live coaching calls to learn strategies, ask questions, and connect with other agents.</p>
+                            </div>
+                            <div className="bg-dark-800/50 rounded-xl p-4">
+                                <div className="text-2xl mb-2">📖</div>
+                                <h4 className="text-sm font-medium text-white mb-1">Training Library</h4>
+                                <p className="text-xs text-slate-400">Access our full library of training videos, scripts, and resources in the Skool classroom.</p>
+                            </div>
+                            <div className="bg-dark-800/50 rounded-xl p-4">
+                                <div className="text-2xl mb-2">🤝</div>
+                                <h4 className="text-sm font-medium text-white mb-1">Community</h4>
+                                <p className="text-xs text-slate-400">Connect with hundreds of agents in our private community. Share wins, ask questions, and learn together.</p>
+                            </div>
+                            <div className="bg-dark-800/50 rounded-xl p-4">
+                                <div className="text-2xl mb-2">🏆</div>
+                                <h4 className="text-sm font-medium text-white mb-1">Success Stories</h4>
+                                <p className="text-xs text-slate-400">See how other agents are converting leads and closing deals using the same system you have.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Tips for Success */}
+                    <div className="glass rounded-2xl p-6 fade-up fade-up-2">
+                        <h3 className="text-white font-semibold text-lg mb-3">🚀 Tips for Success</h3>
+                        <div className="space-y-3">
+                            {[
+                                { icon: '📞', title: 'Speed to Lead', desc: 'Call new leads within 5 minutes. Response time is the #1 factor in lead conversion.' },
+                                { icon: '🔄', title: 'Follow Up Consistently', desc: 'Most deals close after 5-12 touches. Set up your follow-up sequences and stick to them.' },
+                                { icon: '📊', title: 'Track Your Numbers', desc: 'Check this dashboard weekly to understand your pipeline and identify opportunities.' },
+                                { icon: '💬', title: 'Stay Active in Slack', desc: 'Your team posts lead updates, strategy tips, and answers to your questions.' },
+                                { icon: '🎯', title: 'Use Your CRM', desc: 'Log every call, text, and interaction. Your CRM is your pipeline\'s best friend.' },
+                            ].map(tip => (
+                                <div key={tip.title} className="flex items-start gap-3 p-3 rounded-xl bg-dark-800/30 hover:bg-dark-800/50 transition-colors">
+                                    <span className="text-xl shrink-0">{tip.icon}</span>
+                                    <div>
+                                        <h4 className="text-sm font-medium text-white">{tip.title}</h4>
+                                        <p className="text-xs text-slate-400 mt-0.5">{tip.desc}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Account Info */}
+                    {setupInfo && (
+                        <div className="glass rounded-2xl p-6 fade-up fade-up-3">
+                            <h3 className="text-white font-semibold text-lg mb-4">📋 Your Account Info</h3>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                {[
+                                    { label: 'CSM Rep', value: setupInfo.csmRep },
+                                    { label: 'Status', value: setupInfo.status },
+                                    { label: 'Campaign', value: setupInfo.campaign },
+                                    { label: 'Platform', value: setupInfo.platform },
+                                    { label: 'Ad Live Date', value: setupInfo.adLiveDate },
+                                    { label: 'Timezone', value: setupInfo.timezone },
+                                ].filter(i => i.value).map(i => (
+                                    <div key={i.label} className="bg-dark-800/50 rounded-lg p-3">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-wider">{i.label}</p>
+                                        <p className="text-sm font-medium text-white mt-1">{i.value}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ═══════════════════════════════════════════
+        // APP ROOT
+        // ═══════════════════════════════════════════
+        const App = () => {
+            const [clientName, setClientName] = useState(localStorage.getItem('cp_client_name') || '');
+            const [accessCode, setAccessCode] = useState(localStorage.getItem('cp_access_code') || '');
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [checking, setChecking] = useState(true);
+
+            // Check stored session on mount
+            useEffect(() => {
+                const verify = async () => {
+                    const code = localStorage.getItem('cp_access_code');
+                    if (!code) { setChecking(false); return; }
+                    try {
+                        const resp = await fetch('/api/client-portal-data', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'verify', access_code: code })
+                        });
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            setClientName(data.client_name);
+                            setAccessCode(code);
+                            setIsLoggedIn(true);
+                        } else {
+                            localStorage.removeItem('cp_access_code');
+                            localStorage.removeItem('cp_client_name');
+                        }
+                    } catch {}
+                    setChecking(false);
+                };
+                verify();
+            }, []);
+
+            const handleLogin = (name, code) => {
+                setClientName(name);
+                setAccessCode(code);
+                setIsLoggedIn(true);
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('cp_access_code');
+                localStorage.removeItem('cp_client_name');
+                setIsLoggedIn(false);
+                setClientName('');
+                setAccessCode('');
+            };
+
+            if (checking) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center login-bg">
+                        <div className="animate-pulse text-slate-500">Loading...</div>
+                    </div>
+                );
+            }
+
+            if (!isLoggedIn) return <LoginScreen onLogin={handleLogin} />;
+            return <Dashboard clientName={clientName} accessCode={accessCode} onLogout={handleLogout} />;
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
