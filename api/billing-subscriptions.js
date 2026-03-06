@@ -11,6 +11,22 @@ export default async function handler(req, res) {
 
     const { action } = req.body;
 
+    const mapWhopMembership = (m) => ({
+        id: m.id,
+        source: 'whop',
+        customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
+        customerEmail: m.user?.email || m.email || '',
+        status: m.status || (m.valid ? 'active' : 'inactive'),
+        currentPeriodEnd: m.renewal_period_end || m.expires_at || m.next_renewal_date || null,
+        currentPeriodStart: m.renewal_period_start || m.created_at || null,
+        cancelAtPeriodEnd: m.cancel_at_period_end || false,
+        amount: m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null),
+        currency: m.currency || 'usd',
+        interval: m.plan?.renewal_period || m.renewal_period || null,
+        productName: m.plan?.plan_name || m.product?.name || m.product_name || '',
+        created: m.created_at ? m.created_at.split('T')[0] : null
+    });
+
     // ========== FETCH ALL SUBSCRIPTIONS ==========
     if (action === 'fetchAll') {
         const results = { stripe: [], whop: [], errors: [] };
@@ -79,51 +95,65 @@ export default async function handler(req, res) {
         // --- Whop ---
         if (WHOP_API_KEY) {
             try {
-                let page = 1;
                 const allMemberships = [];
+                let cursor = null;
                 let hasMore = true;
 
                 while (hasMore) {
-                    const resp = await fetch(`https://api.whop.com/api/v2/company/memberships?per=${100}&page=${page}`, {
+                    const params = new URLSearchParams({ per: '50' });
+                    if (cursor) params.append('cursor', cursor);
+
+                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?${params}`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
-                    const data = await resp.json();
 
-                    if (data.error) {
-                        results.errors.push({ source: 'whop', message: data.error || JSON.stringify(data) });
-                        break;
-                    }
-
-                    const memberships = data.data || data.memberships || [];
-                    if (memberships.length === 0) {
+                    // If v5 fails, try v2
+                    if (!resp.ok) {
+                        const errText = await resp.text();
+                        // Try v2 as fallback
+                        const resp2 = await fetch(`https://api.whop.com/api/v2/company/memberships?per=50&page=1`, {
+                            headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                        });
+                        if (!resp2.ok) {
+                            const err2 = await resp2.text();
+                            // Try the newer /memberships endpoint
+                            const resp3 = await fetch(`https://api.whop.com/company/memberships?per=50`, {
+                                headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                            });
+                            if (!resp3.ok) {
+                                const err3 = await resp3.text();
+                                results.errors.push({ source: 'whop', message: `v5: ${errText.substring(0,200)} | v2: ${err2.substring(0,200)} | base: ${err3.substring(0,200)}` });
+                                break;
+                            }
+                            const data3 = await resp3.json();
+                            const memberships3 = data3.data || data3.memberships || data3 || [];
+                            if (Array.isArray(memberships3)) {
+                                for (const m of memberships3) {
+                                    allMemberships.push(mapWhopMembership(m));
+                                }
+                            }
+                            hasMore = false;
+                            break;
+                        }
+                        const data2 = await resp2.json();
+                        const memberships2 = data2.data || data2.memberships || [];
+                        for (const m of memberships2) {
+                            allMemberships.push(mapWhopMembership(m));
+                        }
                         hasMore = false;
                         break;
                     }
+
+                    const data = await resp.json();
+                    const memberships = data.data || data.memberships || [];
+                    if (memberships.length === 0) { hasMore = false; break; }
 
                     for (const m of memberships) {
-                        allMemberships.push({
-                            id: m.id,
-                            source: 'whop',
-                            customerName: m.user?.username || m.user?.email || m.discord?.username || '',
-                            customerEmail: m.user?.email || '',
-                            status: m.status || m.valid ? 'active' : 'inactive',
-                            currentPeriodEnd: m.renewal_period_end || m.expires_at || null,
-                            currentPeriodStart: m.renewal_period_start || m.created_at || null,
-                            cancelAtPeriodEnd: m.cancel_at_period_end || false,
-                            amount: m.amount_subtotal ? m.amount_subtotal / 100 : null,
-                            currency: m.currency || 'usd',
-                            interval: m.plan?.renewal_period || null,
-                            productName: m.plan?.plan_name || m.product?.name || '',
-                            created: m.created_at ? m.created_at.split('T')[0] : null
-                        });
+                        allMemberships.push(mapWhopMembership(m));
                     }
 
-                    const pagination = data.pagination;
-                    if (pagination && pagination.current_page < pagination.total_page) {
-                        page++;
-                    } else {
-                        hasMore = false;
-                    }
+                    cursor = data.pagination?.next_cursor || data.next_cursor;
+                    if (!cursor) hasMore = false;
                 }
 
                 results.whop = allMemberships;
