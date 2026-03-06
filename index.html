@@ -4728,7 +4728,7 @@ Column definitions:
                                         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-2">
                                             <div className="text-xs text-red-400 font-medium mb-1">API Errors:</div>
                                             {(subscriptions.errors || []).map((e, i) => (
-                                                <div key={i} className="text-xs text-red-300">{e.source}: {e.message}</div>
+                                                <div key={i} className="text-xs text-red-300">{e.source}: {typeof e.message === 'string' ? e.message : JSON.stringify(e.message)}</div>
                                             ))}
                                         </div>
                                     )}
