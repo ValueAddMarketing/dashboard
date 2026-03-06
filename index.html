@@ -343,6 +343,7 @@
             { id: 'fathom-meetings', name: 'Fathom Meetings', icon: '🎙️', desc: 'All meetings from the previous month' },
             { id: 'pipeline', name: 'Deal Pipeline', icon: '🤝', desc: 'Deal closing progress for all clients' },
             { id: 'billing-audit', name: 'Billing Audit', icon: '💲', desc: 'Audit billing cycles against actual ad activity' },
+            { id: 'client-map', name: 'Client Map', icon: '🗺️', desc: 'US map view of all clients by state' },
         ];
 
         // ========== LOGIN ==========
@@ -4552,7 +4553,10 @@ Column definitions:
                 const adsClient = clients.find(c => c.client.toLowerCase().trim() === clientName.toLowerCase().trim());
                 const sub = matchSubscription(clientName);
                 const nextBillingDate = sub?.currentPeriodEnd ? parseDate(sub.currentPeriodEnd) : null;
-                return { client: clientName, setup: s, paidDate, adLiveDate, firstSpendDate, launchSetupDays, setupDaysVal, activeDays, inactiveDays, recordedOnPause, correctedBillingStart, billingCycle, discrepancy, severity, hasMetaData, teamMember: adsClient?.teamMember || s.csmRep || '', subscription: sub, nextBillingDate, paymentSource: sub?.source || null };
+                const sheetBillingDate = parseDate(billingCycle) || parseDate(s.duePayment) || parseDate(s.contractEndDate);
+                const billingDaysDiff = (nextBillingDate && sheetBillingDate) ? daysBetween(sheetBillingDate, nextBillingDate) : null;
+                const billingMatch = billingDaysDiff !== null ? (Math.abs(billingDaysDiff) <= 1 ? 'Match' : billingDaysDiff > 0 ? `+${billingDaysDiff}d` : `${billingDaysDiff}d`) : null;
+                return { client: clientName, setup: s, paidDate, adLiveDate, firstSpendDate, launchSetupDays, setupDaysVal, activeDays, inactiveDays, recordedOnPause, correctedBillingStart, billingCycle, sheetBillingDate, discrepancy, severity, hasMetaData, teamMember: adsClient?.teamMember || s.csmRep || '', subscription: sub, nextBillingDate, paymentSource: sub?.source || null, billingDaysDiff, billingMatch };
             }), [clients, setupData, dailySpend, allSubs, manualMappings]);
 
             const teamMembers = useMemo(() => [...new Set(enriched.map(c => c.teamMember).filter(Boolean))].sort(), [enriched]);
@@ -4905,6 +4909,7 @@ Column definitions:
                     case 'fathom-meetings': return <FathomMeetingsTab clients={clients} user={user} />;
                     case 'pipeline': return <DealPipelineTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                     case 'billing-audit': return <BillingAuditTab clients={clients} setupData={setupData} />;
+                    case 'client-map': return <ClientMapTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
@@ -4998,7 +5003,7 @@ Column definitions:
                                             {s && s.mrr && <span className="text-emerald-400 text-sm">MRR: {s.mrr}</span>}
                                         </div>
                                     ) : (
-                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : tab === 'billing-audit' ? '💲 Billing Audit' : 'Select a client to get started'}</h2>
+                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : tab === 'billing-audit' ? '💲 Billing Audit' : tab === 'client-map' ? '🗺️ Client Map' : 'Select a client to get started'}</h2>
                                     )}
                                 </div>
                                 <button 
