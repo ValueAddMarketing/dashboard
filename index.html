@@ -5035,12 +5035,46 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 }
             };
 
-            const saveMapping = async (clientName, locationId) => {
+            const saveMapping = async (clientName, locationId, token) => {
                 if (!locationId) {
                     await supabase.from('client_ghl_locations').delete().eq('client_name', clientName);
                 } else {
-                    await supabase.from('client_ghl_locations').upsert({ client_name: clientName, ghl_location_id: locationId }, { onConflict: 'client_name' });
+                    const row = { client_name: clientName, ghl_location_id: locationId };
+                    if (token) row.ghl_token = token;
+                    await supabase.from('client_ghl_locations').upsert(row, { onConflict: 'client_name' });
                 }
+                await loadMappings();
+            };
+
+            const saveToken = async (clientName, token) => {
+                await supabase.from('client_ghl_locations').update({ ghl_token: token }).eq('client_name', clientName);
+                await loadMappings();
+            };
+
+            const [bulkToken, setBulkToken] = useState('');
+            const [bulkTokenStatus, setBulkTokenStatus] = useState('');
+
+            const applyBulkToken = async () => {
+                if (!bulkToken.trim()) return;
+                setBulkTokenStatus('Applying...');
+                const noToken = mappings.filter(m => !m.ghl_token);
+                let applied = 0;
+                for (const m of noToken) {
+                    // Test if this token works for this location
+                    try {
+                        const resp = await fetch('/api/ghl', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'testToken', token: bulkToken.trim(), testLocationId: m.ghl_location_id })
+                        });
+                        const data = await resp.json();
+                        if (data.success) {
+                            await saveToken(m.client_name, bulkToken.trim());
+                            applied++;
+                        }
+                    } catch (e) { /* skip */ }
+                }
+                setBulkTokenStatus(`Applied to ${applied} of ${noToken.length} clients`);
                 await loadMappings();
             };
 
@@ -5352,20 +5386,60 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             </div>
                         </div>
 
-                        {/* Current mappings */}
+                        {/* Bulk Token Application */}
                         {mappings.length > 0 && (
                             <div className="card p-4">
-                                <h3 className="text-sm font-semibold text-white mb-3">Current Mappings ({mappings.length})</h3>
-                                <div className="space-y-2">
+                                <h3 className="text-sm font-semibold text-white mb-2">Sub-Account Tokens</h3>
+                                <p className="text-xs text-slate-500 mb-3">GHL requires a sub-account private integration token to access contacts. You can create one per sub-account, or paste one here to test it against all mapped clients.</p>
+                                <div className="flex gap-3 items-end flex-wrap mb-3">
+                                    <div style={{ minWidth: '300px' }} className="flex-1">
+                                        <label className="text-xs text-slate-400 block mb-1">Sub-Account Token (pit-...)</label>
+                                        <input type="text" value={bulkToken} onChange={e => setBulkToken(e.target.value)} placeholder="pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className="w-full input-field border rounded-lg px-3 py-2 text-sm font-mono" />
+                                    </div>
+                                    <button onClick={applyBulkToken} disabled={!bulkToken.trim() || setupLoading} className="px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                                        Test & Apply to All
+                                    </button>
+                                </div>
+                                {bulkTokenStatus && <p className="text-xs text-brand-cyan mb-3">{bulkTokenStatus}</p>}
+                                <div className="bg-dark-800 rounded-lg p-3 text-xs text-slate-400">
+                                    <p className="font-semibold text-white mb-1">How to get tokens:</p>
+                                    <p>1. Go into a GHL sub-account → Settings → Integrations → Private Integrations</p>
+                                    <p>2. Create integration, check all scopes, copy the pit- token</p>
+                                    <p>3. Each token only works for its own sub-account</p>
+                                    <p className="mt-1 text-slate-500">Tip: If you create the same-named integration in multiple sub-accounts, paste each token here - it will auto-detect which client it belongs to.</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Current mappings with token status */}
+                        {mappings.length > 0 && (
+                            <div className="card p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-semibold text-white">Current Mappings ({mappings.length})</h3>
+                                    <div className="flex gap-3 text-xs">
+                                        <span className="text-emerald-400">{mappings.filter(m => m.ghl_token).length} with token</span>
+                                        <span className="text-red-400">{mappings.filter(m => !m.ghl_token).length} missing token</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-1 max-h-96 overflow-y-auto scrollbar">
                                     {mappings.map(m => {
                                         const locName = ghlLocations.find(l => l.id === m.ghl_location_id)?.name;
+                                        const hasToken = !!m.ghl_token;
                                         return (
                                             <div key={m.client_name} className="flex items-center justify-between bg-dark-800 rounded-lg px-3 py-2">
-                                                <div>
-                                                    <span className="text-sm text-white">{m.client_name}</span>
-                                                    <span className="text-xs text-slate-500 ml-2">{locName || m.ghl_location_id}</span>
+                                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasToken ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                                    <span className="text-sm text-white truncate">{m.client_name}</span>
+                                                    <span className="text-xs text-slate-600 truncate">{locName || m.ghl_location_id}</span>
                                                 </div>
-                                                <button onClick={async () => { await saveMapping(m.client_name, null); }} className="text-xs text-red-400 hover:text-red-300">Remove</button>
+                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                    {hasToken ? (
+                                                        <span className="text-xs text-emerald-400">Token set</span>
+                                                    ) : (
+                                                        <span className="text-xs text-red-400">No token</span>
+                                                    )}
+                                                    <button onClick={async () => { await saveMapping(m.client_name, null); }} className="text-xs text-red-400 hover:text-red-300 ml-2">Remove</button>
+                                                </div>
                                             </div>
                                         );
                                     })}
