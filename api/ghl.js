@@ -1,4 +1,6 @@
-const GHL_API_KEY = process.env.GHL_API_KEY; // Agency-level token (for listing locations)
+const GHL_API_KEY = process.env.GHL_API_KEY; // Agency-level PIT (fallback for listing locations)
+const GHL_CLIENT_ID = process.env.GHL_CLIENT_ID;
+const GHL_CLIENT_SECRET = process.env.GHL_CLIENT_SECRET;
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -21,6 +23,78 @@ const makeGhlFetch = (token) => async (url, options = {}) => {
     return resp.json();
 };
 
+// Get the agency OAuth token from Supabase, refreshing if needed
+async function getAgencyOAuthToken() {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?select=*&limit=1`, {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    const tokens = await resp.json();
+    if (!Array.isArray(tokens) || tokens.length === 0) return null;
+
+    const stored = tokens[0];
+    const expiresAt = new Date(stored.expires_at);
+
+    // If token expires within 1 hour, refresh it
+    if (expiresAt < new Date(Date.now() + 3600000) && stored.refresh_token && GHL_CLIENT_ID && GHL_CLIENT_SECRET) {
+        try {
+            const refreshResp = await fetch('https://services.leadconnectorhq.com/oauth/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    client_id: GHL_CLIENT_ID,
+                    client_secret: GHL_CLIENT_SECRET,
+                    grant_type: 'refresh_token',
+                    refresh_token: stored.refresh_token,
+                    user_type: 'Company'
+                }).toString()
+            });
+            const refreshData = await refreshResp.json();
+
+            if (refreshData.access_token) {
+                const newExpiresAt = new Date(Date.now() + (refreshData.expires_in || 86400) * 1000).toISOString();
+                await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?company_id=eq.${stored.company_id}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        access_token: refreshData.access_token,
+                        refresh_token: refreshData.refresh_token,
+                        expires_at: newExpiresAt,
+                        updated_at: new Date().toISOString()
+                    })
+                });
+                return { token: refreshData.access_token, companyId: stored.company_id };
+            }
+        } catch (e) {
+            console.error('Token refresh failed:', e);
+        }
+    }
+
+    return { token: stored.access_token, companyId: stored.company_id };
+}
+
+// Generate a location-level token from the agency OAuth token
+async function getLocationToken(agencyToken, companyId, locationId) {
+    const resp = await fetch(`${GHL_BASE}/oauth/locationToken`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${agencyToken}`,
+            'Version': '2021-07-28',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({ companyId, locationId })
+    });
+    const data = await resp.json();
+    if (!data.access_token) throw new Error(`Failed to get location token: ${JSON.stringify(data)}`);
+    return data.access_token;
+}
+
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -31,13 +105,27 @@ export default async function handler(req, res) {
 
     const { action, locationId, contactId, startDate, endDate } = req.body;
 
-    // Agency-level fetch (for locations/companies)
-    const agencyFetch = GHL_API_KEY ? makeGhlFetch(GHL_API_KEY) : null;
+    // Get the best available agency token (OAuth first, then PIT fallback)
+    const oauthData = await getAgencyOAuthToken();
+    const agencyToken = oauthData?.token || GHL_API_KEY;
+    const companyId = oauthData?.companyId;
+    const agencyFetch = agencyToken ? makeGhlFetch(agencyToken) : null;
+    const hasOAuth = !!oauthData?.token;
 
     try {
+        // Check OAuth status
+        if (action === 'oauthStatus') {
+            return res.json({
+                hasOAuth,
+                hasPIT: !!GHL_API_KEY,
+                hasClientCredentials: !!(GHL_CLIENT_ID && GHL_CLIENT_SECRET),
+                companyId
+            });
+        }
+
         // List all locations using agency token
         if (action === 'listLocations') {
-            if (!agencyFetch) return res.status(500).json({ error: 'GHL_API_KEY not configured' });
+            if (!agencyFetch) return res.status(500).json({ error: 'No GHL token configured. Install the OAuth app or set GHL_API_KEY.' });
 
             const allLocations = [];
             let skip = 0;
@@ -71,13 +159,55 @@ export default async function handler(req, res) {
             }
         }
 
-        // Fetch speed to lead for ALL locations that have tokens
+        // Generate location tokens for all mapped clients (OAuth only)
+        if (action === 'generateLocationTokens') {
+            if (!hasOAuth || !companyId) {
+                return res.status(400).json({ error: 'OAuth not configured. Install the GHL app first.' });
+            }
+
+            const mappingsRes = await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?select=*`, {
+                headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+            });
+            const mappings = await mappingsRes.json();
+
+            if (!Array.isArray(mappings) || mappings.length === 0) {
+                return res.json({ updated: 0, error: 'No mappings found' });
+            }
+
+            let updated = 0;
+            let failed = 0;
+            const errors = {};
+
+            for (const mapping of mappings) {
+                try {
+                    const locToken = await getLocationToken(oauthData.token, companyId, mapping.ghl_location_id);
+                    await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?ghl_location_id=eq.${mapping.ghl_location_id}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ ghl_token: locToken })
+                    });
+                    updated++;
+                } catch (err) {
+                    errors[mapping.client_name] = err.message;
+                    failed++;
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            return res.json({ updated, failed, total: mappings.length, errors: Object.keys(errors).length > 0 ? errors : undefined });
+        }
+
+        // Fetch speed to lead for ALL locations
         if (action === 'getAllSpeedToLead') {
             if (!SUPABASE_URL || !SUPABASE_KEY) {
                 return res.status(500).json({ error: 'Supabase not configured' });
             }
 
-            // Get GHL location mappings from Supabase (now includes ghl_token)
+            // Get GHL location mappings from Supabase
             const mappingsRes = await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?select=*`, {
                 headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
             });
@@ -87,10 +217,34 @@ export default async function handler(req, res) {
                 return res.json({ results: {}, mappingsCount: 0, error: 'No GHL location mappings found.' });
             }
 
-            // Only process mappings that have a token
-            const withTokens = mappings.filter(m => m.ghl_token);
-            if (withTokens.length === 0) {
-                return res.json({ results: {}, mappingsCount: mappings.length, tokensConfigured: 0, error: 'No sub-account tokens configured. Add a token for each client in the Setup page.' });
+            // Strategy: use stored ghl_token if available, otherwise try OAuth locationToken
+            const processable = [];
+            for (const m of mappings) {
+                if (m.ghl_token) {
+                    processable.push({ ...m, tokenSource: 'stored' });
+                } else if (hasOAuth && companyId) {
+                    // Try to generate a location token on the fly
+                    try {
+                        const locToken = await getLocationToken(oauthData.token, companyId, m.ghl_location_id);
+                        // Store it for next time
+                        await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?ghl_location_id=eq.${m.ghl_location_id}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'apikey': SUPABASE_KEY,
+                                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ ghl_token: locToken })
+                        });
+                        processable.push({ ...m, ghl_token: locToken, tokenSource: 'oauth' });
+                    } catch (e) {
+                        // Skip this one
+                    }
+                }
+            }
+
+            if (processable.length === 0) {
+                return res.json({ results: {}, mappingsCount: mappings.length, tokensConfigured: 0, error: 'No tokens available. Install the GHL OAuth app or add sub-account tokens manually.' });
             }
 
             const since = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -99,7 +253,7 @@ export default async function handler(req, res) {
             const results = {};
             const errors = {};
 
-            for (const mapping of withTokens) {
+            for (const mapping of processable) {
                 try {
                     const locationFetch = makeGhlFetch(mapping.ghl_token);
                     const locationData = await processLocationSpeedToLead(locationFetch, mapping.ghl_location_id, since, until);
@@ -114,7 +268,7 @@ export default async function handler(req, res) {
                 errors: Object.keys(errors).length > 0 ? errors : undefined,
                 dateRange: { since, until },
                 mappingsCount: mappings.length,
-                tokensConfigured: withTokens.length
+                tokensConfigured: processable.length
             });
         }
 

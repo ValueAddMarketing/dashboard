@@ -5053,6 +5053,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
             const [bulkToken, setBulkToken] = useState('');
             const [bulkTokenStatus, setBulkTokenStatus] = useState('');
+            const [oauthStatus, setOauthStatus] = useState(null);
+            const [genTokensLoading, setGenTokensLoading] = useState(false);
+            const [genTokensResult, setGenTokensResult] = useState(null);
 
             const applyBulkToken = async () => {
                 if (!bulkToken.trim()) return;
@@ -5112,8 +5115,39 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 setLoading(false);
             };
 
+            const checkOAuthStatus = async () => {
+                try {
+                    const resp = await fetch('/api/ghl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'oauthStatus' })
+                    });
+                    const data = await resp.json();
+                    setOauthStatus(data);
+                    return data;
+                } catch (e) { return null; }
+            };
+
+            const generateAllTokens = async () => {
+                setGenTokensLoading(true);
+                setGenTokensResult(null);
+                try {
+                    const resp = await fetch('/api/ghl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'generateLocationTokens' })
+                    });
+                    const data = await resp.json();
+                    setGenTokensResult(data);
+                    await loadMappings();
+                } catch (e) {
+                    setGenTokensResult({ error: e.message });
+                }
+                setGenTokensLoading(false);
+            };
+
             useEffect(() => {
-                loadMappings().then(m => {
+                Promise.all([loadMappings(), checkOAuthStatus()]).then(([m]) => {
                     if (m.length > 0) fetchSpeedData();
                     else { setLoading(false); setShowSetup(true); }
                 });
@@ -5296,6 +5330,38 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             )}
                         </div>
                         <p className="text-slate-400 text-sm">Map your clients to their GoHighLevel sub-accounts (locations) to track speed-to-lead data.</p>
+
+                        {/* OAuth Connection Status */}
+                        <div className="card p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-semibold text-white">GHL OAuth App</h3>
+                                {oauthStatus?.hasOAuth ? (
+                                    <span className="text-xs text-emerald-400 font-semibold">Connected</span>
+                                ) : (
+                                    <span className="text-xs text-yellow-400 font-semibold">Not Connected</span>
+                                )}
+                            </div>
+                            {oauthStatus?.hasOAuth ? (
+                                <div className="space-y-3">
+                                    <p className="text-xs text-emerald-400">OAuth app is connected. Tokens will be auto-generated for all sub-accounts.</p>
+                                    <div className="flex gap-2 items-center">
+                                        <button onClick={generateAllTokens} disabled={genTokensLoading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                                            {genTokensLoading ? 'Generating...' : 'Generate All Location Tokens'}
+                                        </button>
+                                        {genTokensResult && (
+                                            <span className="text-xs text-slate-400">
+                                                {genTokensResult.error ? genTokensResult.error : `${genTokensResult.updated} updated, ${genTokensResult.failed || 0} failed`}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-slate-500">Install the GHL OAuth app to auto-generate tokens for all sub-accounts. This is the easiest way — one install covers all clients.</p>
+                                    <p className="text-xs text-slate-400">Steps: 1) Create app in GHL Developer Marketplace 2) Set redirect URL to <code className="text-brand-cyan">{typeof window !== 'undefined' ? window.location.origin : ''}/api/ghl-oauth-callback</code> 3) Add GHL_CLIENT_ID and GHL_CLIENT_SECRET to Vercel 4) Install the app from GHL</p>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Auto-Match Section */}
                         <div className="card p-4">
