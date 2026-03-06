@@ -3598,6 +3598,52 @@ ${transcript}`;
                 setAssigningId(null);
             };
 
+            // Undo a client assignment — revert sync log to unmatched, delete the meeting note
+            const [undoingId, setUndoingId] = React.useState(null);
+            const unassignClient = async (recordingId) => {
+                if (!recordingId) return;
+                if (!confirm('Undo this assignment? The meeting note will be deleted and the recording will go back to unmatched.')) return;
+                setUndoingId(recordingId);
+                try {
+                    const entry = syncLog.find(l => l.fathom_recording_id === recordingId);
+                    // Delete the meeting note if it exists
+                    if (entry?.meeting_note_id) {
+                        await supabase.from('meeting_notes').delete().eq('id', entry.meeting_note_id);
+                    } else {
+                        // Fallback: delete by external_id
+                        await supabase.from('meeting_notes').delete().eq('external_id', recordingId);
+                    }
+                    // Delete any auto-created notes/activity for this meeting
+                    if (entry?.client_name) {
+                        const meetDate = entry.processed_at || entry.synced_at;
+                        if (meetDate) {
+                            await supabase.from('client_notes').delete().eq('client_name', entry.client_name).like('note_text', `%[Fathom%`).gte('created_at', new Date(new Date(meetDate).getTime() - 60000).toISOString()).lte('created_at', new Date(new Date(meetDate).getTime() + 60000).toISOString());
+                            await supabase.from('activity_log').delete().eq('client_name', entry.client_name).eq('action', 'Fathom meeting auto-imported').gte('created_at', new Date(new Date(meetDate).getTime() - 60000).toISOString()).lte('created_at', new Date(new Date(meetDate).getTime() + 60000).toISOString());
+                        }
+                    }
+                    // Reset sync log entry to unmatched — restore original metadata
+                    const origMeta = { reason: 'Could not match to a client. Add email domain mapping in Fathom Settings.' };
+                    try {
+                        const meta = JSON.parse(entry?.error_message || '{}');
+                        if (meta.meeting_date) origMeta.meeting_date = meta.meeting_date;
+                        if (meta.participant_names) origMeta.participant_names = meta.participant_names;
+                        if (meta.participants) origMeta.participants = meta.participants;
+                    } catch {}
+                    await supabase.from('fathom_sync_log').update({
+                        status: 'unmatched',
+                        client_name: null,
+                        meeting_note_id: null,
+                        processed_at: null,
+                        error_message: JSON.stringify(origMeta),
+                    }).eq('fathom_recording_id', recordingId);
+                    // Refresh sync log + meetings
+                    const { data: logData } = await supabase.from('fathom_sync_log').select('*').order('synced_at', { ascending: false }).limit(100);
+                    if (logData) setSyncLog(logData);
+                    await refreshMeetings();
+                } catch (e) { alert('Undo failed: ' + e.message); }
+                setUndoingId(null);
+            };
+
             // Fetch meetings for selected month (filtered by team member if selected)
             useEffect(() => {
                 const load = async () => {
@@ -3920,6 +3966,11 @@ ${transcript}`;
                                                 <span className="text-slate-300 truncate shrink-0" style={{maxWidth: '200px'}}>{l.fathom_title || l.fathom_recording_id}</span>
                                                 {logParticipants.length > 0 && <span className="text-brand-cyan truncate" style={{maxWidth: '300px'}}>{logParticipants.join(', ')}</span>}
                                                 {l.client_name && <span className="text-brand-purple shrink-0">{l.client_name}</span>}
+                                                {l.status === 'processed' && (
+                                                    <button onClick={() => unassignClient(l.fathom_recording_id)} disabled={undoingId === l.fathom_recording_id} className={`px-1.5 py-0.5 rounded text-xs shrink-0 transition-colors ${undoingId === l.fathom_recording_id ? 'bg-dark-600 text-slate-500 cursor-not-allowed' : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'}`}>
+                                                        {undoingId === l.fathom_recording_id ? 'Undoing...' : 'Undo'}
+                                                    </button>
+                                                )}
                                                 {l.status === 'unmatched' && (
                                                     <div className="flex items-center gap-1 shrink-0">
                                                         {allClientNames.length > 0 ? (
