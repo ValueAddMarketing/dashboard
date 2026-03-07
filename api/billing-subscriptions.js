@@ -192,17 +192,21 @@ export default async function handler(req, res) {
     // ========== DEBUG RAW WHOP DATA ==========
     if (action === 'debugWhop') {
         if (!WHOP_API_KEY) return res.json({ error: 'No WHOP_API_KEY' });
-        try {
-            const [memResp, planResp] = await Promise.all([
-                fetch('https://api.whop.com/api/v5/company/memberships?per=3', { headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` } }),
-                fetch('https://api.whop.com/api/v5/company/plans?per=5', { headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` } })
-            ]);
-            const memberships = memResp.ok ? await memResp.json() : { error: await memResp.text() };
-            const plans = planResp.ok ? await planResp.json() : { error: await planResp.text() };
-            return res.json({ memberships, plans });
-        } catch (err) {
-            return res.json({ error: err.message });
-        }
+        const headers = { 'Authorization': `Bearer ${WHOP_API_KEY}` };
+        const tryFetch = async (url) => {
+            try {
+                const r = await fetch(url, { headers });
+                const text = await r.text();
+                try { return { status: r.status, data: JSON.parse(text) }; } catch { return { status: r.status, text: text.substring(0, 500) }; }
+            } catch (e) { return { error: e.message }; }
+        };
+        const [plans_v5, plans_v2, products_v5, singlePlan] = await Promise.all([
+            tryFetch('https://api.whop.com/api/v5/company/plans?per=3'),
+            tryFetch('https://api.whop.com/api/v2/company/plans?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/products?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/plans/plan_Bo2pCwEPNibzX'),
+        ]);
+        return res.json({ plans_v5, plans_v2, products_v5, singlePlan });
     }
 
     return res.status(400).json({ error: 'Invalid action. Use "fetchAll" or "saveMappings".' });
