@@ -6201,10 +6201,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 const load = async () => {
                     setLoading(true);
                     try {
-                        const resp = await fetch('/api/list-users');
-                        const data = await resp.json();
-                        if (data.error) { setError(data.error); }
-                        else { setUsers(data.users || []); }
+                        const { data, error } = await supabase.rpc('list_auth_users');
+                        if (error) { setError(error.message); }
+                        else { setUsers(data || []); }
                     } catch (e) { setError(e.message); }
                     setLoading(false);
                 };
