@@ -51,27 +51,14 @@ export default async function handler(req, res) {
         const expiresAt = new Date(Date.now() + (expires_in || 86400) * 1000).toISOString();
         const cid = companyId || 'default';
 
-        // Use Supabase RPC or raw SQL to do a true upsert via postgrest
-        // First, just DELETE then INSERT — two simple operations
-        const delResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?company_id=eq.${encodeURIComponent(cid)}`, {
-            method: 'DELETE',
-            headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        // Log delete result for debugging
-        const delStatus = delResp.status;
-        const delText = await delResp.text();
-
-        const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens`, {
+        // Upsert using PostgREST on_conflict parameter
+        const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?on_conflict=company_id`, {
             method: 'POST',
             headers: {
                 'apikey': SUPABASE_KEY,
                 'Authorization': `Bearer ${SUPABASE_KEY}`,
                 'Content-Type': 'application/json',
-                'Prefer': 'return=minimal'
+                'Prefer': 'resolution=merge-duplicates,return=minimal'
             },
             body: JSON.stringify({
                 company_id: cid,
@@ -84,9 +71,9 @@ export default async function handler(req, res) {
             })
         });
 
-        if (!insertResp.ok) {
-            const errText = await insertResp.text();
-            return res.status(500).send(`Failed to store tokens (delete status: ${delStatus}, delete body: ${delText}). Insert error: ${errText}`);
+        if (!upsertResp.ok) {
+            const errText = await upsertResp.text();
+            return res.status(500).send(`Failed to store tokens: ${errText}`);
         }
 
         // Redirect to dashboard with success
