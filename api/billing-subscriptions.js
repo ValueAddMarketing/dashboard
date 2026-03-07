@@ -186,5 +186,26 @@ export default async function handler(req, res) {
         return res.json({ ok: true });
     }
 
+    // ========== DEBUG RAW WHOP DATA ==========
+    if (action === 'debugWhop') {
+        if (!WHOP_API_KEY) return res.json({ error: 'No WHOP_API_KEY' });
+        try {
+            const resp = await fetch('https://api.whop.com/api/v5/company/memberships?per=3', {
+                headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+            });
+            if (!resp.ok) {
+                const resp2 = await fetch('https://api.whop.com/api/v2/company/memberships?per=3&page=1', {
+                    headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                });
+                const raw2 = await resp2.json();
+                return res.json({ api: 'v2', raw: raw2 });
+            }
+            const raw = await resp.json();
+            return res.json({ api: 'v5', raw });
+        } catch (err) {
+            return res.json({ error: err.message });
+        }
+    }
+
     return res.status(400).json({ error: 'Invalid action. Use "fetchAll" or "saveMappings".' });
 }
