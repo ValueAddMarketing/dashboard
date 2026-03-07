@@ -200,13 +200,14 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
     return Array.from(allSources).map(src => {
       const stats = sourceStats[src] || { total: 0, stages: {} };
       const deals = dealsBySource[src] || { totalDeals: 0, closedDeals: 0, closedCommission: 0, closedVolume: 0, totalCommission: 0, activeDeals: 0 };
-      const spend = adSpend[src] || 0;
+      const spendData = getSpend(adSpend, src);
+      const spend = spendData.total;
       const roi = spend > 0 ? ((deals.closedCommission - spend) / spend) : null;
       const convRate = stats.total > 0 ? deals.closedDeals / stats.total : 0;
       const costPerLead = spend > 0 && stats.total > 0 ? spend / stats.total : null;
       const hotLeads = (stats.stages['A - Hot 1-3 Months'] || 0);
       const warmLeads = (stats.stages['B - Warm 3-6 Months'] || 0);
-      return { src, ...stats, ...deals, spend, roi, convRate, costPerLead, hotLeads, warmLeads };
+      return { src, ...stats, ...deals, spend, adSpendAmt: spendData.adSpend, serviceFee: spendData.serviceFee, roi, convRate, costPerLead, hotLeads, warmLeads };
     }).sort((a, b) => b.closedCommission - a.closedCommission);
   }, [sourceStats, dealsBySource, adSpend]);
 
@@ -225,6 +226,8 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
             <th className="text-right p-3">Commission Earned</th>
             <th className="text-right p-3">Pipeline Commission</th>
             <th className="text-right p-3">Ad Spend</th>
+            <th className="text-right p-3">Service Fee</th>
+            <th className="text-right p-3">Total Cost</th>
             <th className="text-right p-3">Cost/Lead</th>
             <th className="text-right p-3">ROI</th>
           </tr>
@@ -243,7 +246,9 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
               <td className="p-3 text-right">{formatCurrency(r.closedVolume)}</td>
               <td className="p-3 text-right font-bold text-green-400">{formatCurrency(r.closedCommission)}</td>
               <td className="p-3 text-right text-blue-400">{formatCurrency(r.totalCommission - r.closedCommission)}</td>
-              <td className="p-3 text-right text-red-400">{r.spend > 0 ? formatCurrency(r.spend) : '-'}</td>
+              <td className="p-3 text-right text-red-400">{r.adSpendAmt > 0 ? formatCurrency(r.adSpendAmt) : '-'}</td>
+              <td className="p-3 text-right text-orange-400">{r.serviceFee > 0 ? formatCurrency(r.serviceFee) : '-'}</td>
+              <td className="p-3 text-right text-red-300 font-medium">{r.spend > 0 ? formatCurrency(r.spend) : '-'}</td>
               <td className="p-3 text-right">{r.costPerLead != null ? formatCurrency(r.costPerLead) : '-'}</td>
               <td className="p-3 text-right">
                 {r.roi != null ? (
@@ -329,24 +334,87 @@ function DealTable({ deals }) {
   );
 }
 
+// ── Helper to get total spend (ad spend + service fee) for a source ──
+function getSpend(adSpend, src) {
+  const entry = adSpend[src];
+  if (!entry) return { adSpend: 0, serviceFee: 0, total: 0 };
+  if (typeof entry === 'number') return { adSpend: entry, serviceFee: 0, total: entry }; // legacy format
+  return { adSpend: entry.adSpend || 0, serviceFee: entry.serviceFee || 0, total: (entry.adSpend || 0) + (entry.serviceFee || 0) };
+}
+
+function getTotalSpend(adSpend) {
+  return Object.keys(adSpend).reduce((sum, src) => sum + getSpend(adSpend, src).total, 0);
+}
+
 // ── Ad Spend Input Modal ──
 function AdSpendModal({ sources, adSpend, setAdSpend, onClose }) {
-  const [local, setLocal] = useState({...adSpend});
+  // Normalize legacy format on load
+  const normalize = (data) => {
+    const out = {};
+    for (const src of Object.keys(data)) {
+      if (typeof data[src] === 'number') {
+        out[src] = { adSpend: data[src], serviceFee: 0 };
+      } else {
+        out[src] = { adSpend: data[src]?.adSpend || 0, serviceFee: data[src]?.serviceFee || 0 };
+      }
+    }
+    // Ensure all sources have entries
+    for (const src of sources) {
+      if (!out[src]) out[src] = { adSpend: 0, serviceFee: 0 };
+    }
+    return out;
+  };
+  const [local, setLocal] = useState(() => normalize(adSpend));
+
+  const updateField = (src, field, value) => {
+    setLocal(prev => ({ ...prev, [src]: { ...prev[src], [field]: parseFloat(value) || 0 } }));
+  };
+
+  const grandTotal = Object.values(local).reduce((s, v) => s + (v.adSpend || 0) + (v.serviceFee || 0), 0);
+
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:50,display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div className="card p-6" style={{width:450,maxHeight:'80vh',overflow:'auto'}}>
-        <h3 className="text-lg font-bold text-white mb-4">Set Monthly Ad Spend by Source</h3>
-        <p className="text-xs text-slate-400 mb-4">Enter your monthly ad spend for each lead source to calculate ROI.</p>
-        {sources.map(src => (
-          <div key={src} className="flex items-center gap-3 mb-3">
-            <label className="text-sm text-slate-300 w-40 truncate">{src}</label>
-            <div className="flex items-center bg-slate-800 rounded px-2 flex-1">
-              <span className="text-slate-500">$</span>
-              <input type="number" value={local[src] || ''} onChange={e => setLocal({...local, [src]: parseFloat(e.target.value) || 0})}
-                className="bg-transparent text-white p-2 w-full outline-none" placeholder="0" />
+      <div className="card p-6" style={{width:600,maxHeight:'80vh',overflow:'auto'}}>
+        <h3 className="text-lg font-bold text-white mb-2">Set Monthly Costs by Source</h3>
+        <p className="text-xs text-slate-400 mb-4">Enter the actual ad spend (paid to the platform) and the service/management fee separately for each lead source.</p>
+
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-2 px-1">
+          <div className="text-xs text-slate-500 font-medium" style={{width:120}}>Source</div>
+          <div className="text-xs text-slate-500 font-medium flex-1 text-center">Ad Spend (Platform)</div>
+          <div className="text-xs text-slate-500 font-medium flex-1 text-center">Service Fee</div>
+          <div className="text-xs text-slate-500 font-medium" style={{width:80,textAlign:'right'}}>Total</div>
+        </div>
+
+        {sources.map(src => {
+          const entry = local[src] || { adSpend: 0, serviceFee: 0 };
+          const rowTotal = (entry.adSpend || 0) + (entry.serviceFee || 0);
+          return (
+            <div key={src} className="flex items-center gap-3 mb-2">
+              <label className="text-sm text-slate-300 truncate" style={{width:120}} title={src}>{src}</label>
+              <div className="flex items-center bg-slate-800 rounded px-2 flex-1">
+                <span className="text-slate-500 text-xs">$</span>
+                <input type="number" value={entry.adSpend || ''} onChange={e => updateField(src, 'adSpend', e.target.value)}
+                  className="bg-transparent text-white p-1.5 w-full outline-none text-sm" placeholder="0" />
+              </div>
+              <div className="flex items-center bg-slate-800 rounded px-2 flex-1">
+                <span className="text-slate-500 text-xs">$</span>
+                <input type="number" value={entry.serviceFee || ''} onChange={e => updateField(src, 'serviceFee', e.target.value)}
+                  className="bg-transparent text-white p-1.5 w-full outline-none text-sm" placeholder="0" />
+              </div>
+              <div className="text-sm text-slate-400 text-right" style={{width:80}}>
+                {rowTotal > 0 ? formatCurrency(rowTotal) : '-'}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
+
+        {/* Grand total */}
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-700">
+          <span className="text-sm text-slate-400">Grand Total</span>
+          <span className="text-sm font-bold text-white">{formatCurrency(grandTotal)}/mo</span>
+        </div>
+
         <div className="flex gap-2 mt-4">
           <button onClick={() => { setAdSpend(local); localStorage.setItem('george_ad_spend', JSON.stringify(local)); onClose(); }}
             className="px-4 py-2 bg-blue-600 text-white rounded text-sm flex-1">Save</button>
@@ -379,9 +447,10 @@ function Recommendations({ sourceStats, dealsBySource, adSpend }) {
       if (leads > 10 && deals === 0) items.push({ type: 'warning', text: `${src} has ${leads} leads but 0 deals. Review lead quality or follow-up process.` });
     }
     for (const src of Object.keys(adSpend)) {
-      if (!adSpend[src]) continue;
+      const spendData = getSpend(adSpend, src);
+      if (!spendData.total) continue;
       const comm = dealsBySource[src]?.closedCommission || 0;
-      const spend = adSpend[src];
+      const spend = spendData.total;
       const roi = (comm - spend) / spend;
       if (roi < 0) items.push({ type: 'danger', text: `${src} is currently negative ROI (${(roi*100).toFixed(0)}%). Review if pipeline deals will close to recover.` });
       else if (roi > 2) items.push({ type: 'success', text: `${src} has excellent ROI of ${(roi*100).toFixed(0)}%. Strong candidate for increased spend.` });
@@ -678,7 +747,7 @@ function App() {
 
   const { summary, sourceStats, dealsBySource, deals } = data;
   const allSources = [...new Set([...Object.keys(sourceStats), ...Object.keys(dealsBySource)])].filter(s => s !== '<unspecified>');
-  const totalSpend = Object.values(adSpend).reduce((s, v) => s + (v || 0), 0);
+  const totalSpend = getTotalSpend(adSpend);
 
   // Chart data
   const commissionBySource = Object.entries(dealsBySource)
