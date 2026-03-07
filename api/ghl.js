@@ -124,7 +124,8 @@ export default async function handler(req, res) {
                 companyId,
                 oauthUserType,
                 oauthLocationId,
-                debug: oauthData
+                storedUserType: oauthData?.userType || 'NOT_SET',
+                storedLocationId: oauthData?.locationId || 'NOT_SET'
             });
         }
 
