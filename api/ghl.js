@@ -243,31 +243,14 @@ export default async function handler(req, res) {
                 return res.json({ results: {}, mappingsCount: 0, error: 'No GHL location mappings found.' });
             }
 
-            // Strategy: use stored ghl_token if available, or OAuth token directly for matching location
+            // Strategy: use stored ghl_token if available, otherwise try OAuth token directly
             const processable = [];
             for (const m of mappings) {
                 if (m.ghl_token) {
                     processable.push({ ...m, tokenSource: 'stored' });
-                } else if (hasOAuth && oauthUserType === 'Location' && m.ghl_location_id === oauthLocationId) {
-                    // Sub-Account OAuth token — use directly for matching location
+                } else if (hasOAuth) {
+                    // Try OAuth token directly — works for the location the app was installed on
                     processable.push({ ...m, ghl_token: oauthData.token, tokenSource: 'oauth_direct' });
-                } else if (hasOAuth && oauthUserType === 'Company' && companyId) {
-                    // Company OAuth token — generate location token
-                    try {
-                        const locToken = await getLocationToken(oauthData.token, companyId, m.ghl_location_id);
-                        await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?ghl_location_id=eq.${m.ghl_location_id}`, {
-                            method: 'PATCH',
-                            headers: {
-                                'apikey': SUPABASE_KEY,
-                                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ ghl_token: locToken })
-                        });
-                        processable.push({ ...m, ghl_token: locToken, tokenSource: 'oauth' });
-                    } catch (e) {
-                        // Skip this one
-                    }
                 }
             }
 
