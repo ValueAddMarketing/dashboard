@@ -63,33 +63,53 @@ export default async function handler(req, res) {
 
         const expiresAt = new Date(Date.now() + (expires_in || 86400) * 1000).toISOString();
 
-        // Delete existing token first, then insert new one
+        // Try update first, then insert if no row exists
         const cid = companyId || 'default';
-        await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?company_id=eq.${cid}`, {
-            method: 'DELETE',
-            headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
-        });
+        const tokenPayload = {
+            access_token,
+            refresh_token,
+            expires_at: expiresAt,
+            user_type: userType || 'Location',
+            location_id: locationId || null,
+            updated_at: new Date().toISOString()
+        };
 
-        const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens`, {
-            method: 'POST',
+        const patchResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?company_id=eq.${cid}`, {
+            method: 'PATCH',
             headers: {
                 'apikey': SUPABASE_KEY,
                 'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
             },
-            body: JSON.stringify({
-                company_id: cid,
-                access_token,
-                refresh_token,
-                expires_at: expiresAt,
-                user_type: userType || 'Location',
-                location_id: locationId || null,
-                updated_at: new Date().toISOString()
-            })
+            body: JSON.stringify(tokenPayload)
         });
+
+        // If PATCH matched 0 rows, insert instead
+        let upsertResp;
+        if (patchResp.ok) {
+            // Check if any rows were actually updated by trying a count
+            const checkResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?company_id=eq.${cid}&select=id`, {
+                headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+            });
+            const existing = await checkResp.json();
+            if (Array.isArray(existing) && existing.length > 0) {
+                upsertResp = patchResp; // Update worked
+            } else {
+                // No existing row, insert
+                upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens`, {
+                    method: 'POST',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ company_id: cid, ...tokenPayload })
+                });
+            }
+        } else {
+            upsertResp = patchResp;
+        }
 
         if (!upsertResp.ok) {
             const errText = await upsertResp.text();
