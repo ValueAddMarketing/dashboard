@@ -63,21 +63,29 @@ export default async function handler(req, res) {
 
         const expiresAt = new Date(Date.now() + (expires_in || 86400) * 1000).toISOString();
 
-        // Upsert the OAuth tokens
+        // Delete existing token first, then insert new one
+        const cid = companyId || 'default';
+        await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?company_id=eq.${cid}`, {
+            method: 'DELETE',
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+        });
+
         const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens`, {
             method: 'POST',
             headers: {
                 'apikey': SUPABASE_KEY,
                 'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'resolution=merge-duplicates'
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                company_id: companyId || 'default',
+                company_id: cid,
                 access_token,
                 refresh_token,
                 expires_at: expiresAt,
-                user_type: userType || 'Company',
+                user_type: userType || 'Location',
                 location_id: locationId || null,
                 updated_at: new Date().toISOString()
             })
