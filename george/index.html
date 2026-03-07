@@ -17,12 +17,21 @@
     @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     .loading-pulse { animation: pulse-slow 1.5s ease-in-out infinite; }
     .chart-container { position: relative; height: 300px; }
+    .ai-chat-messages { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+    .ai-chat-messages::-webkit-scrollbar { width: 6px; }
+    .ai-chat-messages::-webkit-scrollbar-track { background: transparent; }
+    .ai-chat-messages::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .ai-msg pre { background: #0f172a; padding: 8px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
+    .ai-msg ul, .ai-msg ol { padding-left: 20px; margin: 4px 0; }
+    .ai-msg li { margin: 2px 0; }
+    .ai-msg p { margin: 4px 0; }
+    .ai-msg strong { color: #93c5fd; }
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useRef, useMemo } = React;
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 function formatCurrency(n) {
   if (n == null) return '$0';
@@ -31,6 +40,44 @@ function formatCurrency(n) {
 
 function formatPct(n) {
   return (n * 100).toFixed(1) + '%';
+}
+
+function formatDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── Date filter helpers ──
+function getDateRange(preset) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let start = null;
+  switch (preset) {
+    case 'all': return { start: null, end: null };
+    case '7d': start = new Date(today); start.setDate(start.getDate() - 7); break;
+    case '30d': start = new Date(today); start.setDate(start.getDate() - 30); break;
+    case '90d': start = new Date(today); start.setDate(start.getDate() - 90); break;
+    case '6m': start = new Date(today); start.setMonth(start.getMonth() - 6); break;
+    case '1y': start = new Date(today); start.setFullYear(start.getFullYear() - 1); break;
+    case 'ytd': start = new Date(now.getFullYear(), 0, 1); break;
+    case 'mtd': start = new Date(now.getFullYear(), now.getMonth(), 1); break;
+    case 'custom': return null; // handled separately
+    default: return { start: null, end: null };
+  }
+  return { start, end: today };
+}
+
+function isInRange(dateStr, range) {
+  if (!range || (!range.start && !range.end)) return true;
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  if (range.start && d < range.start) return false;
+  if (range.end) {
+    const endOfDay = new Date(range.end);
+    endOfDay.setHours(23, 59, 59, 999);
+    if (d > endOfDay) return false;
+  }
+  return true;
 }
 
 // ── KPI Card ──
@@ -60,17 +107,12 @@ function DonutChart({ data, title }) {
   useEffect(() => {
     if (!canvasRef.current || !data.length) return;
     if (chartRef.current) chartRef.current.destroy();
-
     const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#6366f1'];
     chartRef.current = new Chart(canvasRef.current, {
       type: 'doughnut',
       data: {
         labels: data.map(d => d.label),
-        datasets: [{
-          data: data.map(d => d.value),
-          backgroundColor: data.map((_, i) => palette[i % palette.length]),
-          borderWidth: 0,
-        }]
+        datasets: [{ data: data.map(d => d.value), backgroundColor: data.map((_, i) => palette[i % palette.length]), borderWidth: 0 }]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -95,7 +137,6 @@ function BarChart({ labels, datasets, title }) {
   useEffect(() => {
     if (!canvasRef.current || !labels.length) return;
     if (chartRef.current) chartRef.current.destroy();
-
     chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
       data: { labels, datasets },
@@ -117,6 +158,41 @@ function BarChart({ labels, datasets, title }) {
   return <div className="chart-container"><canvas ref={canvasRef}></canvas></div>;
 }
 
+// ── Date Filter Bar ──
+function DateFilterBar({ datePreset, setDatePreset, customStart, setCustomStart, customEnd, setCustomEnd }) {
+  const presets = [
+    { id: 'all', label: 'All Time' },
+    { id: 'mtd', label: 'MTD' },
+    { id: 'ytd', label: 'YTD' },
+    { id: '7d', label: '7 Days' },
+    { id: '30d', label: '30 Days' },
+    { id: '90d', label: '90 Days' },
+    { id: '6m', label: '6 Months' },
+    { id: '1y', label: '1 Year' },
+    { id: 'custom', label: 'Custom' },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-6">
+      <span className="text-sm text-slate-400 mr-1">Time Period:</span>
+      {presets.map(p => (
+        <button key={p.id} onClick={() => setDatePreset(p.id)}
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${datePreset === p.id ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+          {p.label}
+        </button>
+      ))}
+      {datePreset === 'custom' && (
+        <div className="flex items-center gap-2 ml-2">
+          <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+            style={{background:'#1e293b', color:'#e2e8f0', border:'1px solid #475569', borderRadius:6, padding:'4px 8px', fontSize:12}} />
+          <span className="text-slate-500">to</span>
+          <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+            style={{background:'#1e293b', color:'#e2e8f0', border:'1px solid #475569', borderRadius:6, padding:'4px 8px', fontSize:12}} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Source ROI Table ──
 function SourceTable({ sourceStats, dealsBySource, adSpend }) {
   const rows = useMemo(() => {
@@ -130,8 +206,7 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
       const costPerLead = spend > 0 && stats.total > 0 ? spend / stats.total : null;
       const hotLeads = (stats.stages['A - Hot 1-3 Months'] || 0);
       const warmLeads = (stats.stages['B - Warm 3-6 Months'] || 0);
-      const activeLeads = hotLeads + warmLeads;
-      return { src, ...stats, ...deals, spend, roi, convRate, costPerLead, activeLeads, hotLeads, warmLeads };
+      return { src, ...stats, ...deals, spend, roi, convRate, costPerLead, hotLeads, warmLeads };
     }).sort((a, b) => b.closedCommission - a.closedCommission);
   }, [sourceStats, dealsBySource, adSpend]);
 
@@ -160,9 +235,7 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
               <td className="p-3 font-medium text-white">{r.src}</td>
               <td className="p-3 text-right">{r.total.toLocaleString()}</td>
               <td className="p-3 text-right">
-                <span className="text-orange-400">{r.hotLeads}</span>
-                {' / '}
-                <span className="text-yellow-400">{r.warmLeads}</span>
+                <span className="text-orange-400">{r.hotLeads}</span>{' / '}<span className="text-yellow-400">{r.warmLeads}</span>
               </td>
               <td className="p-3 text-right">{r.totalDeals}</td>
               <td className="p-3 text-right text-green-400">{r.closedDeals}</td>
@@ -174,9 +247,7 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
               <td className="p-3 text-right">{r.costPerLead != null ? formatCurrency(r.costPerLead) : '-'}</td>
               <td className="p-3 text-right">
                 {r.roi != null ? (
-                  <span className={r.roi >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-                    {(r.roi * 100).toFixed(0)}%
-                  </span>
+                  <span className={r.roi >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{(r.roi * 100).toFixed(0)}%</span>
                 ) : '-'}
               </td>
             </tr>
@@ -189,13 +260,14 @@ function SourceTable({ sourceStats, dealsBySource, adSpend }) {
 
 // ── Deal Pipeline Table ──
 function DealTable({ deals }) {
-  const [sortKey, setSortKey] = useState('commission');
+  const [sortKey, setSortKey] = useState('date');
   const sorted = useMemo(() => {
     return [...deals].sort((a, b) => {
       if (sortKey === 'commission') return (b.commissionValue || 0) - (a.commissionValue || 0);
       if (sortKey === 'price') return (b.price || 0) - (a.price || 0);
       if (sortKey === 'stage') return (a.stageName || '').localeCompare(b.stageName || '');
       if (sortKey === 'source') return (a.primarySource || '').localeCompare(b.primarySource || '');
+      if (sortKey === 'date') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
       return 0;
     });
   }, [deals, sortKey]);
@@ -203,7 +275,7 @@ function DealTable({ deals }) {
   return (
     <div className="overflow-x-auto">
       <div className="flex gap-2 mb-3">
-        {['commission','price','stage','source'].map(k => (
+        {['date','commission','price','stage','source'].map(k => (
           <button key={k} onClick={() => setSortKey(k)}
             className={`px-3 py-1 rounded text-xs ${sortKey === k ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
             Sort: {k.charAt(0).toUpperCase() + k.slice(1)}
@@ -214,6 +286,7 @@ function DealTable({ deals }) {
         <thead>
           <tr className="text-slate-400 border-b border-slate-700">
             <th className="text-left p-2">Deal</th>
+            <th className="text-left p-2">Date</th>
             <th className="text-left p-2">Source</th>
             <th className="text-left p-2">Pipeline</th>
             <th className="text-left p-2">Stage</th>
@@ -226,9 +299,8 @@ function DealTable({ deals }) {
           {sorted.map(d => (
             <tr key={d.id} className="source-row border-b border-slate-800 transition-colors">
               <td className="p-2 text-white font-medium">{d.name}</td>
-              <td className="p-2">
-                <span className="px-2 py-0.5 rounded text-xs bg-slate-700">{d.primarySource}</span>
-              </td>
+              <td className="p-2 text-slate-400 text-xs">{formatDate(d.createdAt)}</td>
+              <td className="p-2"><span className="px-2 py-0.5 rounded text-xs bg-slate-700">{d.primarySource}</span></td>
               <td className="p-2 text-slate-400">{d.pipelineName}</td>
               <td className="p-2">
                 <span className={`px-2 py-0.5 rounded text-xs ${
@@ -244,6 +316,14 @@ function DealTable({ deals }) {
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr className="border-t border-slate-600 font-bold">
+            <td className="p-2 text-white" colSpan="5">Totals ({sorted.length} deals)</td>
+            <td className="p-2 text-right text-white">{formatCurrency(sorted.reduce((s,d) => s + (d.price||0), 0))}</td>
+            <td className="p-2 text-right text-green-400">{formatCurrency(sorted.reduce((s,d) => s + (d.commissionValue||0), 0))}</td>
+            <td></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
@@ -282,63 +362,35 @@ function Recommendations({ sourceStats, dealsBySource, adSpend }) {
   const recs = useMemo(() => {
     const items = [];
     const sources = Object.keys(dealsBySource);
-
-    // Find best converting source
     let bestConv = null, bestConvRate = 0;
     for (const src of sources) {
       const leads = sourceStats[src]?.total || 0;
       const closed = dealsBySource[src]?.closedDeals || 0;
-      if (leads > 5) {
-        const rate = closed / leads;
-        if (rate > bestConvRate) { bestConvRate = rate; bestConv = src; }
-      }
+      if (leads > 5) { const rate = closed / leads; if (rate > bestConvRate) { bestConvRate = rate; bestConv = src; } }
     }
-    if (bestConv) {
-      items.push({ type: 'success', text: `${bestConv} has the highest conversion rate at ${formatPct(bestConvRate)}. Consider increasing investment here.` });
-    }
-
-    // Highest commission source
+    if (bestConv) items.push({ type: 'success', text: `${bestConv} has the highest conversion rate at ${formatPct(bestConvRate)}. Consider increasing investment here.` });
     let topSrc = null, topComm = 0;
-    for (const src of sources) {
-      const comm = dealsBySource[src]?.closedCommission || 0;
-      if (comm > topComm) { topComm = comm; topSrc = src; }
-    }
-    if (topSrc) {
-      items.push({ type: 'info', text: `${topSrc} has generated the most commission: ${formatCurrency(topComm)}.` });
-    }
-
-    // Sources with leads but no deals
+    for (const src of sources) { const comm = dealsBySource[src]?.closedCommission || 0; if (comm > topComm) { topComm = comm; topSrc = src; } }
+    if (topSrc) items.push({ type: 'info', text: `${topSrc} has generated the most commission: ${formatCurrency(topComm)}.` });
     for (const src of Object.keys(sourceStats)) {
       if (src === '<unspecified>' || src === 'Import') continue;
       const leads = sourceStats[src]?.total || 0;
       const deals = dealsBySource[src]?.totalDeals || 0;
-      if (leads > 10 && deals === 0) {
-        items.push({ type: 'warning', text: `${src} has ${leads} leads but 0 deals. Review lead quality or follow-up process.` });
-      }
+      if (leads > 10 && deals === 0) items.push({ type: 'warning', text: `${src} has ${leads} leads but 0 deals. Review lead quality or follow-up process.` });
     }
-
-    // ROI check
     for (const src of Object.keys(adSpend)) {
       if (!adSpend[src]) continue;
       const comm = dealsBySource[src]?.closedCommission || 0;
       const spend = adSpend[src];
       const roi = (comm - spend) / spend;
-      if (roi < 0) {
-        items.push({ type: 'danger', text: `${src} is currently negative ROI (${(roi*100).toFixed(0)}%). Review if pipeline deals will close to recover.` });
-      } else if (roi > 2) {
-        items.push({ type: 'success', text: `${src} has excellent ROI of ${(roi*100).toFixed(0)}%. Strong candidate for increased spend.` });
-      }
+      if (roi < 0) items.push({ type: 'danger', text: `${src} is currently negative ROI (${(roi*100).toFixed(0)}%). Review if pipeline deals will close to recover.` });
+      else if (roi > 2) items.push({ type: 'success', text: `${src} has excellent ROI of ${(roi*100).toFixed(0)}%. Strong candidate for increased spend.` });
     }
-
-    // Hot leads insight
     for (const src of Object.keys(sourceStats)) {
       if (src === '<unspecified>' || src === 'Import') continue;
       const hot = sourceStats[src]?.stages?.['A - Hot 1-3 Months'] || 0;
-      if (hot >= 3) {
-        items.push({ type: 'info', text: `${src} has ${hot} hot leads ready to convert. Prioritize follow-up.` });
-      }
+      if (hot >= 3) items.push({ type: 'info', text: `${src} has ${hot} hot leads ready to convert. Prioritize follow-up.` });
     }
-
     return items;
   }, [sourceStats, dealsBySource, adSpend]);
 
@@ -357,9 +409,157 @@ function Recommendations({ sourceStats, dealsBySource, adSpend }) {
   );
 }
 
+// ── AI Marketing Chat ──
+function AIChat({ data, dateRange, dateLabel }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
+  useEffect(scrollToBottom, [messages]);
+
+  const buildContext = useCallback(() => {
+    const { summary, sourceStats, dealsBySource, deals } = data;
+    const lines = [];
+    lines.push(`=== George Mikhael's CRM Data (${dateLabel}) ===`);
+    lines.push(`Total Leads: ${summary.totalPeople}`);
+    lines.push(`Total Deals: ${summary.totalDeals} (${summary.closedDeals} closed)`);
+    lines.push(`Total Closed Commission: $${summary.closedCommission.toLocaleString()}`);
+    lines.push(`Pipeline Commission: $${(summary.totalCommission - summary.closedCommission).toLocaleString()}`);
+    lines.push(`Total Volume: $${summary.totalVolume.toLocaleString()}`);
+    lines.push('');
+    lines.push('=== Lead Sources ===');
+    for (const [src, stats] of Object.entries(sourceStats)) {
+      const d = dealsBySource[src] || {};
+      lines.push(`${src}: ${stats.total} leads, ${d.closedDeals || 0} closed deals, $${(d.closedCommission || 0).toLocaleString()} commission, ${d.activeDeals || 0} active deals, Hot: ${stats.stages?.['A - Hot 1-3 Months'] || 0}, Warm: ${stats.stages?.['B - Warm 3-6 Months'] || 0}`);
+    }
+    lines.push('');
+    lines.push('=== All Deals ===');
+    for (const d of deals) {
+      lines.push(`"${d.name}" | Source: ${d.primarySource} | Stage: ${d.stageName} | Pipeline: ${d.pipelineName} | Price: $${(d.price||0).toLocaleString()} | Commission: $${(d.commissionValue||0).toLocaleString()} | Created: ${d.createdAt?.slice(0,10)} | TimeToClose: ${d.timeToClose || 'N/A'} days | People: ${(d.dealPeople||[]).map(p=>p.name).join(', ')}`);
+    }
+    return lines.join('\n');
+  }, [data, dateLabel]);
+
+  const quickQuestions = [
+    "Which lead source has the best ROI and why?",
+    "Where should I invest more marketing budget?",
+    "What's my conversion rate by source and how can I improve it?",
+    "Analyze my deal pipeline - which deals are most likely to close?",
+    "Compare my paid lead sources vs referral/organic performance",
+    "What's my average commission per deal by source?",
+  ];
+
+  const sendMessage = async (text) => {
+    if (!text.trim() || loading) return;
+    const userMsg = { role: 'user', content: text.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: `You are a real estate marketing analyst and ROI advisor for George Mikhael, a real estate agent. You have access to his CRM data from Follow Up Boss. Analyze his lead sources, deals, and commissions to provide actionable marketing advice. Be specific with numbers from his data. Use markdown formatting for readability. Keep responses concise but insightful.
+
+Here is George's current CRM data:
+
+${buildContext()}`,
+          messages: apiMessages,
+          max_tokens: 2000,
+        })
+      });
+      const result = await resp.json();
+      if (result.content && result.content[0]) {
+        setMessages([...newMessages, { role: 'assistant', content: result.content[0].text }]);
+      } else if (result.error) {
+        setMessages([...newMessages, { role: 'assistant', content: `Error: ${result.error.message || result.error}` }]);
+      }
+    } catch (err) {
+      setMessages([...newMessages, { role: 'assistant', content: `Error: ${err.message}` }]);
+    }
+    setLoading(false);
+  };
+
+  const renderMarkdown = (text) => {
+    let html = text
+      .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/^### (.*$)/gm, '<h4 style="color:#93c5fd;margin:8px 0 4px;font-size:14px">$1</h4>')
+      .replace(/^## (.*$)/gm, '<h3 style="color:#93c5fd;margin:8px 0 4px;font-size:15px">$1</h3>')
+      .replace(/^- (.*$)/gm, '<li>$1</li>')
+      .replace(/^(\d+)\. (.*$)/gm, '<li>$1. $2</li>')
+      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br/>');
+    return '<p>' + html + '</p>';
+  };
+
+  return (
+    <div className="card flex flex-col" style={{height: 500}}>
+      <div className="p-4 border-b border-slate-700">
+        <h3 className="text-lg font-bold text-white">AI Marketing Advisor</h3>
+        <p className="text-xs text-slate-400 mt-1">Ask questions about your lead sources, ROI, and marketing strategy</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 ai-chat-messages">
+        {messages.length === 0 && (
+          <div>
+            <p className="text-slate-500 text-sm mb-4">Try one of these questions:</p>
+            <div className="grid gap-2">
+              {quickQuestions.map((q, i) => (
+                <button key={i} onClick={() => sendMessage(q)}
+                  className="text-left text-sm px-3 py-2 bg-slate-800/50 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition">
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={`mb-4 ${m.role === 'user' ? 'flex justify-end' : ''}`}>
+            {m.role === 'user' ? (
+              <div className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm" style={{maxWidth:'80%'}}>{m.content}</div>
+            ) : (
+              <div className="ai-msg text-sm text-slate-200" style={{maxWidth:'90%'}}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
+            )}
+          </div>
+        ))}
+        {loading && (
+          <div className="flex items-center gap-2 text-slate-400 text-sm">
+            <div className="loading-pulse">Analyzing your data...</div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="p-4 border-t border-slate-700">
+        <div className="flex gap-2">
+          <input ref={inputRef} type="text" value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }}}
+            placeholder="Ask about your marketing ROI, lead sources, strategy..."
+            style={{background:'#0f172a', border:'1px solid #475569', borderRadius:8, padding:'8px 12px', flex:1, color:'#e2e8f0', fontSize:14, outline:'none'}} />
+          <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${loading || !input.trim() ? 'bg-slate-700 text-slate-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──
 function App() {
-  const [data, setData] = useState(null);
+  const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('overview');
@@ -367,12 +567,15 @@ function App() {
   const [adSpend, setAdSpend] = useState(() => {
     try { return JSON.parse(localStorage.getItem('george_ad_spend') || '{}'); } catch { return {}; }
   });
+  const [datePreset, setDatePreset] = useState('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
 
   useEffect(() => {
     const cached = localStorage.getItem('george_fub_data');
     const cacheTime = localStorage.getItem('george_fub_cache_time');
     if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 10 * 60 * 1000) {
-      setData(JSON.parse(cached));
+      setRawData(JSON.parse(cached));
       setLoading(false);
       return;
     }
@@ -380,13 +583,79 @@ function App() {
       .then(r => r.json())
       .then(d => {
         if (d.error) throw new Error(d.error);
-        setData(d);
+        setRawData(d);
         localStorage.setItem('george_fub_data', JSON.stringify(d));
         localStorage.setItem('george_fub_cache_time', Date.now().toString());
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // Compute active date range
+  const activeRange = useMemo(() => {
+    if (datePreset === 'custom') {
+      return {
+        start: customStart ? new Date(customStart + 'T00:00:00') : null,
+        end: customEnd ? new Date(customEnd + 'T23:59:59') : null
+      };
+    }
+    return getDateRange(datePreset);
+  }, [datePreset, customStart, customEnd]);
+
+  const dateLabel = useMemo(() => {
+    if (datePreset === 'all') return 'All Time';
+    if (datePreset === 'custom') return `${customStart || '...'} to ${customEnd || '...'}`;
+    const labels = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', '90d': 'Last 90 Days', '6m': 'Last 6 Months', '1y': 'Last Year', 'ytd': 'Year to Date', 'mtd': 'Month to Date' };
+    return labels[datePreset] || datePreset;
+  }, [datePreset, customStart, customEnd]);
+
+  // Filter data based on date range
+  const data = useMemo(() => {
+    if (!rawData) return null;
+
+    // Filter deals by createdAt
+    const filteredDeals = rawData.deals.filter(d => isInRange(d.createdAt, activeRange));
+
+    // Recompute summary from filtered deals
+    const closedDeals = filteredDeals.filter(d => d.stageName === 'Closed');
+    const summary = {
+      totalPeople: rawData.summary.totalPeople, // people count stays same (we filter deals, not leads)
+      totalDeals: filteredDeals.length,
+      closedDeals: closedDeals.length,
+      totalCommission: filteredDeals.reduce((s, d) => s + (d.commissionValue || 0), 0),
+      closedCommission: closedDeals.reduce((s, d) => s + (d.commissionValue || 0), 0),
+      totalVolume: filteredDeals.reduce((s, d) => s + (d.price || 0), 0),
+    };
+
+    // Recompute dealsBySource from filtered deals
+    const dealsBySource = {};
+    for (const deal of filteredDeals) {
+      const src = deal.primarySource;
+      if (!dealsBySource[src]) {
+        dealsBySource[src] = { totalDeals: 0, closedDeals: 0, activeDeals: 0, totalVolume: 0, closedVolume: 0, totalCommission: 0, closedCommission: 0, deals: [] };
+      }
+      dealsBySource[src].totalDeals++;
+      dealsBySource[src].totalVolume += deal.price || 0;
+      dealsBySource[src].totalCommission += deal.commissionValue || 0;
+      const isClosed = deal.stageName === 'Closed';
+      if (isClosed) {
+        dealsBySource[src].closedDeals++;
+        dealsBySource[src].closedVolume += deal.price || 0;
+        dealsBySource[src].closedCommission += deal.commissionValue || 0;
+      } else {
+        dealsBySource[src].activeDeals++;
+      }
+      dealsBySource[src].deals.push(deal);
+    }
+
+    return {
+      summary,
+      sourceStats: rawData.sourceStats,
+      dealsBySource,
+      deals: filteredDeals,
+      pipelines: rawData.pipelines,
+    };
+  }, [rawData, activeRange]);
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -423,7 +692,6 @@ function App() {
     .sort((a, b) => b.value - a.value);
 
   const sourcesForBar = Object.keys(dealsBySource).filter(s => s !== '<unspecified>');
-  const barLabels = sourcesForBar;
   const barDatasets = [
     { label: 'Closed Commission', data: sourcesForBar.map(s => dealsBySource[s]?.closedCommission || 0), backgroundColor: '#10b981' },
     { label: 'Pipeline Commission', data: sourcesForBar.map(s => (dealsBySource[s]?.totalCommission || 0) - (dealsBySource[s]?.closedCommission || 0)), backgroundColor: '#3b82f6' },
@@ -434,12 +702,13 @@ function App() {
     { id: 'sources', label: 'Source Breakdown' },
     { id: 'deals', label: 'All Deals' },
     { id: 'insights', label: 'Insights & Recs' },
+    { id: 'ai', label: 'AI Advisor' },
   ];
 
   return (
     <div className="min-h-screen p-4 md:p-8" style={{maxWidth:1400,margin:'0 auto'}}>
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-white">Lead Source ROI Dashboard</h1>
           <p className="text-slate-400 mt-1">George Mikhael - Follow Up Boss Analytics</p>
@@ -459,6 +728,21 @@ function App() {
         </div>
       </div>
 
+      {/* Date Filter */}
+      <DateFilterBar datePreset={datePreset} setDatePreset={setDatePreset}
+        customStart={customStart} setCustomStart={setCustomStart}
+        customEnd={customEnd} setCustomEnd={setCustomEnd} />
+
+      {/* Active filter indicator */}
+      {datePreset !== 'all' && (
+        <div className="flex items-center gap-2 mb-4 text-sm">
+          <span className="bg-blue-900/40 text-blue-300 px-3 py-1 rounded-full border border-blue-800">
+            Showing: {dateLabel}
+          </span>
+          <button onClick={() => setDatePreset('all')} className="text-slate-500 hover:text-white text-xs">Clear filter</button>
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <KPICard label="Total Leads" value={summary.totalPeople.toLocaleString()} color="blue" />
@@ -470,7 +754,7 @@ function App() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-slate-800/50 p-1 rounded-lg w-fit">
+      <div className="flex flex-wrap gap-1 mb-6 bg-slate-800/50 p-1 rounded-lg w-fit">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`px-4 py-2 rounded-md text-sm transition ${tab === t.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
@@ -491,7 +775,7 @@ function App() {
             </div>
           </div>
           <div className="card p-5">
-            <BarChart labels={barLabels} datasets={barDatasets} title="Closed vs Pipeline Commission by Source" />
+            <BarChart labels={sourcesForBar} datasets={barDatasets} title="Closed vs Pipeline Commission by Source" />
           </div>
         </div>
       )}
@@ -523,7 +807,6 @@ function App() {
                 .filter(([src]) => src !== '<unspecified>')
                 .sort((a, b) => b[1].total - a[1].total)
                 .map(([src, stats]) => {
-                  const deals_data = dealsBySource[src] || {};
                   const hot = stats.stages['A - Hot 1-3 Months'] || 0;
                   const warm = stats.stages['B - Warm 3-6 Months'] || 0;
                   const cold = stats.stages['C - Cold 6+ Months'] || 0;
@@ -556,6 +839,10 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {tab === 'ai' && (
+        <AIChat data={data} dateRange={activeRange} dateLabel={dateLabel} />
       )}
 
       {showSpendModal && (
