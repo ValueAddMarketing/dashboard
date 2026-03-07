@@ -1,7 +1,7 @@
 {
   "buildCommand": "mkdir -p dist/client-portal && cp index.html dashboard.html dist/ && cp client-portal/index.html dist/client-portal/index.html",
   "outputDirectory": "dist",
-  "cleanUrls": true,
+  "cleanUrls": false,
   "crons": [
     {
       "path": "/api/fathom-sync-cron",
