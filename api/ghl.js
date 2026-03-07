@@ -123,7 +123,8 @@ export default async function handler(req, res) {
                 hasClientCredentials: !!(GHL_CLIENT_ID && GHL_CLIENT_SECRET),
                 companyId,
                 oauthUserType,
-                oauthLocationId
+                oauthLocationId,
+                debug: oauthData
             });
         }
 
