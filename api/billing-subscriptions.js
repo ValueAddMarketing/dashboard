@@ -17,24 +17,36 @@ export default async function handler(req, res) {
         return String(val).split('T')[0];
     };
 
-    const mapWhopMembership = (m) => ({
-        id: m.id,
-        source: 'whop',
-        customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
-        customerEmail: m.user?.email || m.email || '',
-        status: m.status || (m.valid ? 'active' : 'inactive'),
-        currentPeriodEnd: formatWhopDate(m.renewal_period_end || m.expires_at || m.next_renewal_date),
-        currentPeriodStart: formatWhopDate(m.renewal_period_start || m.created_at),
-        cancelAtPeriodEnd: m.cancel_at_period_end || false,
-        canceledAt: formatWhopDate(m.canceled_at || m.cancelled_at),
-        endedAt: formatWhopDate(m.ended_at || m.expired_at),
-        cancelAt: formatWhopDate(m.cancel_at),
-        amount: m._plan_price != null ? m._plan_price : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)),
-        currency: m.currency || 'usd',
-        interval: m._plan_interval || m.plan?.renewal_period || m.renewal_period || null,
-        productName: m._plan_name || m.plan?.plan_name || m.product?.name || m.product_name || '',
-        created: m.created_at ? (typeof m.created_at === 'number' ? new Date(m.created_at * 1000).toISOString().split('T')[0] : String(m.created_at).split('T')[0]) : null
-    });
+    const mapWhopMembership = (m) => {
+        // Derive billing interval from renewal period timestamps
+        let interval = m.plan?.renewal_period || m.renewal_period || null;
+        if (!interval && m.renewal_period_start && m.renewal_period_end) {
+            const start = typeof m.renewal_period_start === 'number' ? m.renewal_period_start : Date.parse(m.renewal_period_start) / 1000;
+            const end = typeof m.renewal_period_end === 'number' ? m.renewal_period_end : Date.parse(m.renewal_period_end) / 1000;
+            const days = (end - start) / 86400;
+            if (days >= 350) interval = 'year';
+            else if (days >= 25) interval = 'month';
+            else if (days >= 6) interval = 'week';
+        }
+        return {
+            id: m.id,
+            source: 'whop',
+            customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
+            customerEmail: m.user?.email || m.email || '',
+            status: m.status || (m.valid ? 'active' : 'inactive'),
+            currentPeriodEnd: formatWhopDate(m.renewal_period_end || m.expires_at || m.next_renewal_date),
+            currentPeriodStart: formatWhopDate(m.renewal_period_start || m.created_at),
+            cancelAtPeriodEnd: m.cancel_at_period_end || false,
+            canceledAt: formatWhopDate(m.canceled_at || m.cancelled_at),
+            endedAt: formatWhopDate(m.ended_at || m.expired_at),
+            cancelAt: formatWhopDate(m.cancel_at),
+            amount: m._plan_price != null ? m._plan_price : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)),
+            currency: m.currency || 'usd',
+            interval,
+            productName: m._plan_name || m.plan?.plan_name || m.product?.name || m.product_name || '',
+            created: m.created_at ? (typeof m.created_at === 'number' ? new Date(m.created_at * 1000).toISOString().split('T')[0] : String(m.created_at).split('T')[0]) : null
+        };
+    };
 
     // ========== FETCH ALL SUBSCRIPTIONS ==========
     if (action === 'fetchAll') {
@@ -107,28 +119,51 @@ export default async function handler(req, res) {
         // --- Whop ---
         if (WHOP_API_KEY) {
             try {
-                // First, fetch all plans to get pricing info
+                // Fetch payments to build plan_id → price lookup (plans endpoint not available in v5)
                 const planPrices = {};
                 const planNames = {};
                 const planIntervals = {};
-                let planPage = 1;
-                let planHasMore = true;
-                while (planHasMore) {
-                    const planResp = await fetch(`https://api.whop.com/api/v5/company/plans?per=50&page=${planPage}`, {
+                let payPage = 1;
+                let payHasMore = true;
+                // Fetch up to 5 pages (250 payments) to cover all plan_ids
+                while (payHasMore && payPage <= 5) {
+                    const payResp = await fetch(`https://api.whop.com/api/v5/company/payments?per=50&page=${payPage}`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
-                    if (!planResp.ok) break;
-                    const planData = await planResp.json();
-                    const plans = planData.data || [];
-                    for (const p of plans) {
-                        // Price fields: initial_price, renewal_price, base_currency_price, or price
-                        const price = p.renewal_price ?? p.initial_price ?? p.base_currency_price ?? p.price ?? null;
-                        if (price != null) planPrices[p.id] = typeof price === 'number' ? price : parseFloat(price) || 0;
-                        planNames[p.id] = p.plan_name || p.name || p.internal_name || '';
-                        planIntervals[p.id] = p.renewal_period || p.billing_period || p.interval || null;
+                    if (!payResp.ok) break;
+                    const payData = await payResp.json();
+                    const payments = payData.data || [];
+                    for (const p of payments) {
+                        // Only use paid subscription payments with a subtotal > 0
+                        if (p.plan_id && p.subtotal > 0 && !planPrices[p.plan_id]) {
+                            planPrices[p.plan_id] = p.subtotal / 100; // cents to dollars
+                        }
+                        // Also capture user info for name resolution
+                        if (p.plan_id && p.product_id && !planNames[p.plan_id]) {
+                            planNames[p.plan_id] = ''; // will be filled from products if needed
+                        }
                     }
-                    if (plans.length < 50 || planPage >= (planData.pagination?.total_pages || planPage)) { planHasMore = false; }
-                    else { planPage++; }
+                    const totalPages = payData.pagination?.total_pages || 1;
+                    if (payPage >= totalPages || payments.length < 50) { payHasMore = false; }
+                    else { payPage++; }
+                }
+
+                // Fetch products for names
+                const productNames = {};
+                let prodPage = 1;
+                let prodHasMore = true;
+                while (prodHasMore) {
+                    const prodResp = await fetch(`https://api.whop.com/api/v5/company/products?per=50&page=${prodPage}`, {
+                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                    });
+                    if (!prodResp.ok) break;
+                    const prodData = await prodResp.json();
+                    const products = prodData.data || [];
+                    for (const p of products) {
+                        productNames[p.id] = p.name || p.title || '';
+                    }
+                    if (products.length < 50 || prodPage >= (prodData.pagination?.total_pages || prodPage)) { prodHasMore = false; }
+                    else { prodPage++; }
                 }
 
                 // Now fetch all memberships (page-based pagination for v5)
@@ -152,16 +187,13 @@ export default async function handler(req, res) {
                     if (memberships.length === 0) { hasMore = false; break; }
 
                     for (const m of memberships) {
-                        // Inject plan pricing into the membership before mapping
-                        const planId = m.plan_id;
-                        if (planId && planPrices[planId] != null) {
-                            m._plan_price = planPrices[planId];
+                        // Inject plan pricing from payments data
+                        if (m.plan_id && planPrices[m.plan_id] != null) {
+                            m._plan_price = planPrices[m.plan_id];
                         }
-                        if (planId && planNames[planId]) {
-                            m._plan_name = planNames[planId];
-                        }
-                        if (planId && planIntervals[planId]) {
-                            m._plan_interval = planIntervals[planId];
+                        // Inject product name
+                        if (m.product_id && productNames[m.product_id]) {
+                            m._plan_name = productNames[m.product_id];
                         }
                         allMemberships.push(mapWhopMembership(m));
                     }
