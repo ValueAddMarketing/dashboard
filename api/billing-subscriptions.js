@@ -200,13 +200,13 @@ export default async function handler(req, res) {
                 try { return { status: r.status, data: JSON.parse(text) }; } catch { return { status: r.status, text: text.substring(0, 500) }; }
             } catch (e) { return { error: e.message }; }
         };
-        const [plans_v5, plans_v2, products_v5, singlePlan] = await Promise.all([
-            tryFetch('https://api.whop.com/api/v5/company/plans?per=3'),
-            tryFetch('https://api.whop.com/api/v2/company/plans?per=3'),
-            tryFetch('https://api.whop.com/api/v5/company/products?per=3'),
-            tryFetch('https://api.whop.com/api/v5/company/plans/plan_Bo2pCwEPNibzX'),
+        const [productPlans, payments, invoices, pricesEndpoint] = await Promise.all([
+            tryFetch('https://api.whop.com/api/v5/company/products/prod_16YCAds3BF2ea/plans?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/payments?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/invoices?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/prices?per=3'),
         ]);
-        return res.json({ plans_v5, plans_v2, products_v5, singlePlan });
+        return res.json({ productPlans, payments, invoices, pricesEndpoint });
     }
 
     return res.status(400).json({ error: 'Invalid action. Use "fetchAll" or "saveMappings".' });
