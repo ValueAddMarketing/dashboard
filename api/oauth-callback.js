@@ -1,4 +1,5 @@
 // GHL OAuth Callback Handler
+// Exchanges authorization code for token, stores it in client_ghl_locations for the location
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const GHL_CLIENT_ID = process.env.GHL_CLIENT_ID;
@@ -42,42 +43,38 @@ export default async function handler(req, res) {
             return res.status(400).send(`Token exchange failed: ${JSON.stringify(tokenData)}`);
         }
 
-        const { access_token, refresh_token, expires_in, userType, companyId, locationId } = tokenData;
+        const { access_token, locationId, companyId } = tokenData;
 
         if (!SUPABASE_URL || !SUPABASE_KEY) {
             return res.status(500).send('Supabase not configured');
         }
 
-        const expiresAt = new Date(Date.now() + (expires_in || 86400) * 1000).toISOString();
-        const cid = companyId || 'default';
+        let updated = false;
 
-        // Upsert using PostgREST on_conflict parameter
-        const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/ghl_oauth_tokens?on_conflict=company_id`, {
-            method: 'POST',
-            headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'resolution=merge-duplicates,return=minimal'
-            },
-            body: JSON.stringify({
-                company_id: cid,
-                access_token,
-                refresh_token,
-                expires_at: expiresAt,
-                user_type: userType || 'Location',
-                location_id: locationId || null,
-                updated_at: new Date().toISOString()
-            })
-        });
-
-        if (!upsertResp.ok) {
-            const errText = await upsertResp.text();
-            return res.status(500).send(`Failed to store tokens: ${errText}`);
+        // Store token directly in client_ghl_locations for the matching location
+        if (locationId) {
+            const patchResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/client_ghl_locations?ghl_location_id=eq.${encodeURIComponent(locationId)}`,
+                {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=representation'
+                    },
+                    body: JSON.stringify({ ghl_token: access_token })
+                }
+            );
+            const patchResult = await patchResp.json();
+            if (Array.isArray(patchResult) && patchResult.length > 0) {
+                updated = true;
+            }
         }
 
-        // Redirect to dashboard with success
-        return res.redirect(302, '/?ghl_setup=success');
+        // Redirect to dashboard with result
+        const clientName = updated ? 'location' : 'unknown';
+        return res.redirect(302, `/?ghl_token_saved=${updated ? 'true' : 'false'}&locationId=${locationId || 'none'}`);
 
     } catch (error) {
         return res.status(500).send(`OAuth error: ${error.message}`);

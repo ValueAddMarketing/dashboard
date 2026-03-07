@@ -5150,35 +5150,25 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 await loadMappings();
             };
 
-            const [bulkToken, setBulkToken] = useState('');
-            const [bulkTokenStatus, setBulkTokenStatus] = useState('');
             const [oauthStatus, setOauthStatus] = useState(null);
-            const [genTokensLoading, setGenTokensLoading] = useState(false);
-            const [genTokensResult, setGenTokensResult] = useState(null);
+            const GHL_CLIENT_ID = '69ab33c7855dd90a8bd919cf-mmfc7ady';
+            const OAUTH_REDIRECT = window.location.origin + '/api/oauth-callback';
+            const OAUTH_SCOPES = 'contacts.readonly contacts.write conversations.readonly calendars/events.write locations.readonly oauth.write oauth.readonly';
 
-            const applyBulkToken = async () => {
-                if (!bulkToken.trim()) return;
-                setBulkTokenStatus('Applying...');
-                const noToken = mappings.filter(m => !m.ghl_token);
-                let applied = 0;
-                for (const m of noToken) {
-                    // Test if this token works for this location
-                    try {
-                        const resp = await fetch('/api/ghl', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'testToken', token: bulkToken.trim(), testLocationId: m.ghl_location_id })
-                        });
-                        const data = await resp.json();
-                        if (data.success) {
-                            await saveToken(m.client_name, bulkToken.trim());
-                            applied++;
-                        }
-                    } catch (e) { /* skip */ }
-                }
-                setBulkTokenStatus(`Applied to ${applied} of ${noToken.length} clients`);
-                await loadMappings();
+            const getInstallUrl = () => {
+                return `https://marketplace.leadconnectorhq.com/oauth/chooselocation?response_type=code&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT)}&client_id=${GHL_CLIENT_ID}&scope=${encodeURIComponent(OAUTH_SCOPES)}`;
             };
+
+            // Listen for when user returns from OAuth flow
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('ghl_token_saved') === 'true') {
+                    // Token was saved — refresh mappings
+                    loadMappings();
+                    // Clean up URL
+                    window.history.replaceState({}, '', window.location.pathname);
+                }
+            }, []);
 
             const fetchSpeedData = async () => {
                 setLoading(true);
@@ -5214,39 +5204,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 setLoading(false);
             };
 
-            const checkOAuthStatus = async () => {
-                try {
-                    const resp = await fetch('/api/ghl', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'oauthStatus' })
-                    });
-                    const data = await resp.json();
-                    setOauthStatus(data);
-                    return data;
-                } catch (e) { return null; }
-            };
-
-            const generateAllTokens = async () => {
-                setGenTokensLoading(true);
-                setGenTokensResult(null);
-                try {
-                    const resp = await fetch('/api/ghl', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'generateLocationTokens' })
-                    });
-                    const data = await resp.json();
-                    setGenTokensResult(data);
-                    await loadMappings();
-                } catch (e) {
-                    setGenTokensResult({ error: e.message });
-                }
-                setGenTokensLoading(false);
-            };
-
             useEffect(() => {
-                Promise.all([loadMappings(), checkOAuthStatus()]).then(([m]) => {
+                loadMappings().then((m) => {
                     if (m.length > 0) fetchSpeedData();
                     else { setLoading(false); setShowSetup(true); }
                 });
@@ -5430,35 +5389,42 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                         </div>
                         <p className="text-slate-400 text-sm">Map your clients to their GoHighLevel sub-accounts (locations) to track speed-to-lead data.</p>
 
-                        {/* OAuth Connection Status */}
+                        {/* Batch OAuth Install */}
                         <div className="card p-4">
                             <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-semibold text-white">GHL OAuth App</h3>
-                                {oauthStatus?.hasOAuth ? (
-                                    <span className="text-xs text-emerald-400 font-semibold">Connected</span>
-                                ) : (
-                                    <span className="text-xs text-yellow-400 font-semibold">Not Connected</span>
-                                )}
+                                <h3 className="text-sm font-semibold text-white">Batch Install - Connect Sub-Accounts</h3>
+                                <div className="flex gap-3 text-xs">
+                                    <span className="text-emerald-400">{mappings.filter(m => m.ghl_token).length} connected</span>
+                                    <span className="text-red-400">{mappings.filter(m => !m.ghl_token).length} need token</span>
+                                </div>
                             </div>
-                            {oauthStatus?.hasOAuth ? (
+                            <p className="text-xs text-slate-500 mb-3">Click the button below to install the GHL app on a sub-account. Each install connects one location. After authorizing, you'll be redirected back here with the token saved automatically.</p>
+
+                            {mappings.length > 0 && mappings.some(m => !m.ghl_token) && (
                                 <div className="space-y-3">
-                                    <p className="text-xs text-emerald-400">OAuth app is connected. Tokens will be auto-generated for all sub-accounts.</p>
-                                    <div className="flex gap-2 items-center">
-                                        <button onClick={generateAllTokens} disabled={genTokensLoading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold disabled:opacity-40">
-                                            {genTokensLoading ? 'Generating...' : 'Generate All Location Tokens'}
-                                        </button>
-                                        {genTokensResult && (
-                                            <span className="text-xs text-slate-400">
-                                                {genTokensResult.error ? genTokensResult.error : `${genTokensResult.updated} updated, ${genTokensResult.failed || 0} failed`}
-                                            </span>
-                                        )}
+                                    <a href={getInstallUrl()} target="_blank" rel="noopener noreferrer" className="inline-block px-4 py-2 bg-gradient-to-r from-brand-cyan to-brand-purple text-white rounded-lg text-sm font-semibold hover:opacity-90 cursor-pointer">
+                                        Install GHL App on Next Sub-Account
+                                    </a>
+                                    <p className="text-xs text-slate-600">Tip: After each install, come back here and click again for the next one. The token is saved automatically per location.</p>
+
+                                    <div className="space-y-1 max-h-64 overflow-y-auto scrollbar mt-3">
+                                        <p className="text-xs text-slate-400 font-semibold mb-1">Locations still needing tokens:</p>
+                                        {mappings.filter(m => !m.ghl_token).map(m => {
+                                            const locName = ghlLocations.find(l => l.id === m.ghl_location_id)?.name;
+                                            return (
+                                                <div key={m.client_name} className="flex items-center gap-2 bg-dark-800 rounded px-3 py-1.5">
+                                                    <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+                                                    <span className="text-sm text-white">{m.client_name}</span>
+                                                    <span className="text-xs text-slate-600">{locName || m.ghl_location_id}</span>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="space-y-2">
-                                    <p className="text-xs text-slate-500">Install the GHL OAuth app to auto-generate tokens for all sub-accounts. This is the easiest way — one install covers all clients.</p>
-                                    <p className="text-xs text-slate-400">Steps: 1) Create app in GHL Developer Marketplace 2) Set redirect URL to <code className="text-brand-cyan">{typeof window !== 'undefined' ? window.location.origin : ''}/api/oauth-callback</code> 3) Add GHL_CLIENT_ID and GHL_CLIENT_SECRET to Vercel 4) Install the app from GHL</p>
-                                </div>
+                            )}
+
+                            {mappings.length > 0 && !mappings.some(m => !m.ghl_token) && (
+                                <p className="text-xs text-emerald-400">All locations are connected! You're ready to view Speed to Lead data.</p>
                             )}
                         </div>
 
@@ -5551,30 +5517,6 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             </div>
                         </div>
 
-                        {/* Bulk Token Application */}
-                        {mappings.length > 0 && (
-                            <div className="card p-4">
-                                <h3 className="text-sm font-semibold text-white mb-2">Sub-Account Tokens</h3>
-                                <p className="text-xs text-slate-500 mb-3">GHL requires a sub-account private integration token to access contacts. You can create one per sub-account, or paste one here to test it against all mapped clients.</p>
-                                <div className="flex gap-3 items-end flex-wrap mb-3">
-                                    <div style={{ minWidth: '300px' }} className="flex-1">
-                                        <label className="text-xs text-slate-400 block mb-1">Sub-Account Token (pit-...)</label>
-                                        <input type="text" value={bulkToken} onChange={e => setBulkToken(e.target.value)} placeholder="pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className="w-full input-field border rounded-lg px-3 py-2 text-sm font-mono" />
-                                    </div>
-                                    <button onClick={applyBulkToken} disabled={!bulkToken.trim() || setupLoading} className="px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm font-semibold disabled:opacity-40">
-                                        Test & Apply to All
-                                    </button>
-                                </div>
-                                {bulkTokenStatus && <p className="text-xs text-brand-cyan mb-3">{bulkTokenStatus}</p>}
-                                <div className="bg-dark-800 rounded-lg p-3 text-xs text-slate-400">
-                                    <p className="font-semibold text-white mb-1">How to get tokens:</p>
-                                    <p>1. Go into a GHL sub-account → Settings → Integrations → Private Integrations</p>
-                                    <p>2. Create integration, check all scopes, copy the pit- token</p>
-                                    <p>3. Each token only works for its own sub-account</p>
-                                    <p className="mt-1 text-slate-500">Tip: If you create the same-named integration in multiple sub-accounts, paste each token here - it will auto-detect which client it belongs to.</p>
-                                </div>
-                            </div>
-                        )}
 
                         {/* Current mappings with token status */}
                         {mappings.length > 0 && (
