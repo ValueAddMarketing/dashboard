@@ -29,10 +29,10 @@ export default async function handler(req, res) {
         canceledAt: formatWhopDate(m.canceled_at || m.cancelled_at),
         endedAt: formatWhopDate(m.ended_at || m.expired_at),
         cancelAt: formatWhopDate(m.cancel_at),
-        amount: m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null),
+        amount: m._plan_price != null ? m._plan_price : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)),
         currency: m.currency || 'usd',
-        interval: m.plan?.renewal_period || m.renewal_period || null,
-        productName: m.plan?.plan_name || m.product?.name || m.product_name || '',
+        interval: m._plan_interval || m.plan?.renewal_period || m.renewal_period || null,
+        productName: m._plan_name || m.plan?.plan_name || m.product?.name || m.product_name || '',
         created: m.created_at ? (typeof m.created_at === 'number' ? new Date(m.created_at * 1000).toISOString().split('T')[0] : String(m.created_at).split('T')[0]) : null
     });
 
@@ -107,65 +107,68 @@ export default async function handler(req, res) {
         // --- Whop ---
         if (WHOP_API_KEY) {
             try {
+                // First, fetch all plans to get pricing info
+                const planPrices = {};
+                const planNames = {};
+                const planIntervals = {};
+                let planPage = 1;
+                let planHasMore = true;
+                while (planHasMore) {
+                    const planResp = await fetch(`https://api.whop.com/api/v5/company/plans?per=50&page=${planPage}`, {
+                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                    });
+                    if (!planResp.ok) break;
+                    const planData = await planResp.json();
+                    const plans = planData.data || [];
+                    for (const p of plans) {
+                        // Price fields: initial_price, renewal_price, base_currency_price, or price
+                        const price = p.renewal_price ?? p.initial_price ?? p.base_currency_price ?? p.price ?? null;
+                        if (price != null) planPrices[p.id] = typeof price === 'number' ? price : parseFloat(price) || 0;
+                        planNames[p.id] = p.plan_name || p.name || p.internal_name || '';
+                        planIntervals[p.id] = p.renewal_period || p.billing_period || p.interval || null;
+                    }
+                    if (plans.length < 50 || planPage >= (planData.pagination?.total_pages || planPage)) { planHasMore = false; }
+                    else { planPage++; }
+                }
+
+                // Now fetch all memberships (page-based pagination for v5)
                 const allMemberships = [];
-                let cursor = null;
+                let page = 1;
                 let hasMore = true;
 
                 while (hasMore) {
-                    const params = new URLSearchParams({ per: '50' });
-                    if (cursor) params.append('cursor', cursor);
-
-                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?${params}`, {
+                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
 
-                    // If v5 fails, try v2
                     if (!resp.ok) {
                         const errText = await resp.text();
-                        // Try v2 as fallback
-                        const resp2 = await fetch(`https://api.whop.com/api/v2/company/memberships?per=50&page=1`, {
-                            headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                        });
-                        if (!resp2.ok) {
-                            const err2 = await resp2.text();
-                            // Try the newer /memberships endpoint
-                            const resp3 = await fetch(`https://api.whop.com/company/memberships?per=50`, {
-                                headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                            });
-                            if (!resp3.ok) {
-                                const err3 = await resp3.text();
-                                results.errors.push({ source: 'whop', message: `v5: ${errText.substring(0,200)} | v2: ${err2.substring(0,200)} | base: ${err3.substring(0,200)}` });
-                                break;
-                            }
-                            const data3 = await resp3.json();
-                            const memberships3 = data3.data || data3.memberships || data3 || [];
-                            if (Array.isArray(memberships3)) {
-                                for (const m of memberships3) {
-                                    allMemberships.push(mapWhopMembership(m));
-                                }
-                            }
-                            hasMore = false;
-                            break;
-                        }
-                        const data2 = await resp2.json();
-                        const memberships2 = data2.data || data2.memberships || [];
-                        for (const m of memberships2) {
-                            allMemberships.push(mapWhopMembership(m));
-                        }
-                        hasMore = false;
+                        results.errors.push({ source: 'whop', message: `v5 page ${page}: ${errText.substring(0,200)}` });
                         break;
                     }
 
                     const data = await resp.json();
-                    const memberships = data.data || data.memberships || [];
+                    const memberships = data.data || [];
                     if (memberships.length === 0) { hasMore = false; break; }
 
                     for (const m of memberships) {
+                        // Inject plan pricing into the membership before mapping
+                        const planId = m.plan_id;
+                        if (planId && planPrices[planId] != null) {
+                            m._plan_price = planPrices[planId];
+                        }
+                        if (planId && planNames[planId]) {
+                            m._plan_name = planNames[planId];
+                        }
+                        if (planId && planIntervals[planId]) {
+                            m._plan_interval = planIntervals[planId];
+                        }
                         allMemberships.push(mapWhopMembership(m));
                     }
 
-                    cursor = data.pagination?.next_cursor || data.next_cursor;
-                    if (!cursor) hasMore = false;
+                    const totalPages = data.pagination?.total_pages || 1;
+                    if (page >= totalPages) { hasMore = false; }
+                    else { page++; }
                 }
 
                 results.whop = allMemberships;
@@ -190,18 +193,13 @@ export default async function handler(req, res) {
     if (action === 'debugWhop') {
         if (!WHOP_API_KEY) return res.json({ error: 'No WHOP_API_KEY' });
         try {
-            const resp = await fetch('https://api.whop.com/api/v5/company/memberships?per=3', {
-                headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-            });
-            if (!resp.ok) {
-                const resp2 = await fetch('https://api.whop.com/api/v2/company/memberships?per=3&page=1', {
-                    headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                });
-                const raw2 = await resp2.json();
-                return res.json({ api: 'v2', raw: raw2 });
-            }
-            const raw = await resp.json();
-            return res.json({ api: 'v5', raw });
+            const [memResp, planResp] = await Promise.all([
+                fetch('https://api.whop.com/api/v5/company/memberships?per=3', { headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` } }),
+                fetch('https://api.whop.com/api/v5/company/plans?per=5', { headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` } })
+            ]);
+            const memberships = memResp.ok ? await memResp.json() : { error: await memResp.text() };
+            const plans = planResp.ok ? await planResp.json() : { error: await planResp.text() };
+            return res.json({ memberships, plans });
         } catch (err) {
             return res.json({ error: err.message });
         }
