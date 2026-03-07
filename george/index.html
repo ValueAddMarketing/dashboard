@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>George Mikhael - Lead Source ROI Dashboard</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body { background: #0f172a; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .card { background: #1e293b; border-radius: 12px; border: 1px solid #334155; }
+    .glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.1); }
+    .source-row:hover { background: #334155; }
+    @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .loading-pulse { animation: pulse-slow 1.5s ease-in-out infinite; }
+    .chart-container { position: relative; height: 300px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+function formatCurrency(n) {
+  if (n == null) return '$0';
+  return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+function formatPct(n) {
+  return (n * 100).toFixed(1) + '%';
+}
+
+// ── KPI Card ──
+function KPICard({ label, value, sub, color = 'blue' }) {
+  const colors = {
+    blue: 'from-blue-500/20 to-blue-600/5 border-blue-500/30',
+    green: 'from-green-500/20 to-green-600/5 border-green-500/30',
+    purple: 'from-purple-500/20 to-purple-600/5 border-purple-500/30',
+    amber: 'from-amber-500/20 to-amber-600/5 border-amber-500/30',
+    cyan: 'from-cyan-500/20 to-cyan-600/5 border-cyan-500/30',
+    rose: 'from-rose-500/20 to-rose-600/5 border-rose-500/30',
+  };
+  return (
+    <div className={`card bg-gradient-to-br ${colors[color]} p-5 glow`}>
+      <div className="text-sm text-slate-400 mb-1">{label}</div>
+      <div className="text-2xl font-bold text-white">{value}</div>
+      {sub && <div className="text-xs text-slate-500 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Donut Chart ──
+function DonutChart({ data, title }) {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !data.length) return;
+    if (chartRef.current) chartRef.current.destroy();
+
+    const palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#6366f1'];
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'doughnut',
+      data: {
+        labels: data.map(d => d.label),
+        datasets: [{
+          data: data.map(d => d.value),
+          backgroundColor: data.map((_, i) => palette[i % palette.length]),
+          borderWidth: 0,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, padding: 12 } },
+          title: { display: true, text: title, color: '#e2e8f0', font: { size: 14 } }
+        },
+        cutout: '65%',
+      }
+    });
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [data, title]);
+
+  return <div className="chart-container"><canvas ref={canvasRef}></canvas></div>;
+}
+
+// ── Bar Chart ──
+function BarChart({ labels, datasets, title }) {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !labels.length) return;
+    if (chartRef.current) chartRef.current.destroy();
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } },
+          title: { display: true, text: title, color: '#e2e8f0', font: { size: 14 } }
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+          y: { ticks: { color: '#94a3b8', callback: v => '$' + v.toLocaleString() }, grid: { color: '#334155' } }
+        }
+      }
+    });
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [labels, datasets, title]);
+
+  return <div className="chart-container"><canvas ref={canvasRef}></canvas></div>;
+}
+
+// ── Source ROI Table ──
+function SourceTable({ sourceStats, dealsBySource, adSpend }) {
+  const rows = useMemo(() => {
+    const allSources = new Set([...Object.keys(sourceStats), ...Object.keys(dealsBySource)]);
+    return Array.from(allSources).map(src => {
+      const stats = sourceStats[src] || { total: 0, stages: {} };
+      const deals = dealsBySource[src] || { totalDeals: 0, closedDeals: 0, closedCommission: 0, closedVolume: 0, totalCommission: 0, activeDeals: 0 };
+      const spend = adSpend[src] || 0;
+      const roi = spend > 0 ? ((deals.closedCommission - spend) / spend) : null;
+      const convRate = stats.total > 0 ? deals.closedDeals / stats.total : 0;
+      const costPerLead = spend > 0 && stats.total > 0 ? spend / stats.total : null;
+      const hotLeads = (stats.stages['A - Hot 1-3 Months'] || 0);
+      const warmLeads = (stats.stages['B - Warm 3-6 Months'] || 0);
+      const activeLeads = hotLeads + warmLeads;
+      return { src, ...stats, ...deals, spend, roi, convRate, costPerLead, activeLeads, hotLeads, warmLeads };
+    }).sort((a, b) => b.closedCommission - a.closedCommission);
+  }, [sourceStats, dealsBySource, adSpend]);
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-slate-400 border-b border-slate-700">
+            <th className="text-left p-3">Source</th>
+            <th className="text-right p-3">Total Leads</th>
+            <th className="text-right p-3">Hot / Warm</th>
+            <th className="text-right p-3">Deals</th>
+            <th className="text-right p-3">Closed</th>
+            <th className="text-right p-3">Conv. Rate</th>
+            <th className="text-right p-3">Closed Volume</th>
+            <th className="text-right p-3">Commission Earned</th>
+            <th className="text-right p-3">Pipeline Commission</th>
+            <th className="text-right p-3">Ad Spend</th>
+            <th className="text-right p-3">Cost/Lead</th>
+            <th className="text-right p-3">ROI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.src} className="source-row border-b border-slate-800 transition-colors">
+              <td className="p-3 font-medium text-white">{r.src}</td>
+              <td className="p-3 text-right">{r.total.toLocaleString()}</td>
+              <td className="p-3 text-right">
+                <span className="text-orange-400">{r.hotLeads}</span>
+                {' / '}
+                <span className="text-yellow-400">{r.warmLeads}</span>
+              </td>
+              <td className="p-3 text-right">{r.totalDeals}</td>
+              <td className="p-3 text-right text-green-400">{r.closedDeals}</td>
+              <td className="p-3 text-right">{r.total > 0 ? formatPct(r.convRate) : '-'}</td>
+              <td className="p-3 text-right">{formatCurrency(r.closedVolume)}</td>
+              <td className="p-3 text-right font-bold text-green-400">{formatCurrency(r.closedCommission)}</td>
+              <td className="p-3 text-right text-blue-400">{formatCurrency(r.totalCommission - r.closedCommission)}</td>
+              <td className="p-3 text-right text-red-400">{r.spend > 0 ? formatCurrency(r.spend) : '-'}</td>
+              <td className="p-3 text-right">{r.costPerLead != null ? formatCurrency(r.costPerLead) : '-'}</td>
+              <td className="p-3 text-right">
+                {r.roi != null ? (
+                  <span className={r.roi >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                    {(r.roi * 100).toFixed(0)}%
+                  </span>
+                ) : '-'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Deal Pipeline Table ──
+function DealTable({ deals }) {
+  const [sortKey, setSortKey] = useState('commission');
+  const sorted = useMemo(() => {
+    return [...deals].sort((a, b) => {
+      if (sortKey === 'commission') return (b.commissionValue || 0) - (a.commissionValue || 0);
+      if (sortKey === 'price') return (b.price || 0) - (a.price || 0);
+      if (sortKey === 'stage') return (a.stageName || '').localeCompare(b.stageName || '');
+      if (sortKey === 'source') return (a.primarySource || '').localeCompare(b.primarySource || '');
+      return 0;
+    });
+  }, [deals, sortKey]);
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="flex gap-2 mb-3">
+        {['commission','price','stage','source'].map(k => (
+          <button key={k} onClick={() => setSortKey(k)}
+            className={`px-3 py-1 rounded text-xs ${sortKey === k ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+            Sort: {k.charAt(0).toUpperCase() + k.slice(1)}
+          </button>
+        ))}
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-slate-400 border-b border-slate-700">
+            <th className="text-left p-2">Deal</th>
+            <th className="text-left p-2">Source</th>
+            <th className="text-left p-2">Pipeline</th>
+            <th className="text-left p-2">Stage</th>
+            <th className="text-right p-2">Price</th>
+            <th className="text-right p-2">Commission</th>
+            <th className="text-left p-2">People</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(d => (
+            <tr key={d.id} className="source-row border-b border-slate-800 transition-colors">
+              <td className="p-2 text-white font-medium">{d.name}</td>
+              <td className="p-2">
+                <span className="px-2 py-0.5 rounded text-xs bg-slate-700">{d.primarySource}</span>
+              </td>
+              <td className="p-2 text-slate-400">{d.pipelineName}</td>
+              <td className="p-2">
+                <span className={`px-2 py-0.5 rounded text-xs ${
+                  d.stageName === 'Closed' ? 'bg-green-900/50 text-green-400' :
+                  d.stageName === 'Pending' ? 'bg-yellow-900/50 text-yellow-400' :
+                  d.stageName === 'Offer' ? 'bg-purple-900/50 text-purple-400' :
+                  'bg-slate-700 text-slate-300'
+                }`}>{d.stageName}</span>
+              </td>
+              <td className="p-2 text-right">{formatCurrency(d.price)}</td>
+              <td className="p-2 text-right font-bold text-green-400">{formatCurrency(d.commissionValue)}</td>
+              <td className="p-2 text-slate-400 text-xs">{(d.dealPeople || []).map(p => p.name).join(', ')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Ad Spend Input Modal ──
+function AdSpendModal({ sources, adSpend, setAdSpend, onClose }) {
+  const [local, setLocal] = useState({...adSpend});
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:50,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="card p-6" style={{width:450,maxHeight:'80vh',overflow:'auto'}}>
+        <h3 className="text-lg font-bold text-white mb-4">Set Monthly Ad Spend by Source</h3>
+        <p className="text-xs text-slate-400 mb-4">Enter your monthly ad spend for each lead source to calculate ROI.</p>
+        {sources.map(src => (
+          <div key={src} className="flex items-center gap-3 mb-3">
+            <label className="text-sm text-slate-300 w-40 truncate">{src}</label>
+            <div className="flex items-center bg-slate-800 rounded px-2 flex-1">
+              <span className="text-slate-500">$</span>
+              <input type="number" value={local[src] || ''} onChange={e => setLocal({...local, [src]: parseFloat(e.target.value) || 0})}
+                className="bg-transparent text-white p-2 w-full outline-none" placeholder="0" />
+            </div>
+          </div>
+        ))}
+        <div className="flex gap-2 mt-4">
+          <button onClick={() => { setAdSpend(local); localStorage.setItem('george_ad_spend', JSON.stringify(local)); onClose(); }}
+            className="px-4 py-2 bg-blue-600 text-white rounded text-sm flex-1">Save</button>
+          <button onClick={onClose} className="px-4 py-2 bg-slate-700 text-slate-300 rounded text-sm">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Recommendations Panel ──
+function Recommendations({ sourceStats, dealsBySource, adSpend }) {
+  const recs = useMemo(() => {
+    const items = [];
+    const sources = Object.keys(dealsBySource);
+
+    // Find best converting source
+    let bestConv = null, bestConvRate = 0;
+    for (const src of sources) {
+      const leads = sourceStats[src]?.total || 0;
+      const closed = dealsBySource[src]?.closedDeals || 0;
+      if (leads > 5) {
+        const rate = closed / leads;
+        if (rate > bestConvRate) { bestConvRate = rate; bestConv = src; }
+      }
+    }
+    if (bestConv) {
+      items.push({ type: 'success', text: `${bestConv} has the highest conversion rate at ${formatPct(bestConvRate)}. Consider increasing investment here.` });
+    }
+
+    // Highest commission source
+    let topSrc = null, topComm = 0;
+    for (const src of sources) {
+      const comm = dealsBySource[src]?.closedCommission || 0;
+      if (comm > topComm) { topComm = comm; topSrc = src; }
+    }
+    if (topSrc) {
+      items.push({ type: 'info', text: `${topSrc} has generated the most commission: ${formatCurrency(topComm)}.` });
+    }
+
+    // Sources with leads but no deals
+    for (const src of Object.keys(sourceStats)) {
+      if (src === '<unspecified>' || src === 'Import') continue;
+      const leads = sourceStats[src]?.total || 0;
+      const deals = dealsBySource[src]?.totalDeals || 0;
+      if (leads > 10 && deals === 0) {
+        items.push({ type: 'warning', text: `${src} has ${leads} leads but 0 deals. Review lead quality or follow-up process.` });
+      }
+    }
+
+    // ROI check
+    for (const src of Object.keys(adSpend)) {
+      if (!adSpend[src]) continue;
+      const comm = dealsBySource[src]?.closedCommission || 0;
+      const spend = adSpend[src];
+      const roi = (comm - spend) / spend;
+      if (roi < 0) {
+        items.push({ type: 'danger', text: `${src} is currently negative ROI (${(roi*100).toFixed(0)}%). Review if pipeline deals will close to recover.` });
+      } else if (roi > 2) {
+        items.push({ type: 'success', text: `${src} has excellent ROI of ${(roi*100).toFixed(0)}%. Strong candidate for increased spend.` });
+      }
+    }
+
+    // Hot leads insight
+    for (const src of Object.keys(sourceStats)) {
+      if (src === '<unspecified>' || src === 'Import') continue;
+      const hot = sourceStats[src]?.stages?.['A - Hot 1-3 Months'] || 0;
+      if (hot >= 3) {
+        items.push({ type: 'info', text: `${src} has ${hot} hot leads ready to convert. Prioritize follow-up.` });
+      }
+    }
+
+    return items;
+  }, [sourceStats, dealsBySource, adSpend]);
+
+  const icons = { success: '\u2705', info: '\u2139\uFE0F', warning: '\u26A0\uFE0F', danger: '\uD83D\uDED1' };
+  const bgColors = { success: 'bg-green-900/30 border-green-800', info: 'bg-blue-900/30 border-blue-800', warning: 'bg-yellow-900/30 border-yellow-800', danger: 'bg-red-900/30 border-red-800' };
+
+  return (
+    <div className="space-y-2">
+      {recs.map((r, i) => (
+        <div key={i} className={`${bgColors[r.type]} border rounded-lg p-3 text-sm`}>
+          <span className="mr-2">{icons[r.type]}</span>{r.text}
+        </div>
+      ))}
+      {recs.length === 0 && <div className="text-slate-500 text-sm">Add ad spend data to get ROI recommendations.</div>}
+    </div>
+  );
+}
+
+// ── Main App ──
+function App() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [tab, setTab] = useState('overview');
+  const [showSpendModal, setShowSpendModal] = useState(false);
+  const [adSpend, setAdSpend] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('george_ad_spend') || '{}'); } catch { return {}; }
+  });
+
+  useEffect(() => {
+    const cached = localStorage.getItem('george_fub_data');
+    const cacheTime = localStorage.getItem('george_fub_cache_time');
+    if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 10 * 60 * 1000) {
+      setData(JSON.parse(cached));
+      setLoading(false);
+      return;
+    }
+    fetch('/api/fub-data')
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) throw new Error(d.error);
+        setData(d);
+        localStorage.setItem('george_fub_data', JSON.stringify(d));
+        localStorage.setItem('george_fub_cache_time', Date.now().toString());
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="text-4xl loading-pulse mb-4">Loading FUB Data...</div>
+        <div className="text-slate-500">Fetching 1,300+ leads and 40 deals from Follow Up Boss</div>
+      </div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="card p-8 text-center" style={{maxWidth:500}}>
+        <div className="text-red-400 text-xl mb-2">Error Loading Data</div>
+        <div className="text-slate-400">{error}</div>
+        <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-blue-600 rounded text-white">Retry</button>
+      </div>
+    </div>
+  );
+
+  const { summary, sourceStats, dealsBySource, deals } = data;
+  const allSources = [...new Set([...Object.keys(sourceStats), ...Object.keys(dealsBySource)])].filter(s => s !== '<unspecified>');
+  const totalSpend = Object.values(adSpend).reduce((s, v) => s + (v || 0), 0);
+
+  // Chart data
+  const commissionBySource = Object.entries(dealsBySource)
+    .filter(([_, d]) => d.closedCommission > 0)
+    .map(([src, d]) => ({ label: src, value: d.closedCommission }))
+    .sort((a, b) => b.value - a.value);
+
+  const leadsBySource = Object.entries(sourceStats)
+    .filter(([src]) => src !== '<unspecified>')
+    .map(([src, d]) => ({ label: src, value: d.total }))
+    .sort((a, b) => b.value - a.value);
+
+  const sourcesForBar = Object.keys(dealsBySource).filter(s => s !== '<unspecified>');
+  const barLabels = sourcesForBar;
+  const barDatasets = [
+    { label: 'Closed Commission', data: sourcesForBar.map(s => dealsBySource[s]?.closedCommission || 0), backgroundColor: '#10b981' },
+    { label: 'Pipeline Commission', data: sourcesForBar.map(s => (dealsBySource[s]?.totalCommission || 0) - (dealsBySource[s]?.closedCommission || 0)), backgroundColor: '#3b82f6' },
+  ];
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'sources', label: 'Source Breakdown' },
+    { id: 'deals', label: 'All Deals' },
+    { id: 'insights', label: 'Insights & Recs' },
+  ];
+
+  return (
+    <div className="min-h-screen p-4 md:p-8" style={{maxWidth:1400,margin:'0 auto'}}>
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-white">Lead Source ROI Dashboard</h1>
+          <p className="text-slate-400 mt-1">George Mikhael - Follow Up Boss Analytics</p>
+        </div>
+        <div className="flex gap-2 mt-4 md:mt-0">
+          <button onClick={() => setShowSpendModal(true)}
+            className="px-4 py-2 bg-slate-700 text-slate-300 rounded-lg text-sm hover:bg-slate-600 transition">
+            Set Ad Spend
+          </button>
+          <button onClick={() => {
+            localStorage.removeItem('george_fub_data');
+            localStorage.removeItem('george_fub_cache_time');
+            window.location.reload();
+          }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
+            Refresh Data
+          </button>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        <KPICard label="Total Leads" value={summary.totalPeople.toLocaleString()} color="blue" />
+        <KPICard label="Total Deals" value={summary.totalDeals} sub={`${summary.closedDeals} closed`} color="purple" />
+        <KPICard label="Closed Commission" value={formatCurrency(summary.closedCommission)} color="green" />
+        <KPICard label="Pipeline Commission" value={formatCurrency(summary.totalCommission - summary.closedCommission)} color="cyan" />
+        <KPICard label="Total Volume" value={formatCurrency(summary.totalVolume)} color="amber" />
+        <KPICard label="Total Ad Spend" value={totalSpend > 0 ? formatCurrency(totalSpend) : 'Not Set'} sub={totalSpend > 0 ? `ROI: ${((summary.closedCommission - totalSpend) / totalSpend * 100).toFixed(0)}%` : 'Click Set Ad Spend'} color="rose" />
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 bg-slate-800/50 p-1 rounded-lg w-fit">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-md text-sm transition ${tab === t.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      {tab === 'overview' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="card p-5">
+              <DonutChart data={commissionBySource} title="Commission Earned by Source" />
+            </div>
+            <div className="card p-5">
+              <DonutChart data={leadsBySource} title="Lead Volume by Source" />
+            </div>
+          </div>
+          <div className="card p-5">
+            <BarChart labels={barLabels} datasets={barDatasets} title="Closed vs Pipeline Commission by Source" />
+          </div>
+        </div>
+      )}
+
+      {tab === 'sources' && (
+        <div className="card p-5">
+          <h2 className="text-lg font-bold text-white mb-4">Source Performance Breakdown</h2>
+          <SourceTable sourceStats={sourceStats} dealsBySource={dealsBySource} adSpend={adSpend} />
+        </div>
+      )}
+
+      {tab === 'deals' && (
+        <div className="card p-5">
+          <h2 className="text-lg font-bold text-white mb-4">All Deals ({deals.length})</h2>
+          <DealTable deals={deals} />
+        </div>
+      )}
+
+      {tab === 'insights' && (
+        <div className="space-y-6">
+          <div className="card p-5">
+            <h2 className="text-lg font-bold text-white mb-4">AI Recommendations</h2>
+            <Recommendations sourceStats={sourceStats} dealsBySource={dealsBySource} adSpend={adSpend} />
+          </div>
+          <div className="card p-5">
+            <h2 className="text-lg font-bold text-white mb-4">Lead Funnel by Source</h2>
+            <div className="space-y-4">
+              {Object.entries(sourceStats)
+                .filter(([src]) => src !== '<unspecified>')
+                .sort((a, b) => b[1].total - a[1].total)
+                .map(([src, stats]) => {
+                  const deals_data = dealsBySource[src] || {};
+                  const hot = stats.stages['A - Hot 1-3 Months'] || 0;
+                  const warm = stats.stages['B - Warm 3-6 Months'] || 0;
+                  const cold = stats.stages['C - Cold 6+ Months'] || 0;
+                  const closed = stats.stages['Closed'] || 0;
+                  const pastClient = stats.stages['Past Client'] || 0;
+                  return (
+                    <div key={src} className="bg-slate-800/50 rounded-lg p-4">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-medium text-white">{src}</span>
+                        <span className="text-sm text-slate-400">{stats.total} total leads</span>
+                      </div>
+                      <div className="flex gap-1 h-6 rounded overflow-hidden">
+                        {hot > 0 && <div style={{flex: hot, background:'#f97316'}} title={`Hot: ${hot}`}></div>}
+                        {warm > 0 && <div style={{flex: warm, background:'#eab308'}} title={`Warm: ${warm}`}></div>}
+                        {cold > 0 && <div style={{flex: cold, background:'#64748b'}} title={`Cold: ${cold}`}></div>}
+                        {closed > 0 && <div style={{flex: closed, background:'#10b981'}} title={`Closed: ${closed}`}></div>}
+                        {pastClient > 0 && <div style={{flex: pastClient, background:'#3b82f6'}} title={`Past Client: ${pastClient}`}></div>}
+                        {(stats.total - hot - warm - cold - closed - pastClient) > 0 && <div style={{flex: stats.total - hot - warm - cold - closed - pastClient, background:'#1e293b'}} title={`Other: ${stats.total - hot - warm - cold - closed - pastClient}`}></div>}
+                      </div>
+                      <div className="flex gap-4 mt-2 text-xs text-slate-400">
+                        <span><span className="inline-block w-2 h-2 rounded" style={{background:'#f97316'}}></span> Hot: {hot}</span>
+                        <span><span className="inline-block w-2 h-2 rounded" style={{background:'#eab308'}}></span> Warm: {warm}</span>
+                        <span><span className="inline-block w-2 h-2 rounded" style={{background:'#64748b'}}></span> Cold: {cold}</span>
+                        <span><span className="inline-block w-2 h-2 rounded" style={{background:'#10b981'}}></span> Closed: {closed}</span>
+                        <span><span className="inline-block w-2 h-2 rounded" style={{background:'#3b82f6'}}></span> Past Client: {pastClient}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSpendModal && (
+        <AdSpendModal sources={allSources} adSpend={adSpend} setAdSpend={setAdSpend} onClose={() => setShowSpendModal(false)} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
