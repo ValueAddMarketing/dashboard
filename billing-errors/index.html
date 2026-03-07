@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VAM - Billing Errors & Revenue Recovery</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --brand-cyan: #22d3ee; }
+    body { background: #0d1117; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; }
+    .card { background: #161b22; border: 1px solid #21262d; border-radius: 12px; }
+    .input-field { background: #0d1117; border: 1px solid #21262d; color: #e2e8f0; }
+    .input-field:focus { outline: none; border-color: var(--brand-cyan); }
+    .row-hover:hover { background: #1c2128; }
+    .tooltip-wrap:hover .tooltip-content { display: block; }
+    .tooltip-content { display: none; }
+    @keyframes pulse-slow { 0%,100%{opacity:1}50%{opacity:.5} }
+    .loading-pulse { animation: pulse-slow 1.5s ease-in-out infinite; }
+    .chat-msgs { scrollbar-width: thin; scrollbar-color: #21262d transparent; }
+    .chat-msgs::-webkit-scrollbar { width: 6px; }
+    .chat-msgs::-webkit-scrollbar-thumb { background: #21262d; border-radius: 3px; }
+    .ai-msg p { margin: 4px 0; }
+    .ai-msg strong { color: #93c5fd; }
+    .ai-msg ul, .ai-msg ol { padding-left: 20px; margin: 4px 0; }
+    .ai-msg li { margin: 2px 0; }
+    .ai-msg pre { background: #0d1117; padding: 8px; border-radius: 6px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+const SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1KSEofetcdOx_vdxjMJPrHFFmanGerIJnNGmppmmzCg8/gviz/tq?tqx=out:json&sheet=';
+
+function parseSheetData(text) {
+  const json = JSON.parse(text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1));
+  const cols = json.table.cols.map(c => c.label || '');
+  return json.table.rows.map(r => {
+    const obj = {};
+    r.c.forEach((cell, i) => { if (cols[i]) obj[cols[i]] = cell ? (cell.v != null ? String(cell.v) : (cell.f || '')) : ''; });
+    return obj;
+  });
+}
+
+function parseDate(s) {
+  if (!s) return null;
+  if (s instanceof Date) return isNaN(s) ? null : s;
+  const str = String(s).trim();
+  if (!str) return null;
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  if (typeof d === 'string') d = new Date(d);
+  if (isNaN(d)) return '-';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtCurrency(n) {
+  if (n == null || isNaN(n)) return '-';
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function daysBetween(a, b) {
+  if (!a || !b) return null;
+  return Math.round((b - a) / (1000 * 60 * 60 * 24));
+}
+
+// ── Fetch Google Sheet data ──
+async function fetchSetupData() {
+  const cached = localStorage.getItem('vam_setup');
+  const cacheTime = localStorage.getItem('vam_cache_time');
+  if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 10 * 60 * 1000) {
+    return JSON.parse(cached);
+  }
+  const resp = await fetch(SHEETS_URL + 'Setup%20Timing');
+  const text = await resp.text();
+  const data = parseSheetData(text);
+  const mapped = data.map(r => ({
+    client: r['VAM'] || '',
+    status: r['Status'] || '',
+    csmRep: r['CSM'] || '',
+    paidDate: r['Paid date'] || '',
+    billingCycle: r['Billing cycle'] || '',
+    nextBillingDateSheet: r['Next Billing Date'] || '',
+    duePayment: r['Due Payment'] || '',
+    contractEndDate: r['Contract End Date'] || '',
+    contractCategory: r['Contract Category'] || '',
+    contractLength: r['Contract length'] || '',
+    contractNotes: r['contract notes'] || '',
+    paymentNotes: r['Payment notes'] || '',
+    mrr: r['MRR'] || '',
+    revenueContracted: r['Revenue Contracted'] || '',
+    moPaymentsCollected: r['mo payments collected'] || '',
+    amountCollected: r['Amount collected'] || '',
+    platform: r['Platform'] || '',
+    nameEmail: r['Name/email'] || '',
+    daysLeftForEndOfContract: r['Days left for end of Contract'] || '',
+    freeTrialDays: r['Free trial Days'] || '',
+    adsOnPauseDays: r['ADs on pause total days'] || '',
+    billingAdjust: r['Billing adjust'] || '',
+  }));
+  try {
+    localStorage.setItem('vam_setup', JSON.stringify(mapped));
+    localStorage.setItem('vam_cache_time', Date.now().toString());
+  } catch(e) {}
+  return mapped;
+}
+
+// ── Parse contract notes to extract billing clues ──
+function parseContractNotes(notes) {
+  if (!notes) return { raw: '', loanOfficer: false, loanOfficerName: null, splitBilling: false, specialTerms: [], amounts: [], platforms: [] };
+  const lower = notes.toLowerCase();
+  const loanOfficer = /loan\s*officer|lo\s+pay|lo\s+split|lender|mortgage/i.test(notes);
+  const loMatch = notes.match(/(?:loan\s*officer|lender|LO)[:\s-]*([A-Z][a-z]+ ?[A-Z]?[a-z]*)/i);
+  const splitBilling = /split|half|shared|50.?50|partial/i.test(notes);
+  const amounts = [...notes.matchAll(/\$[\d,]+\.?\d*/g)].map(m => parseFloat(m[0].replace(/[$,]/g, '')));
+  const platforms = [];
+  if (/stripe/i.test(notes)) platforms.push('Stripe');
+  if (/whop/i.test(notes)) platforms.push('Whop');
+  if (/paypal/i.test(notes)) platforms.push('PayPal');
+  if (/venmo/i.test(notes)) platforms.push('Venmo');
+  if (/zelle/i.test(notes)) platforms.push('Zelle');
+  if (/cash/i.test(notes)) platforms.push('Cash');
+  if (/check/i.test(notes)) platforms.push('Check');
+
+  return {
+    raw: notes,
+    loanOfficer,
+    loanOfficerName: loMatch ? loMatch[1].trim() : null,
+    splitBilling,
+    specialTerms: [],
+    amounts,
+    platforms,
+  };
+}
+
+// ── Match client to payment data ──
+function matchPayments(clientName, nameEmail, invoices, whopPayments) {
+  const cn = (clientName || '').toLowerCase().trim();
+  const ne = (nameEmail || '').toLowerCase().trim();
+  if (!cn) return { stripeInvoices: [], whopPayments: [] };
+
+  const parts = cn.split(/\s+/);
+
+  const matchStripe = invoices.filter(inv => {
+    const name = (inv.customerName || '').toLowerCase();
+    const email = (inv.customerEmail || '').toLowerCase();
+    if (name === cn || email === ne) return true;
+    if (cn && (name.includes(cn) || cn.includes(name))) return true;
+    if (ne && email && (email.includes(ne) || ne.includes(email))) return true;
+    if (parts.length >= 2 && parts.every(p => name.includes(p))) return true;
+    return false;
+  });
+
+  const matchWhop = whopPayments.filter(p => {
+    const name = (p.customerName || '').toLowerCase();
+    const email = (p.customerEmail || '').toLowerCase();
+    if (name === cn || email === ne) return true;
+    if (cn && (name.includes(cn) || cn.includes(name))) return true;
+    if (ne && email && (email.includes(ne) || ne.includes(email))) return true;
+    if (parts.length >= 2 && parts.every(pt => name.includes(pt))) return true;
+    return false;
+  });
+
+  return { stripeInvoices: matchStripe, whopPayments: matchWhop };
+}
+
+// ── KPI Card ──
+function KPI({ label, value, sub, color = 'white' }) {
+  const colors = { white: 'text-white', red: 'text-red-400', green: 'text-emerald-400', amber: 'text-amber-400', cyan: 'text-cyan-400', purple: 'text-purple-400' };
+  return (
+    <div className="card p-5 text-center">
+      <div className={`text-3xl font-bold ${colors[color]}`}>{value}</div>
+      <div className="text-xs text-slate-400 mt-1">{label}</div>
+      {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Payment History Drawer ──
+function PaymentDrawer({ client, data, onClose }) {
+  if (!data) return null;
+  const { stripeInvoices, whopPayments, upcoming, contractInfo, setup } = data;
+  const allPaid = stripeInvoices.filter(i => i.paid);
+  const totalPaidStripe = allPaid.reduce((s, i) => s + (i.amountPaid || 0), 0);
+  const totalPaidWhop = whopPayments.reduce((s, p) => s + (p.amountPaid || 0), 0);
+  const unpaid = stripeInvoices.filter(i => !i.paid && i.status !== 'void' && i.status !== 'draft');
+  const totalUnpaid = unpaid.reduce((s, i) => s + (i.amountRemaining || 0), 0);
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:50,display:'flex',justifyContent:'flex-end'}} onClick={onClose}>
+      <div style={{width:650,maxWidth:'90vw',height:'100vh',background:'#161b22',borderLeft:'1px solid #21262d',overflow:'auto'}} onClick={e => e.stopPropagation()}>
+        <div style={{padding:'20px',borderBottom:'1px solid #21262d',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,background:'#161b22',zIndex:1}}>
+          <div>
+            <h2 className="text-lg font-bold text-white">{client}</h2>
+            <p className="text-xs text-slate-400 mt-1">Payment History & Details</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-2xl" style={{background:'none',border:'none',cursor:'pointer'}}>x</button>
+        </div>
+
+        <div style={{padding:'20px'}} className="space-y-6">
+          {/* Contract Info */}
+          <div className="card p-4">
+            <h3 className="text-sm font-semibold text-cyan-400 mb-3">Contract Info</h3>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span className="text-slate-500">MRR:</span> <span className="text-white ml-1">{setup.mrr || '-'}</span></div>
+              <div><span className="text-slate-500">Contract Length:</span> <span className="text-white ml-1">{setup.contractLength || '-'}</span></div>
+              <div><span className="text-slate-500">Revenue Contracted:</span> <span className="text-white ml-1">{setup.revenueContracted || '-'}</span></div>
+              <div><span className="text-slate-500">Mo. Payments Collected:</span> <span className="text-white ml-1">{setup.moPaymentsCollected || '-'}</span></div>
+              <div><span className="text-slate-500">Amount Collected:</span> <span className="text-white ml-1">{setup.amountCollected || '-'}</span></div>
+              <div><span className="text-slate-500">Platform:</span> <span className="text-white ml-1">{setup.platform || '-'}</span></div>
+              <div><span className="text-slate-500">Billing Cycle:</span> <span className="text-white ml-1">{setup.billingCycle || '-'}</span></div>
+              <div><span className="text-slate-500">Free Trial Days:</span> <span className="text-white ml-1">{setup.freeTrialDays || '-'}</span></div>
+            </div>
+            {setup.contractNotes && (
+              <div className="mt-3 p-2 bg-slate-900/50 rounded text-xs">
+                <span className="text-slate-500">Contract Notes:</span>
+                <div className="text-slate-300 mt-1 whitespace-pre-wrap">{setup.contractNotes}</div>
+              </div>
+            )}
+            {setup.paymentNotes && (
+              <div className="mt-2 p-2 bg-slate-900/50 rounded text-xs">
+                <span className="text-slate-500">Payment Notes:</span>
+                <div className="text-slate-300 mt-1 whitespace-pre-wrap">{setup.paymentNotes}</div>
+              </div>
+            )}
+            {contractInfo.loanOfficer && (
+              <div className="mt-2 p-2 bg-purple-900/30 border border-purple-800/50 rounded text-xs">
+                <span className="text-purple-400 font-medium">Loan Officer involved</span>
+                {contractInfo.loanOfficerName && <span className="text-slate-300 ml-1">({contractInfo.loanOfficerName})</span>}
+              </div>
+            )}
+          </div>
+
+          {/* Summary */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="card p-3 text-center">
+              <div className="text-lg font-bold text-emerald-400">{fmtCurrency(totalPaidStripe + totalPaidWhop)}</div>
+              <div className="text-xs text-slate-500">Total Collected</div>
+            </div>
+            <div className="card p-3 text-center">
+              <div className="text-lg font-bold text-red-400">{fmtCurrency(totalUnpaid)}</div>
+              <div className="text-xs text-slate-500">Unpaid/Failed</div>
+            </div>
+            <div className="card p-3 text-center">
+              <div className="text-lg font-bold text-white">{allPaid.length + whopPayments.length}</div>
+              <div className="text-xs text-slate-500">Total Payments</div>
+            </div>
+          </div>
+
+          {/* Next Billing */}
+          {upcoming && (
+            <div className="card p-4 border-cyan-800/50">
+              <h3 className="text-sm font-semibold text-cyan-400 mb-2">Next Billing</h3>
+              <div className="text-sm text-white">{fmtDate(upcoming.nextBillingDate)} - {fmtCurrency(upcoming.amount)}/{upcoming.interval || 'mo'}</div>
+              <div className="text-xs text-slate-500 mt-1">via Stripe ({upcoming.customerName})</div>
+            </div>
+          )}
+
+          {/* Stripe Invoices */}
+          <div>
+            <h3 className="text-sm font-semibold text-purple-400 mb-2">Stripe Invoices ({stripeInvoices.length})</h3>
+            {stripeInvoices.length === 0 ? (
+              <div className="text-xs text-slate-500 p-3 card">No Stripe invoices found for this client</div>
+            ) : (
+              <div className="space-y-1">
+                {stripeInvoices.sort((a, b) => new Date(b.created) - new Date(a.created)).map(inv => (
+                  <div key={inv.id} className="card p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm text-white">{fmtCurrency(inv.amountDue)}</div>
+                      <div className="text-xs text-slate-500">{fmtDate(inv.created)} {inv.description ? `- ${inv.description.substring(0, 60)}` : ''}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        inv.paid ? 'bg-emerald-500/20 text-emerald-400' :
+                        inv.status === 'open' ? 'bg-amber-500/20 text-amber-400' :
+                        inv.status === 'void' ? 'bg-slate-500/20 text-slate-400' :
+                        inv.status === 'uncollectible' ? 'bg-red-500/20 text-red-400' :
+                        'bg-slate-500/20 text-slate-400'
+                      }`}>{inv.paid ? 'Paid' : inv.status}</span>
+                      {inv.attemptCount > 1 && <span className="text-xs text-red-400">{inv.attemptCount} attempts</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Whop Payments */}
+          <div>
+            <h3 className="text-sm font-semibold text-blue-400 mb-2">Whop Payments ({whopPayments.length})</h3>
+            {whopPayments.length === 0 ? (
+              <div className="text-xs text-slate-500 p-3 card">No Whop payments found for this client</div>
+            ) : (
+              <div className="space-y-1">
+                {whopPayments.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0)).map(p => (
+                  <div key={p.id} className="card p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm text-white">{fmtCurrency(p.amountPaid)}</div>
+                      <div className="text-xs text-slate-500">{fmtDate(p.created)} {p.productName ? `- ${p.productName}` : ''}</div>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      p.status === 'active' || p.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'
+                    }`}>{p.status || 'unknown'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AI Billing Chat ──
+function BillingAIChat({ enrichedData }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const endRef = useRef(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  const buildContext = useCallback(() => {
+    const lines = ['=== VAM Billing Error Analysis Data ==='];
+    lines.push(`Total clients: ${enrichedData.length}`);
+    const issues = enrichedData.filter(c => c.flags.length > 0);
+    lines.push(`Clients with billing flags: ${issues.length}`);
+    lines.push('');
+
+    for (const c of enrichedData.slice(0, 100)) {
+      const parts = [`Client: ${c.client}`];
+      parts.push(`Status: ${c.setup.status}`);
+      parts.push(`MRR: ${c.setup.mrr || '?'}`);
+      parts.push(`Contract: ${c.setup.contractLength || '?'}`);
+      parts.push(`Revenue Contracted: ${c.setup.revenueContracted || '?'}`);
+      parts.push(`Mo Payments Collected: ${c.setup.moPaymentsCollected || '?'}`);
+      parts.push(`Amount Collected: ${c.setup.amountCollected || '?'}`);
+      parts.push(`Platform: ${c.setup.platform || '?'}`);
+      parts.push(`Stripe invoices: ${c.stripeInvoices.length} (paid: ${c.stripePaidCount}, total: ${fmtCurrency(c.stripeTotalPaid)})`);
+      parts.push(`Whop payments: ${c.whopPayments.length} (total: ${fmtCurrency(c.whopTotalPaid)})`);
+      parts.push(`Total collected (processors): ${fmtCurrency(c.totalCollected)}`);
+      parts.push(`Expected revenue: ${fmtCurrency(c.expectedRevenue)}`);
+      parts.push(`Revenue gap: ${fmtCurrency(c.revenueGap)}`);
+      parts.push(`Next billing: ${c.nextBillingDate || 'none'}`);
+      if (c.setup.contractNotes) parts.push(`Contract notes: ${c.setup.contractNotes}`);
+      if (c.setup.paymentNotes) parts.push(`Payment notes: ${c.setup.paymentNotes}`);
+      if (c.contractInfo.loanOfficer) parts.push(`HAS LOAN OFFICER PAYING`);
+      if (c.flags.length) parts.push(`FLAGS: ${c.flags.join(', ')}`);
+      lines.push(parts.join(' | '));
+    }
+    return lines.join('\n');
+  }, [enrichedData]);
+
+  const quickQs = [
+    "Which clients have the biggest revenue gaps?",
+    "Find clients where payments don't match the contract",
+    "Which clients have loan officers paying and are there billing issues?",
+    "List all clients with zero payments collected but active contracts",
+    "What's the total uncollected revenue across all clients?",
+    "Which clients are about to be billed next and for how much?",
+  ];
+
+  const send = async (text) => {
+    if (!text.trim() || loading) return;
+    const userMsg = { role: 'user', content: text.trim() };
+    const newMsgs = [...messages, userMsg];
+    setMessages(newMsgs);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: `You are a billing analyst for Value Add Marketing (VAM). You help identify billing errors, uncollected revenue, and payment discrepancies. You have access to client billing data cross-referenced between Google Sheets (contract info) and actual payment processors (Stripe & Whop). Focus on finding money that hasn't been collected, clients being underbilled, payment failures, and loan officer billing issues. Be specific with client names and dollar amounts. Use markdown.\n\n${buildContext()}`,
+          messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
+          max_tokens: 2500,
+        })
+      });
+      const result = await resp.json();
+      if (result.content?.[0]) setMessages([...newMsgs, { role: 'assistant', content: result.content[0].text }]);
+      else setMessages([...newMsgs, { role: 'assistant', content: `Error: ${result.error?.message || JSON.stringify(result.error)}` }]);
+    } catch (err) {
+      setMessages([...newMsgs, { role: 'assistant', content: `Error: ${err.message}` }]);
+    }
+    setLoading(false);
+  };
+
+  const renderMd = (t) => {
+    return t
+      .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/^### (.*$)/gm, '<h4 style="color:#93c5fd;margin:8px 0 4px;font-size:14px">$1</h4>')
+      .replace(/^## (.*$)/gm, '<h3 style="color:#93c5fd;margin:8px 0 4px;font-size:15px">$1</h3>')
+      .replace(/^- (.*$)/gm, '<li>$1</li>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br/>');
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        style={{position:'fixed',bottom:24,right:24,zIndex:40,background:'#22d3ee',color:'#000',borderRadius:16,padding:'12px 20px',border:'none',cursor:'pointer',fontWeight:600,fontSize:14,boxShadow:'0 4px 20px rgba(34,211,238,0.3)'}}>
+        AI Billing Analyst
+      </button>
+    );
+  }
+
+  return (
+    <div style={{position:'fixed',bottom:24,right:24,zIndex:40,width:480,height:550,display:'flex',flexDirection:'column'}} className="card">
+      <div style={{padding:'12px 16px',borderBottom:'1px solid #21262d',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div className="text-sm font-bold text-white">AI Billing Analyst</div>
+        <button onClick={() => setOpen(false)} style={{background:'none',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:18}}>x</button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 chat-msgs">
+        {messages.length === 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500 mb-3">Ask about billing errors and uncollected revenue:</p>
+            {quickQs.map((q, i) => (
+              <button key={i} onClick={() => send(q)} className="block w-full text-left text-xs px-3 py-2 bg-slate-800/50 rounded text-slate-300 hover:bg-slate-700 hover:text-white transition">{q}</button>
+            ))}
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={`mb-3 ${m.role === 'user' ? 'flex justify-end' : ''}`}>
+            {m.role === 'user' ? (
+              <div className="bg-cyan-700 text-white rounded-lg px-3 py-2 text-xs" style={{maxWidth:'80%'}}>{m.content}</div>
+            ) : (
+              <div className="ai-msg text-xs text-slate-200" style={{maxWidth:'90%'}} dangerouslySetInnerHTML={{ __html: renderMd(m.content) }} />
+            )}
+          </div>
+        ))}
+        {loading && <div className="text-xs text-slate-400 loading-pulse">Analyzing billing data...</div>}
+        <div ref={endRef} />
+      </div>
+      <div style={{padding:'12px',borderTop:'1px solid #21262d'}} className="flex gap-2">
+        <input value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') send(input); }}
+          placeholder="Ask about billing errors..."
+          className="input-field flex-1 rounded-lg px-3 py-2 text-xs" />
+        <button onClick={() => send(input)} disabled={loading || !input.trim()}
+          className={`px-3 py-2 rounded-lg text-xs font-medium ${loading || !input.trim() ? 'bg-slate-700 text-slate-500' : 'bg-cyan-600 text-white'}`}>Send</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ──
+function App() {
+  const [setupData, setSetupData] = useState([]);
+  const [invoiceData, setInvoiceData] = useState({ stripe: [], whop: [], stripeUpcoming: [], errors: [] });
+  const [loadingSheet, setLoadingSheet] = useState(true);
+  const [loadingInvoices, setLoadingInvoices] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filterFlag, setFilterFlag] = useState('');
+  const [filterPlatform, setFilterPlatform] = useState('');
+  const [sortConfig, setSortConfig] = useState({ key: 'revenueGap', dir: 'desc' });
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [tab, setTab] = useState('errors');
+
+  // Fetch data
+  useEffect(() => {
+    fetchSetupData().then(d => { setSetupData(d); setLoadingSheet(false); });
+
+    const cachedInv = localStorage.getItem('vam_billing_invoices');
+    const cachedTime = localStorage.getItem('vam_billing_invoices_cache_time');
+    if (cachedInv && cachedTime && (Date.now() - parseInt(cachedTime)) < 10 * 60 * 1000) {
+      setInvoiceData(JSON.parse(cachedInv));
+      setLoadingInvoices(false);
+    } else {
+      fetch('/api/billing-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'fetchInvoices' })
+      })
+        .then(r => r.json())
+        .then(d => {
+          setInvoiceData(d);
+          try {
+            localStorage.setItem('vam_billing_invoices', JSON.stringify(d));
+            localStorage.setItem('vam_billing_invoices_cache_time', Date.now().toString());
+          } catch(e) {}
+        })
+        .catch(err => setInvoiceData(prev => ({ ...prev, errors: [{ source: 'fetch', message: err.message }] })))
+        .finally(() => setLoadingInvoices(false));
+    }
+  }, []);
+
+  // Enrich data
+  const enriched = useMemo(() => {
+    if (!setupData.length) return [];
+
+    return setupData.filter(s => s.client).map(s => {
+      const contractInfo = parseContractNotes(s.contractNotes);
+      const { stripeInvoices, whopPayments: matchedWhop } = matchPayments(
+        s.client, s.nameEmail, invoiceData.stripe, invoiceData.whop
+      );
+
+      // Find upcoming billing
+      const upcoming = (invoiceData.stripeUpcoming || []).find(u => {
+        const cn = s.client.toLowerCase().trim();
+        const ne = (s.nameEmail || '').toLowerCase().trim();
+        const name = (u.customerName || '').toLowerCase();
+        const email = (u.customerEmail || '').toLowerCase();
+        if (name === cn || email === ne) return true;
+        if (cn && (name.includes(cn) || cn.includes(name))) return true;
+        const parts = cn.split(/\s+/);
+        if (parts.length >= 2 && parts.every(p => name.includes(p))) return true;
+        return false;
+      });
+
+      const stripePaidCount = stripeInvoices.filter(i => i.paid).length;
+      const stripeTotalPaid = stripeInvoices.filter(i => i.paid).reduce((sum, i) => sum + (i.amountPaid || 0), 0);
+      const stripeUnpaidCount = stripeInvoices.filter(i => !i.paid && i.status !== 'void' && i.status !== 'draft').length;
+      const stripeUnpaidTotal = stripeInvoices.filter(i => !i.paid && i.status !== 'void' && i.status !== 'draft').reduce((sum, i) => sum + (i.amountRemaining || 0), 0);
+      const whopTotalPaid = matchedWhop.reduce((sum, p) => sum + (p.amountPaid || 0), 0);
+      const totalCollected = stripeTotalPaid + whopTotalPaid;
+
+      // Parse expected revenue from sheet
+      const mrrVal = parseFloat((s.mrr || '').replace(/[$,]/g, '')) || 0;
+      const revenueContracted = parseFloat((s.revenueContracted || '').replace(/[$,]/g, '')) || 0;
+      const moPaymentsCollected = parseInt(s.moPaymentsCollected) || 0;
+      const expectedRevenue = revenueContracted || (mrrVal * moPaymentsCollected) || 0;
+
+      const revenueGap = expectedRevenue > 0 ? expectedRevenue - totalCollected : 0;
+      const nextBillingDate = upcoming?.nextBillingDate || null;
+      const nextBillingAmount = upcoming?.amount || null;
+
+      // Generate flags
+      const flags = [];
+      if (revenueGap > 50) flags.push('Revenue Gap');
+      if (stripeUnpaidCount > 0) flags.push('Unpaid Invoices');
+      if (contractInfo.loanOfficer) flags.push('Loan Officer');
+      if (contractInfo.splitBilling) flags.push('Split Billing');
+      if (mrrVal > 0 && stripePaidCount === 0 && matchedWhop.length === 0) flags.push('No Payments Found');
+      if (s.status && /cancel|churn|inactive/i.test(s.status) && totalCollected < expectedRevenue * 0.5) flags.push('Churned - Underpaid');
+      if (stripeInvoices.some(i => i.attemptCount > 2)) flags.push('Failed Charges');
+
+      const paymentSources = [];
+      if (stripeInvoices.length > 0) paymentSources.push('Stripe');
+      if (matchedWhop.length > 0) paymentSources.push('Whop');
+      const notedPlatforms = contractInfo.platforms;
+      const platformMismatch = notedPlatforms.length > 0 && paymentSources.length > 0 &&
+        !notedPlatforms.some(p => paymentSources.includes(p));
+      if (platformMismatch) flags.push('Platform Mismatch');
+
+      return {
+        client: s.client,
+        setup: s,
+        contractInfo,
+        stripeInvoices,
+        whopPayments: matchedWhop,
+        upcoming,
+        stripePaidCount,
+        stripeTotalPaid,
+        stripeUnpaidCount,
+        stripeUnpaidTotal,
+        whopTotalPaid,
+        totalCollected,
+        mrrVal,
+        expectedRevenue,
+        revenueGap: Math.max(0, revenueGap),
+        moPaymentsCollected,
+        nextBillingDate,
+        nextBillingAmount,
+        totalPayments: stripePaidCount + matchedWhop.length,
+        flags,
+        paymentSources,
+      };
+    });
+  }, [setupData, invoiceData]);
+
+  const flagOptions = useMemo(() => {
+    const allFlags = new Set();
+    enriched.forEach(c => c.flags.forEach(f => allFlags.add(f)));
+    return [...allFlags].sort();
+  }, [enriched]);
+
+  const filtered = useMemo(() => {
+    return enriched.filter(c => {
+      if (search && !c.client.toLowerCase().includes(search.toLowerCase())) return false;
+      if (filterFlag && !c.flags.includes(filterFlag)) return false;
+      if (filterPlatform === 'stripe' && !c.paymentSources.includes('Stripe')) return false;
+      if (filterPlatform === 'whop' && !c.paymentSources.includes('Whop')) return false;
+      if (filterPlatform === 'none' && c.paymentSources.length > 0) return false;
+      if (filterPlatform === 'lo' && !c.contractInfo.loanOfficer) return false;
+      return true;
+    });
+  }, [enriched, search, filterFlag, filterPlatform]);
+
+  const sorted = useMemo(() => {
+    if (!sortConfig.key) return filtered;
+    return [...filtered].sort((a, b) => {
+      let va = a[sortConfig.key], vb = b[sortConfig.key];
+      if (sortConfig.key === 'client') { va = va || ''; vb = vb || ''; return sortConfig.dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va); }
+      if (sortConfig.key === 'flags') { va = a.flags.length; vb = b.flags.length; }
+      va = va ?? 0; vb = vb ?? 0;
+      return sortConfig.dir === 'asc' ? va - vb : vb - va;
+    });
+  }, [filtered, sortConfig]);
+
+  const handleSort = (key) => setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
+
+  // KPI totals
+  const totalRevenueGap = enriched.reduce((s, c) => s + c.revenueGap, 0);
+  const totalCollected = enriched.reduce((s, c) => s + c.totalCollected, 0);
+  const totalUnpaid = enriched.reduce((s, c) => s + c.stripeUnpaidTotal, 0);
+  const clientsWithFlags = enriched.filter(c => c.flags.length > 0).length;
+  const loClients = enriched.filter(c => c.contractInfo.loanOfficer).length;
+  const noPayments = enriched.filter(c => c.mrrVal > 0 && c.totalPayments === 0).length;
+
+  const loading = loadingSheet || loadingInvoices;
+
+  const selectedData = useMemo(() => {
+    if (!selectedClient) return null;
+    return enriched.find(c => c.client === selectedClient);
+  }, [selectedClient, enriched]);
+
+  // CSV export
+  const exportCSV = () => {
+    const headers = ['Client','Status','MRR','Contract Length','Revenue Contracted','Mo Payments Collected','Amount Collected (Sheet)','Stripe Paid Count','Stripe Total Paid','Whop Total Paid','Total Collected (Processors)','Expected Revenue','Revenue Gap','Unpaid Invoices','Next Billing Date','Next Billing Amount','Contract Notes','Payment Notes','Flags','Loan Officer','Platform'];
+    const rows = [headers.join(',')];
+    for (const c of sorted) {
+      rows.push([
+        `"${c.client}"`, `"${c.setup.status}"`, `"${c.setup.mrr}"`, `"${c.setup.contractLength}"`,
+        `"${c.setup.revenueContracted}"`, c.moPaymentsCollected, `"${c.setup.amountCollected}"`,
+        c.stripePaidCount, c.stripeTotalPaid.toFixed(2), c.whopTotalPaid.toFixed(2),
+        c.totalCollected.toFixed(2), c.expectedRevenue.toFixed(2), c.revenueGap.toFixed(2),
+        c.stripeUnpaidCount, c.nextBillingDate || '', c.nextBillingAmount || '',
+        `"${(c.setup.contractNotes || '').replace(/"/g, '""')}"`,
+        `"${(c.setup.paymentNotes || '').replace(/"/g, '""')}"`,
+        `"${c.flags.join('; ')}"`, c.contractInfo.loanOfficer ? 'Yes' : 'No',
+        `"${c.setup.platform}"`
+      ].join(','));
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `billing_errors_${new Date().toISOString().split('T')[0]}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center space-y-3">
+        <div className="text-3xl loading-pulse">Loading Billing Data...</div>
+        <div className="text-sm text-slate-500">
+          {loadingSheet && <div>Fetching client contracts from Google Sheets...</div>}
+          {loadingInvoices && <div>Fetching payment history from Stripe & Whop...</div>}
+        </div>
+      </div>
+    </div>
+  );
+
+  const SortTh = ({ label, sortKey, align = 'right' }) => {
+    const active = sortConfig.key === sortKey;
+    return (
+      <th className={`px-3 py-3 text-xs font-semibold text-slate-400 uppercase cursor-pointer hover:text-white select-none ${align === 'left' ? 'text-left' : 'text-right'}`}
+        onClick={() => handleSort(sortKey)}>
+        {label} {active && <span className="text-cyan-400">{sortConfig.dir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
+      </th>
+    );
+  };
+
+  return (
+    <div className="min-h-screen p-6" style={{maxWidth:1500,margin:'0 auto'}}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Billing Errors & Revenue Recovery</h1>
+          <p className="text-sm text-slate-400 mt-1">Cross-referencing contracts with Stripe & Whop payment history</p>
+        </div>
+        <div className="flex gap-2">
+          <a href="/" className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 transition">Back to Dashboard</a>
+          <button onClick={() => {
+            localStorage.removeItem('vam_billing_invoices');
+            localStorage.removeItem('vam_billing_invoices_cache_time');
+            localStorage.removeItem('vam_setup');
+            localStorage.removeItem('vam_cache_time');
+            window.location.reload();
+          }} className="px-3 py-2 rounded-lg bg-cyan-600 text-white text-sm hover:bg-cyan-700 transition">Refresh All Data</button>
+        </div>
+      </div>
+
+      {/* API errors */}
+      {invoiceData.errors?.length > 0 && (
+        <div className="card p-3 mb-4 border-red-800/50 bg-red-900/10">
+          <div className="text-xs text-red-400 font-medium">API Warnings:</div>
+          {invoiceData.errors.map((e, i) => <div key={i} className="text-xs text-red-300">{e.source}: {e.message}</div>)}
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <KPI label="Revenue Gap" value={fmtCurrency(totalRevenueGap)} color="red" sub="Expected - Collected" />
+        <KPI label="Total Collected" value={fmtCurrency(totalCollected)} color="green" sub="Stripe + Whop" />
+        <KPI label="Unpaid Invoices" value={fmtCurrency(totalUnpaid)} color="amber" sub="Failed/Open" />
+        <KPI label="Clients w/ Flags" value={clientsWithFlags} color="red" sub={`of ${enriched.length}`} />
+        <KPI label="Loan Officer Billing" value={loClients} color="purple" sub="Split/LO payment" />
+        <KPI label="No Payments Found" value={noPayments} color="amber" sub="Has MRR, 0 processor payments" />
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 bg-slate-900/50 p-1 rounded-lg w-fit">
+        {[{id:'errors',label:'Billing Errors'},{id:'all',label:'All Clients'},{id:'upcoming',label:'Upcoming Billing'}].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-md text-sm transition ${tab === t.id ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="card p-4 mb-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..."
+            className="input-field rounded-lg px-3 py-2 text-sm" style={{width:240}} />
+          <select value={filterFlag} onChange={e => setFilterFlag(e.target.value)} className="input-field rounded-lg px-3 py-2 text-sm">
+            <option value="">All Flags</option>
+            {flagOptions.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <select value={filterPlatform} onChange={e => setFilterPlatform(e.target.value)} className="input-field rounded-lg px-3 py-2 text-sm">
+            <option value="">All Platforms</option>
+            <option value="stripe">Stripe Only</option>
+            <option value="whop">Whop Only</option>
+            <option value="none">No Processor Payments</option>
+            <option value="lo">Loan Officer</option>
+          </select>
+          {(search || filterFlag || filterPlatform) && (
+            <button onClick={() => { setSearch(''); setFilterFlag(''); setFilterPlatform(''); }}
+              className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs hover:bg-red-500/20">Clear</button>
+          )}
+          <span className="text-xs text-slate-500">Showing {sorted.length} of {enriched.length}</span>
+          <button onClick={exportCSV} className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs hover:bg-emerald-500/20 ml-auto">Export CSV</button>
+        </div>
+      </div>
+
+      {/* Main Table */}
+      {(tab === 'errors' || tab === 'all') && (
+        <div className="card rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-900/50">
+                <tr>
+                  <SortTh label="Client" sortKey="client" align="left" />
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Contract Notes</th>
+                  <SortTh label="MRR" sortKey="mrrVal" />
+                  <SortTh label="Stripe Paid" sortKey="stripePaidCount" />
+                  <SortTh label="Stripe Total" sortKey="stripeTotalPaid" />
+                  <SortTh label="Whop Paid" sortKey="whopTotalPaid" />
+                  <SortTh label="Total Collected" sortKey="totalCollected" />
+                  <SortTh label="Expected" sortKey="expectedRevenue" />
+                  <SortTh label="Revenue Gap" sortKey="revenueGap" />
+                  <SortTh label="Unpaid" sortKey="stripeUnpaidTotal" />
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Next Billing</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Flags</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {(tab === 'errors' ? sorted.filter(c => c.flags.length > 0) : sorted).map(c => (
+                  <tr key={c.client} className="row-hover cursor-pointer transition" onClick={() => setSelectedClient(c.client)}>
+                    <td className="px-3 py-3">
+                      <div className="font-medium text-white text-sm">{c.client}</div>
+                      <div className="text-xs text-slate-500">{c.setup.status} {c.setup.platform ? `| ${c.setup.platform}` : ''}</div>
+                    </td>
+                    <td className="px-3 py-3" style={{maxWidth:200}}>
+                      {c.setup.contractNotes ? (
+                        <div className="text-xs text-slate-400 truncate" title={c.setup.contractNotes}>{c.setup.contractNotes.substring(0, 60)}{c.setup.contractNotes.length > 60 ? '...' : ''}</div>
+                      ) : <span className="text-slate-600 text-xs">-</span>}
+                      {c.contractInfo.loanOfficer && <div className="text-xs text-purple-400 mt-0.5">LO: {c.contractInfo.loanOfficerName || 'Yes'}</div>}
+                    </td>
+                    <td className="px-3 py-3 text-right text-sm text-white">{c.mrrVal > 0 ? fmtCurrency(c.mrrVal) : '-'}</td>
+                    <td className="px-3 py-3 text-right">
+                      <span className="text-sm text-purple-400">{c.stripePaidCount}</span>
+                      {c.stripeUnpaidCount > 0 && <span className="text-xs text-red-400 ml-1">({c.stripeUnpaidCount} unpaid)</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right text-sm text-emerald-400">{c.stripeTotalPaid > 0 ? fmtCurrency(c.stripeTotalPaid) : '-'}</td>
+                    <td className="px-3 py-3 text-right text-sm text-blue-400">{c.whopTotalPaid > 0 ? fmtCurrency(c.whopTotalPaid) : '-'}</td>
+                    <td className="px-3 py-3 text-right text-sm font-medium text-emerald-400">{c.totalCollected > 0 ? fmtCurrency(c.totalCollected) : '-'}</td>
+                    <td className="px-3 py-3 text-right text-sm text-slate-300">{c.expectedRevenue > 0 ? fmtCurrency(c.expectedRevenue) : '-'}</td>
+                    <td className="px-3 py-3 text-right">
+                      {c.revenueGap > 0 ? (
+                        <span className={`font-bold text-sm ${c.revenueGap > 500 ? 'text-red-400' : c.revenueGap > 100 ? 'text-amber-400' : 'text-slate-400'}`}>{fmtCurrency(c.revenueGap)}</span>
+                      ) : <span className="text-emerald-400 text-xs">OK</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {c.stripeUnpaidTotal > 0 ? <span className="text-red-400 text-sm font-medium">{fmtCurrency(c.stripeUnpaidTotal)}</span> : <span className="text-slate-600 text-xs">-</span>}
+                    </td>
+                    <td className="px-3 py-3 text-sm">
+                      {c.nextBillingDate ? (
+                        <div>
+                          <div className="text-cyan-400">{fmtDate(c.nextBillingDate)}</div>
+                          {c.nextBillingAmount && <div className="text-xs text-slate-500">{fmtCurrency(c.nextBillingAmount)}</div>}
+                        </div>
+                      ) : <span className="text-slate-600 text-xs">-</span>}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {c.flags.map(f => (
+                          <span key={f} className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                            f === 'Revenue Gap' ? 'bg-red-500/20 text-red-400' :
+                            f === 'Unpaid Invoices' ? 'bg-amber-500/20 text-amber-400' :
+                            f === 'Loan Officer' ? 'bg-purple-500/20 text-purple-400' :
+                            f === 'No Payments Found' ? 'bg-red-500/20 text-red-300' :
+                            f === 'Failed Charges' ? 'bg-red-500/20 text-red-400' :
+                            f === 'Platform Mismatch' ? 'bg-orange-500/20 text-orange-400' :
+                            'bg-slate-500/20 text-slate-400'
+                          }`}>{f}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {(tab === 'errors' ? sorted.filter(c => c.flags.length > 0) : sorted).length === 0 && (
+                  <tr><td colSpan={12} className="px-4 py-12 text-center text-slate-500">No clients match current filters</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Upcoming Billing Tab */}
+      {tab === 'upcoming' && (
+        <div className="card rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-900/50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Client</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Next Billing Date</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-400 uppercase">Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Interval</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-400 uppercase">Payments to Date</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-400 uppercase">Total Collected</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Platform</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Contract Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {enriched
+                  .filter(c => c.nextBillingDate)
+                  .sort((a, b) => new Date(a.nextBillingDate) - new Date(b.nextBillingDate))
+                  .map(c => {
+                    const daysUntil = daysBetween(new Date(), new Date(c.nextBillingDate));
+                    return (
+                      <tr key={c.client} className="row-hover cursor-pointer transition" onClick={() => setSelectedClient(c.client)}>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-white text-sm">{c.client}</div>
+                          <div className="text-xs text-slate-500">{c.setup.status}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className={`text-sm font-medium ${daysUntil <= 3 ? 'text-red-400' : daysUntil <= 7 ? 'text-amber-400' : 'text-cyan-400'}`}>
+                            {fmtDate(c.nextBillingDate)}
+                          </div>
+                          <div className="text-xs text-slate-500">{daysUntil != null ? (daysUntil <= 0 ? 'Overdue!' : `in ${daysUntil} days`) : ''}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-white font-medium">{c.nextBillingAmount ? fmtCurrency(c.nextBillingAmount) : '-'}</td>
+                        <td className="px-4 py-3 text-sm text-slate-400">{c.upcoming?.interval || '-'}</td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-300">{c.totalPayments}</td>
+                        <td className="px-4 py-3 text-right text-sm text-emerald-400">{fmtCurrency(c.totalCollected)}</td>
+                        <td className="px-4 py-3">
+                          {c.paymentSources.map(p => (
+                            <span key={p} className={`px-2 py-0.5 rounded-full text-xs font-medium mr-1 ${p === 'Stripe' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>{p}</span>
+                          ))}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-400" style={{maxWidth:200}}>
+                          <div className="truncate" title={c.setup.contractNotes}>{c.setup.contractNotes || '-'}</div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Detail Drawer */}
+      {selectedClient && selectedData && (
+        <PaymentDrawer client={selectedClient} data={selectedData} onClose={() => setSelectedClient(null)} />
+      )}
+
+      {/* AI Chat */}
+      <BillingAIChat enrichedData={enriched} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,12 +1,13 @@
 {
   "framework": null,
-  "buildCommand": "mkdir -p dist/client-portal dist/george && cp index.html dashboard.html dist/ && cp client-portal/index.html dist/client-portal/index.html && cp george/index.html dist/george/index.html",
+  "buildCommand": "mkdir -p dist/client-portal dist/george dist/billing-errors && cp index.html dashboard.html dist/ && cp client-portal/index.html dist/client-portal/index.html && cp george/index.html dist/george/index.html && cp billing-errors/index.html dist/billing-errors/index.html",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
     { "source": "/portal", "destination": "/client-portal/index.html" },
     { "source": "/portal/:path*", "destination": "/client-portal/index.html" },
-    { "source": "/george", "destination": "/george/index.html" }
+    { "source": "/george", "destination": "/george/index.html" },
+    { "source": "/billing-errors", "destination": "/billing-errors/index.html" }
   ],
   "headers": [
     {
