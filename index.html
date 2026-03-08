@@ -144,7 +144,8 @@
         const URLS = {
             clientAdsPerformance: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=964722332&single=true&output=csv',
             setupTiming: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv',
-            closerForm: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=986050898&single=true&output=csv'
+            closerForm: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=986050898&single=true&output=csv',
+            fanbasis: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=102644999&single=true&output=csv'
         };
 
         const pn = v => parseFloat(String(v||'0').replace(/[$,%]/g,'').replace(/,/g,''))||0;
@@ -4412,6 +4413,7 @@ ${transcript}`;
             const [linkWhopSearch, setLinkWhopSearch] = useState('');
             const [whopCsv, setWhopCsv] = useState([]);
             const [closingData, setClosingData] = useState([]);
+            const [fanbasisData, setFanbasisData] = useState([]);
             const [pendingApprovals, setPendingApprovals] = useState([]);
             const [dismissedApprovals, setDismissedApprovals] = useState(() => {
                 try { return JSON.parse(localStorage.getItem('vam_whop_dismissed') || '[]'); } catch(e) { return []; }
@@ -4526,6 +4528,14 @@ ${transcript}`;
                     console.log('[CloserForm] Loaded', rows.length, 'clients from Google Sheet');
                     setClosingData(rows);
                 }).catch(err => console.error('[CloserForm] Failed to load:', err));
+
+                // Load Fanbasis payments from Google Sheet
+                fetch(URLS.fanbasis).then(r => r.text()).then(text => {
+                    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+                    const rows = (parsed.data || []).filter(r => r['Customer Name'] && r['Amount']);
+                    console.log('[Fanbasis] Loaded', rows.length, 'payments from Google Sheet');
+                    setFanbasisData(rows);
+                }).catch(err => console.error('[Fanbasis] Failed to load:', err));
             }, []);
 
             // Build closing data lookup: client name → closing info (emails, notes, etc.)
@@ -4885,6 +4895,41 @@ ${transcript}`;
                     }
                     const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, autoWhopId, extraEmails, whopCsvByMemId, whopCsv);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
+                    // Match Fanbasis payments by name/email
+                    const matchFn = (n, e) => {
+                        if (nameMatcher(n, e)) return true;
+                        if (e && e.length >= 3) {
+                            for (const ex of extraEmails) {
+                                const exl = ex.toLowerCase();
+                                if (e === exl || e.includes(exl) || exl.includes(e)) return true;
+                            }
+                        }
+                        return false;
+                    };
+                    const fbPayments = fanbasisData.filter(fb => {
+                        const n = (fb['Customer Name'] || '').toLowerCase().trim();
+                        const e = (fb['Customer Email'] || '').toLowerCase().trim();
+                        return matchFn(n, e);
+                    }).map(fb => {
+                        const amt = parseFloat((fb['Amount'] || '0').replace(/[$,]/g, '')) || 0;
+                        const status = (fb['Status'] || '').toLowerCase();
+                        return {
+                            id: fb['Sale ID'] || ('fb_' + fb['Date']),
+                            source: 'fanbasis',
+                            customerName: fb['Customer Name'] || '',
+                            customerEmail: fb['Customer Email'] || '',
+                            amount: amt,
+                            paid: status === 'succeeded' || status === 'completed',
+                            status: fb['Status'] || '',
+                            created: fb['Date'] ? fb['Date'].split(' ')[0] : null,
+                            product: fb['Product'] || '',
+                            paymentMethod: fb['Payment Method'] || '',
+                            netAmount: parseFloat((fb['Net Amount (Earnings)'] || '0').replace(/[$,]/g, '')) || 0,
+                        };
+                    });
+                    const fbPaid = fbPayments.filter(p => p.paid);
+                    const fbTotalPaid = fbPaid.reduce((sum, p) => sum + p.amount, 0);
+
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
                         return nameMatcher(n, e);
@@ -4896,7 +4941,7 @@ ${transcript}`;
                     const stripeUnpaidCount = stripeInvoices.filter(i => !i.paid && i.status !== 'void' && i.status !== 'draft').length;
                     const stripeUnpaidTotal = stripeInvoices.filter(i => !i.paid && i.status !== 'void' && i.status !== 'draft').reduce((sum, i) => sum + (i.amountRemaining || 0), 0);
                     const whopTotalPaid = whopPayments.reduce((sum, p) => sum + (p.amountPaid || 0), 0);
-                    const totalCollected = stripeTotalPaid + whopTotalPaid;
+                    const totalCollected = stripeTotalPaid + whopTotalPaid + fbTotalPaid;
                     const mrrVal = parseFloat((s.mrr || '').replace(/[$,]/g, '')) || 0;
                     const revenueContracted = parseFloat((s.revenueContracted || '').replace(/[$,]/g, '')) || 0;
                     const moPaymentsCollected = parseInt(s.moPaymentsCollected) || 0;
@@ -4923,9 +4968,10 @@ ${transcript}`;
                         paymentProcessorEmail: (closingRow['Payment processor username or email'] || '').trim(),
                         closeDate: closingRow['Date of The Close (payment)'] || '',
                     } : null;
-                    return { client: s.client, setup: s, contractInfo, closingNotes, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
+                    if (fbPayments.length > 0) paymentSources.push('Fanbasis');
+                    return { client: s.client, setup: s, contractInfo, closingNotes, stripeInvoices, whopPayments, fbPayments, fbTotalPaid, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length + fbPaid.length, flags, paymentSources };
                 });
-            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup, whopEmailToMembership, whopCsv, whopCsvByMemId]);
+            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup, whopEmailToMembership, whopCsv, whopCsvByMemId, fanbasisData]);
 
             const flagOptions = useMemo(() => { const s = new Set(); enriched.forEach(c => c.flags.forEach(f => s.add(f))); return [...s].sort(); }, [enriched]);
 
@@ -4934,6 +4980,7 @@ ${transcript}`;
                 if (filterFlag && !c.flags.includes(filterFlag)) return false;
                 if (filterPlatform === 'stripe' && !c.paymentSources.includes('Stripe')) return false;
                 if (filterPlatform === 'whop' && !c.paymentSources.includes('Whop')) return false;
+                if (filterPlatform === 'fanbasis' && !c.paymentSources.includes('Fanbasis')) return false;
                 if (filterPlatform === 'none' && c.paymentSources.length > 0) return false;
                 if (filterPlatform === 'lo' && !c.contractInfo.loanOfficer) return false;
                 return true;
@@ -5202,6 +5249,7 @@ ${transcript}`;
                                 <option value="">All Platforms</option>
                                 <option value="stripe">Stripe Only</option>
                                 <option value="whop">Whop Only</option>
+                                <option value="fanbasis">Fanbasis Only</option>
                                 <option value="none">No Processor Payments</option>
                                 <option value="lo">Loan Officer</option>
                             </select>
@@ -5346,6 +5394,18 @@ ${transcript}`;
                                             ))}</div>
                                         )}
                                     </div>
+                                    {selectedData.fbPayments && selectedData.fbPayments.length > 0 && (
+                                        <div><h3 className="text-sm font-semibold text-orange-400 mb-2">Fanbasis Payments ({selectedData.fbPayments.length})</h3>
+                                            <div className="space-y-1">{selectedData.fbPayments.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0)).map(fb => (
+                                                <div key={fb.id} className="card rounded-lg p-3 flex items-center justify-between">
+                                                    <div><div className="text-sm text-white">{fmtC(fb.amount)}</div><div className="text-xs text-slate-500">{fb.created ? formatDateStr(new Date(fb.created)) : '—'} {fb.product ? `- ${fb.product}` : ''}{fb.paymentMethod ? ` (${fb.paymentMethod})` : ''}</div></div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${fb.paid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{fb.status}</span>
+                                                    </div>
+                                                </div>
+                                            ))}</div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
