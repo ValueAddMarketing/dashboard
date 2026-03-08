@@ -4387,26 +4387,35 @@ ${transcript}`;
                 return { raw: notes, loanOfficer, loanOfficerName: loMatch ? loMatch[1].trim() : null, splitBilling, platforms };
             };
 
-            const makeNameMatcher = (clientName, nameEmail) => {
+            const makeNameMatcher = (clientName, nameEmail, platform) => {
                 const cn = (clientName || '').toLowerCase().trim();
                 const ne = (nameEmail || '').toLowerCase().trim();
+                // Extract email from platform field (e.g. "Whop : user@email.com")
+                const platEmail = ((platform || '').match(/[\w.+-]+@[\w.-]+\.\w+/i) || [])[0]?.toLowerCase() || '';
+                const emails = [ne, platEmail].filter(Boolean);
                 const parts = cn.split(/\s+/).filter(p => p.length >= 2);
                 return (n, e) => {
                     if (!cn) return false;
                     if (!n && !e) return false;
                     if (n && n === cn) return true;
-                    if (ne && e && e === ne) return true;
+                    // Check all known emails against the candidate email
+                    if (e && e.length >= 3) {
+                        for (const em of emails) {
+                            if (em.length >= 3 && (e === em || e.includes(em) || em.includes(e))) return true;
+                        }
+                    }
                     if (n && n.length >= 3 && cn.length >= 3 && (n.includes(cn) || cn.includes(n))) return true;
-                    if (ne && ne.length >= 3 && e && e.length >= 3 && (e.includes(ne) || ne.includes(e))) return true;
+                    // Check if candidate email contains client name parts
+                    if (e && e.length >= 3 && parts.length >= 2 && parts.every(p => e.includes(p))) return true;
                     if (parts.length >= 2 && n && n.length >= 3 && parts.every(p => n.includes(p))) return true;
                     return false;
                 };
             };
 
-            const matchPayments = (clientName, nameEmail, invoices, whopMemberships) => {
+            const matchPayments = (clientName, nameEmail, platform, invoices, whopMemberships) => {
                 const cn = (clientName || '').toLowerCase().trim();
                 if (!cn) return { stripeInvoices: [], whopPayments: [] };
-                const matchName = makeNameMatcher(clientName, nameEmail);
+                const matchName = makeNameMatcher(clientName, nameEmail, platform);
                 const sMatch = invoices.filter(inv => {
                     const n = (inv.customerName || '').toLowerCase(), e = (inv.customerEmail || '').toLowerCase();
                     return matchName(n, e);
@@ -4445,8 +4454,8 @@ ${transcript}`;
                 if (!setupData.length) return [];
                 return setupData.filter(s => s.client).map(s => {
                     const contractInfo = parseContractNotes(s.contractNotes);
-                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, invoiceData.stripe, whopSubs);
-                    const nameMatcher = makeNameMatcher(s.client, s.nameEmail);
+                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs);
+                    const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
                         return nameMatcher(n, e);
