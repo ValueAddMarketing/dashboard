@@ -171,13 +171,13 @@ export default async function handler(req, res) {
                     else { prodPage++; }
                 }
 
-                // Now fetch all memberships (page-based pagination for v5)
-                const allMemberships = [];
+                // Fetch all memberships (page-based pagination for v5)
+                const rawMemberships = [];
                 let page = 1;
                 let hasMore = true;
 
                 while (hasMore) {
-                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}&expand=user`, {
+                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
 
@@ -191,27 +191,46 @@ export default async function handler(req, res) {
                     const memberships = data.data || [];
                     if (memberships.length === 0) { hasMore = false; break; }
 
-                    // Log first page raw sample to debug user data
-                    if (page === 1 && memberships.length > 0) {
-                        const sample = memberships[0];
-                        results._whopDebug = { hasUser: !!sample.user, userKeys: sample.user ? Object.keys(sample.user) : [], sampleUser: sample.user || null, sampleEmail: sample.email || null, sampleDiscord: sample.discord || null, topLevelKeys: Object.keys(sample).filter(k => ['user','email','discord','user_id','customer'].includes(k)) };
-                    }
-
-                    for (const m of memberships) {
-                        // Inject plan pricing from payments data
-                        if (m.plan_id && planPrices[m.plan_id] != null) {
-                            m._plan_price = planPrices[m.plan_id];
-                        }
-                        // Inject product name
-                        if (m.product_id && productNames[m.product_id]) {
-                            m._plan_name = productNames[m.product_id];
-                        }
-                        allMemberships.push(mapWhopMembership(m));
-                    }
+                    for (const m of memberships) rawMemberships.push(m);
 
                     const totalPages = data.pagination?.total_pages || 1;
                     if (page >= totalPages) { hasMore = false; }
                     else { page++; }
+                }
+
+                // Collect unique user_ids and fetch user details
+                const userIds = [...new Set(rawMemberships.map(m => m.user_id).filter(Boolean))];
+                const userMap = {};
+
+                // Fetch users in parallel batches of 10
+                for (let i = 0; i < userIds.length; i += 10) {
+                    const batch = userIds.slice(i, i + 10);
+                    const userResults = await Promise.all(batch.map(uid =>
+                        fetch(`https://api.whop.com/api/v5/company/users/${uid}`, {
+                            headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                        }).then(r => r.ok ? r.json() : null).catch(() => null)
+                    ));
+                    for (const u of userResults) {
+                        if (u && u.id) userMap[u.id] = u;
+                    }
+                }
+
+                results._whopDebug = {
+                    totalMemberships: rawMemberships.length,
+                    uniqueUsers: userIds.length,
+                    usersResolved: Object.keys(userMap).length,
+                    sampleUser: Object.values(userMap)[0] ? { username: Object.values(userMap)[0].username, email: Object.values(userMap)[0].email } : null,
+                };
+
+                // Map memberships with user data injected
+                const allMemberships = [];
+                for (const m of rawMemberships) {
+                    if (m.user_id && userMap[m.user_id]) {
+                        m.user = userMap[m.user_id];
+                    }
+                    if (m.plan_id && planPrices[m.plan_id] != null) m._plan_price = planPrices[m.plan_id];
+                    if (m.product_id && productNames[m.product_id]) m._plan_name = productNames[m.product_id];
+                    allMemberships.push(mapWhopMembership(m));
                 }
 
                 results.whop = allMemberships;
