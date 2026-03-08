@@ -4367,6 +4367,7 @@ ${transcript}`;
                                 const whop = (d.whop || []).filter(s => s.source === 'whop');
                                 setWhopSubs(whop);
                                 console.log('[BillingErrors] Whop subs fetched:', whop.length, 'Sample:', whop.slice(0, 5).map(s => s.customerName + ' | ' + s.customerEmail));
+                                if (d._whopDebug) console.log('[BillingErrors] Whop API raw debug:', d._whopDebug);
                                 // Debug: find mauro specifically
                                 const mauro = whop.filter(s => (s.customerName || '').toLowerCase().includes('mauro') || (s.customerEmail || '').toLowerCase().includes('mauro'));
                                 if (mauro.length) console.log('[BillingErrors] Mauro Whop matches:', JSON.stringify(mauro));

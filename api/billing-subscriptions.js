@@ -177,7 +177,7 @@ export default async function handler(req, res) {
                 let hasMore = true;
 
                 while (hasMore) {
-                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}`, {
+                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}&expand=user`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
 
@@ -190,6 +190,12 @@ export default async function handler(req, res) {
                     const data = await resp.json();
                     const memberships = data.data || [];
                     if (memberships.length === 0) { hasMore = false; break; }
+
+                    // Log first page raw sample to debug user data
+                    if (page === 1 && memberships.length > 0) {
+                        const sample = memberships[0];
+                        results._whopDebug = { hasUser: !!sample.user, userKeys: sample.user ? Object.keys(sample.user) : [], sampleUser: sample.user || null, sampleEmail: sample.email || null, sampleDiscord: sample.discord || null, topLevelKeys: Object.keys(sample).filter(k => ['user','email','discord','user_id','customer'].includes(k)) };
+                    }
 
                     for (const m of memberships) {
                         // Inject plan pricing from payments data
