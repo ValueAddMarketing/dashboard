@@ -32,6 +32,10 @@ export default async function handler(req, res) {
             else if (days >= 25) interval = 'month';
             else if (days >= 6) interval = 'week';
         }
+        const payments = m._payments || [];
+        const paidPayments = payments.filter(p => p.status === 'paid' || p.status === 'succeeded');
+        const totalPaid = paidPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const perPeriod = m._plan_price != null ? m._plan_price : (paidPayments.length > 0 ? paidPayments[0].amount : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)));
         return {
             id: m.id,
             source: 'whop',
@@ -44,7 +48,10 @@ export default async function handler(req, res) {
             canceledAt: formatWhopDate(m.canceled_at || m.cancelled_at),
             endedAt: formatWhopDate(m.ended_at || m.expired_at),
             cancelAt: formatWhopDate(m.cancel_at),
-            amount: m._plan_price != null ? m._plan_price : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)),
+            amount: perPeriod,
+            totalPaid,
+            paymentCount: paidPayments.length,
+            payments,
             currency: m.currency || 'usd',
             interval,
             productName: m._plan_name || m.plan?.plan_name || m.product?.name || m.product_name || '',
@@ -123,14 +130,12 @@ export default async function handler(req, res) {
         // --- Whop ---
         if (WHOP_API_KEY) {
             try {
-                // Fetch payments to build plan_id → price lookup (plans endpoint not available in v5)
+                // Fetch ALL payments and group by membership_id
+                const allPayments = [];
                 const planPrices = {};
-                const planNames = {};
-                const planIntervals = {};
                 let payPage = 1;
                 let payHasMore = true;
-                // Fetch up to 5 pages (250 payments) to cover all plan_ids
-                while (payHasMore && payPage <= 5) {
+                while (payHasMore) {
                     const payResp = await fetch(`https://api.whop.com/api/v5/company/payments?per=50&page=${payPage}`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
@@ -138,19 +143,28 @@ export default async function handler(req, res) {
                     const payData = await payResp.json();
                     const payments = payData.data || [];
                     for (const p of payments) {
-                        // Only use subscription payments with a subtotal > 0
-                        // Whop v5 subtotal is already in dollars (not cents)
+                        allPayments.push(p);
                         if (p.plan_id && p.subtotal > 0 && !planPrices[p.plan_id]) {
                             planPrices[p.plan_id] = p.subtotal;
-                        }
-                        // Also capture user info for name resolution
-                        if (p.plan_id && p.product_id && !planNames[p.plan_id]) {
-                            planNames[p.plan_id] = ''; // will be filled from products if needed
                         }
                     }
                     const totalPages = payData.pagination?.total_pages || 1;
                     if (payPage >= totalPages || payments.length < 50) { payHasMore = false; }
                     else { payPage++; }
+                }
+
+                // Group payments by membership_id
+                const paymentsByMembership = {};
+                for (const p of allPayments) {
+                    const mid = p.membership_id;
+                    if (!mid) continue;
+                    if (!paymentsByMembership[mid]) paymentsByMembership[mid] = [];
+                    paymentsByMembership[mid].push({
+                        id: p.id,
+                        amount: p.final_amount || p.subtotal || 0,
+                        status: p.status,
+                        created: p.created_at ? String(p.created_at).split('T')[0] : null,
+                    });
                 }
 
                 // Fetch products for names
@@ -215,14 +229,13 @@ export default async function handler(req, res) {
                     }
                 }
 
-                // Map memberships with user data injected
+                // Map memberships with user data + payments injected
                 const allMemberships = [];
                 for (const m of rawMemberships) {
-                    if (m.user_id && userMap[m.user_id]) {
-                        m.user = userMap[m.user_id];
-                    }
+                    if (m.user_id && userMap[m.user_id]) m.user = userMap[m.user_id];
                     if (m.plan_id && planPrices[m.plan_id] != null) m._plan_price = planPrices[m.plan_id];
                     if (m.product_id && productNames[m.product_id]) m._plan_name = productNames[m.product_id];
+                    m._payments = paymentsByMembership[m.id] || [];
                     allMemberships.push(mapWhopMembership(m));
                 }
 
