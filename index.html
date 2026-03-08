@@ -4446,10 +4446,12 @@ ${transcript}`;
                     const contractInfo = parseContractNotes(s.contractNotes);
                     const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, invoiceData.stripe, whopSubs);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail);
-                    const upcoming = (invoiceData.stripeUpcoming || []).find(u => {
+                    const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
                         return nameMatcher(n, e);
                     });
+                    const upcoming = allUpcoming.find(u => (u.amount || 0) > 20) || allUpcoming[0] || null;
+                    const crmFees = allUpcoming.filter(u => (u.amount || 0) <= 20);
                     const stripePaidCount = stripeInvoices.filter(i => i.paid).length;
                     const stripeTotalPaid = stripeInvoices.filter(i => i.paid).reduce((sum, i) => sum + (i.amountPaid || 0), 0);
                     const stripeUnpaidCount = stripeInvoices.filter(i => !i.paid && i.status !== 'void' && i.status !== 'draft').length;
@@ -4473,7 +4475,7 @@ ${transcript}`;
                     if (stripeInvoices.length > 0) paymentSources.push('Stripe');
                     if (whopPayments.length > 0) paymentSources.push('Whop');
                     if (contractInfo.platforms.length > 0 && paymentSources.length > 0 && !contractInfo.platforms.some(p => paymentSources.includes(p))) flags.push('Platform Mismatch');
-                    return { client: s.client, setup: s, contractInfo, stripeInvoices, whopPayments, upcoming, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
+                    return { client: s.client, setup: s, contractInfo, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
                 });
             }, [setupData, invoiceData, whopSubs]);
 
@@ -4690,6 +4692,7 @@ ${transcript}`;
                                         <div className="card rounded-xl p-3 text-center"><div className="text-lg font-bold text-white">{selectedData.totalPayments}</div><div className="text-xs text-slate-500">Total Payments</div></div>
                                     </div>
                                     {selectedData.upcoming && <div className="card rounded-xl p-4 border-brand-cyan/30"><h3 className="text-sm font-semibold text-brand-cyan mb-1">Next Billing</h3><div className="text-sm text-white">{formatDateStr(new Date(selectedData.upcoming.nextBillingDate))} - {fmtC(selectedData.upcoming.amount)}/{selectedData.upcoming.interval || 'mo'}</div></div>}
+                                    {selectedData.crmFees?.length > 0 && <div className="card rounded-xl p-4 border-slate-600/30">{selectedData.crmFees.map((f, i) => <div key={i} className="flex justify-between text-xs"><span className="text-slate-400">CRM Fee</span><span className="text-slate-300">{fmtC(f.amount)}/{f.interval || 'mo'} — next: {f.nextBillingDate ? formatDateStr(new Date(f.nextBillingDate)) : '—'}</span></div>)}</div>}
                                     <div><h3 className="text-sm font-semibold text-purple-400 mb-2">Stripe Invoices ({selectedData.stripeInvoices.length})</h3>
                                         {selectedData.stripeInvoices.length === 0 ? <div className="text-xs text-slate-500 p-3 card rounded-xl">No Stripe invoices found</div> : (
                                             <div className="space-y-1">{selectedData.stripeInvoices.sort((a, b) => new Date(b.created) - new Date(a.created)).map(inv => (
