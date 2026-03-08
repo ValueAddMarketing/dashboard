@@ -4368,26 +4368,33 @@ ${transcript}`;
                 return { raw: notes, loanOfficer, loanOfficerName: loMatch ? loMatch[1].trim() : null, splitBilling, platforms };
             };
 
-            const matchPayments = (clientName, nameEmail, invoices, whopPay) => {
+            const makeNameMatcher = (clientName, nameEmail) => {
                 const cn = (clientName || '').toLowerCase().trim();
                 const ne = (nameEmail || '').toLowerCase().trim();
+                const parts = cn.split(/\s+/).filter(p => p.length >= 2);
+                return (n, e) => {
+                    if (!cn) return false;
+                    if (!n && !e) return false;
+                    if (n && n === cn) return true;
+                    if (ne && e && e === ne) return true;
+                    if (n && n.length >= 3 && cn.length >= 3 && (n.includes(cn) || cn.includes(n))) return true;
+                    if (ne && ne.length >= 3 && e && e.length >= 3 && (e.includes(ne) || ne.includes(e))) return true;
+                    if (parts.length >= 2 && n && n.length >= 3 && parts.every(p => n.includes(p))) return true;
+                    return false;
+                };
+            };
+
+            const matchPayments = (clientName, nameEmail, invoices, whopPay) => {
+                const cn = (clientName || '').toLowerCase().trim();
                 if (!cn) return { stripeInvoices: [], whopPayments: [] };
-                const parts = cn.split(/\s+/);
+                const matchName = makeNameMatcher(clientName, nameEmail);
                 const sMatch = invoices.filter(inv => {
                     const n = (inv.customerName || '').toLowerCase(), e = (inv.customerEmail || '').toLowerCase();
-                    if (n === cn || e === ne) return true;
-                    if (cn && (n.includes(cn) || cn.includes(n))) return true;
-                    if (ne && e && (e.includes(ne) || ne.includes(e))) return true;
-                    if (parts.length >= 2 && parts.every(p => n.includes(p))) return true;
-                    return false;
+                    return matchName(n, e);
                 });
                 const wMatch = whopPay.filter(p => {
                     const n = (p.customerName || '').toLowerCase(), e = (p.customerEmail || '').toLowerCase();
-                    if (n === cn || e === ne) return true;
-                    if (cn && (n.includes(cn) || cn.includes(n))) return true;
-                    if (ne && e && (e.includes(ne) || ne.includes(e))) return true;
-                    if (parts.length >= 2 && parts.every(pt => n.includes(pt))) return true;
-                    return false;
+                    return matchName(n, e);
                 });
                 return { stripeInvoices: sMatch, whopPayments: wMatch };
             };
@@ -4397,14 +4404,10 @@ ${transcript}`;
                 return setupData.filter(s => s.client).map(s => {
                     const contractInfo = parseContractNotes(s.contractNotes);
                     const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, invoiceData.stripe, invoiceData.whop);
+                    const nameMatcher = makeNameMatcher(s.client, s.nameEmail);
                     const upcoming = (invoiceData.stripeUpcoming || []).find(u => {
-                        const cn = s.client.toLowerCase().trim(), ne = (s.nameEmail || '').toLowerCase().trim();
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
-                        if (n === cn || e === ne) return true;
-                        if (cn && (n.includes(cn) || cn.includes(n))) return true;
-                        const parts = cn.split(/\s+/);
-                        if (parts.length >= 2 && parts.every(p => n.includes(p))) return true;
-                        return false;
+                        return nameMatcher(n, e);
                     });
                     const stripePaidCount = stripeInvoices.filter(i => i.paid).length;
                     const stripeTotalPaid = stripeInvoices.filter(i => i.paid).reduce((sum, i) => sum + (i.amountPaid || 0), 0);

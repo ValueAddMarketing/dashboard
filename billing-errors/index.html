@@ -147,26 +147,28 @@ function matchPayments(clientName, nameEmail, invoices, whopPayments) {
   const ne = (nameEmail || '').toLowerCase().trim();
   if (!cn) return { stripeInvoices: [], whopPayments: [] };
 
-  const parts = cn.split(/\s+/);
+  const parts = cn.split(/\s+/).filter(p => p.length >= 2);
+
+  const matchName = (name, email) => {
+    if (!name && !email) return false;
+    if (name && name === cn) return true;
+    if (ne && email && email === ne) return true;
+    if (name && name.length >= 3 && cn.length >= 3 && (name.includes(cn) || cn.includes(name))) return true;
+    if (ne && ne.length >= 3 && email && email.length >= 3 && (email.includes(ne) || ne.includes(email))) return true;
+    if (parts.length >= 2 && name && name.length >= 3 && parts.every(p => name.includes(p))) return true;
+    return false;
+  };
 
   const matchStripe = invoices.filter(inv => {
     const name = (inv.customerName || '').toLowerCase();
     const email = (inv.customerEmail || '').toLowerCase();
-    if (name === cn || email === ne) return true;
-    if (cn && (name.includes(cn) || cn.includes(name))) return true;
-    if (ne && email && (email.includes(ne) || ne.includes(email))) return true;
-    if (parts.length >= 2 && parts.every(p => name.includes(p))) return true;
-    return false;
+    return matchName(name, email);
   });
 
   const matchWhop = whopPayments.filter(p => {
     const name = (p.customerName || '').toLowerCase();
     const email = (p.customerEmail || '').toLowerCase();
-    if (name === cn || email === ne) return true;
-    if (cn && (name.includes(cn) || cn.includes(name))) return true;
-    if (ne && email && (email.includes(ne) || ne.includes(email))) return true;
-    if (parts.length >= 2 && parts.every(pt => name.includes(pt))) return true;
-    return false;
+    return matchName(name, email);
   });
 
   return { stripeInvoices: matchStripe, whopPayments: matchWhop };
