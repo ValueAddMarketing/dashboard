@@ -86,9 +86,13 @@ export default async function handler(req, res) {
             // Fetch one-time charges (Klarna, payment links, etc.) that aren't tied to invoices
             fetchAllStripePages('charges', (ch) => {
                 const c = getCustomerInfo(ch.customer);
+                // For Klarna/guest payments, customer may be null — use billing_details instead
+                const bd = ch.billing_details || {};
+                const name = c.name || bd.name || '';
+                const email = c.email || bd.email || '';
                 return {
                     id: ch.id, source: 'stripe', customerId: c.id,
-                    customerName: c.name || '', customerEmail: c.email || '',
+                    customerName: name, customerEmail: email,
                     subscriptionId: null, status: ch.status === 'succeeded' ? 'paid' : ch.status,
                     paid: ch.status === 'succeeded', isCharge: true,
                     amountDue: ch.amount ? ch.amount / 100 : 0,
