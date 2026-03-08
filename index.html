@@ -4428,21 +4428,14 @@ ${transcript}`;
                 if (changed) setWhopSubs(enriched);
             }, [whopCsv, whopSubs.length]);
 
-            // Load Whop CSV and auto-match to clients
+            // Load Whop CSV with PapaParse
             useEffect(() => {
                 fetch('/whop-members.csv').then(r => r.text()).then(text => {
-                    const rows = [];
-                    const lines = text.split('\n');
-                    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-                    for (let i = 1; i < lines.length; i++) {
-                        if (!lines[i].trim()) continue;
-                        const vals = lines[i].match(/(".*?"|[^,]*)/g) || [];
-                        const row = {};
-                        headers.forEach((h, j) => { row[h] = (vals[j] || '').replace(/^"|"$/g, '').trim(); });
-                        if (row['Membership IDs']) rows.push(row);
-                    }
+                    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+                    const rows = (parsed.data || []).filter(r => r['Membership IDs']);
+                    console.log('[WhopCSV] Loaded', rows.length, 'rows. Sample:', rows.slice(0, 2).map(r => r['Name'] + ' | ' + r['Email'] + ' | ' + r['Membership IDs']));
                     setWhopCsv(rows);
-                }).catch(() => {});
+                }).catch(err => console.error('[WhopCSV] Failed to load:', err));
             }, []);
 
             // Run auto-matching when CSV + setupData are ready
@@ -4450,84 +4443,97 @@ ${transcript}`;
                 if (!whopCsv.length || !setupData.length) return;
                 const existingMapped = new Set(Object.keys(whopMappings));
                 const usedMembershipIds = new Set(Object.values(whopMappings));
-                const autoMapped = [];
-                const needsApproval = [];
+                const suggestions = [];
+
+                const parseDateFlex = (d) => {
+                    if (!d) return null;
+                    // Try MM/DD/YYYY or M/D/YY
+                    const parts = d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+                    if (parts) {
+                        const yr = parts[3].length === 2 ? '20' + parts[3] : parts[3];
+                        return new Date(parseInt(yr), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                    }
+                    // Try ISO / general date string
+                    const t = Date.parse(d);
+                    return isNaN(t) ? null : new Date(t);
+                };
 
                 for (const s of setupData) {
                     if (!s.client || existingMapped.has(s.client)) continue;
-                    // Check if already auto-matched by name/email via API
+
+                    // Skip if already matched via API (whopSubs has names from CSV enrichment)
                     const matcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const apiMatch = whopSubs.find(m => {
                         const n = (m.customerName || '').toLowerCase(), e = (m.customerEmail || '').toLowerCase();
                         return matcher(n, e);
                     });
-                    if (apiMatch) continue; // Already matched via API
+                    if (apiMatch) continue;
 
                     // Try CSV name/email match
-                    const csvMatch = whopCsv.find(row => {
-                        const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim());
-                        if (memIds.some(id => usedMembershipIds.has(id))) return false;
+                    let matched = false;
+                    for (const row of whopCsv) {
+                        const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                        if (memIds.some(id => usedMembershipIds.has(id))) continue;
                         const csvName = (row['Name'] || '').toLowerCase().trim();
                         const csvEmail = (row['Email'] || '').toLowerCase().trim();
                         const csvUser = (row['Username'] || '').toLowerCase().trim();
-                        return matcher(csvName, csvEmail) || matcher(csvUser, csvEmail);
-                    });
-
-                    if (csvMatch) {
-                        const memId = (csvMatch['Membership IDs'] || '').split(',')[0].trim();
-                        if (memId) { autoMapped.push({ client: s.client, membershipId: memId }); usedMembershipIds.add(memId); }
-                        continue;
-                    }
-
-                    // Date-based fallback: match Joined date to Paid date
-                    const paidDate = s.paidDate ? s.paidDate.trim() : '';
-                    if (!paidDate) continue;
-                    const parsePaidDate = (d) => {
-                        if (!d) return null;
-                        const parts = d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-                        if (parts) {
-                            const yr = parts[3].length === 2 ? '20' + parts[3] : parts[3];
-                            return new Date(yr, parts[0] > 12 ? parts[1] - 1 : parts[0] - 1, parts[0] > 12 ? parts[0] : parts[1]);
-                        }
-                        const t = Date.parse(d);
-                        return isNaN(t) ? null : new Date(t);
-                    };
-                    const clientDate = parsePaidDate(paidDate);
-                    if (!clientDate) continue;
-
-                    for (const row of whopCsv) {
-                        const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim());
-                        if (memIds.some(id => usedMembershipIds.has(id))) continue;
-                        const joinedStr = row['Joined date'] || '';
-                        if (!joinedStr) continue;
-                        const joinedDate = new Date(joinedStr);
-                        if (isNaN(joinedDate)) continue;
-                        const diffDays = Math.abs((clientDate - joinedDate) / 86400000);
-                        if (diffDays <= 7) {
+                        if (matcher(csvName, csvEmail) || matcher(csvUser, csvEmail)) {
                             const memId = memIds[0];
                             if (memId) {
-                                needsApproval.push({
-                                    client: s.client,
-                                    paidDate: paidDate,
+                                suggestions.push({
+                                    client: s.client, membershipId: memId,
+                                    matchType: 'name',
                                     whopName: row['Name'] || row['Username'] || '(no name)',
                                     whopEmail: row['Email'] || '',
-                                    whopJoined: joinedStr,
+                                    whopJoined: row['Joined date'] || '',
                                     whopSpend: row['Platform spend (USD)'] || '0',
-                                    membershipId: memId,
-                                    diffDays: Math.round(diffDays),
+                                    paidDate: s.paidDate || '',
+                                    diffDays: null,
                                     key: s.client + '|' + memId,
                                 });
-                                break; // Take closest match per client
+                                usedMembershipIds.add(memId);
+                                matched = true;
+                                break;
                             }
                         }
                     }
+                    if (matched) continue;
+
+                    // Date-based fallback
+                    const clientDate = parseDateFlex(s.paidDate);
+                    if (!clientDate) continue;
+
+                    let bestMatch = null, bestDiff = Infinity;
+                    for (const row of whopCsv) {
+                        const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                        if (memIds.some(id => usedMembershipIds.has(id))) continue;
+                        const joinedDate = parseDateFlex(row['Joined date']);
+                        if (!joinedDate) continue;
+                        const diffDays = Math.abs((clientDate - joinedDate) / 86400000);
+                        if (diffDays <= 7 && diffDays < bestDiff) {
+                            bestDiff = diffDays;
+                            bestMatch = { row, memId: memIds[0], diffDays: Math.round(diffDays) };
+                        }
+                    }
+                    if (bestMatch) {
+                        suggestions.push({
+                            client: s.client, membershipId: bestMatch.memId,
+                            matchType: 'date',
+                            whopName: bestMatch.row['Name'] || bestMatch.row['Username'] || '(no name)',
+                            whopEmail: bestMatch.row['Email'] || '',
+                            whopJoined: bestMatch.row['Joined date'] || '',
+                            whopSpend: bestMatch.row['Platform spend (USD)'] || '0',
+                            paidDate: s.paidDate || '',
+                            diffDays: bestMatch.diffDays,
+                            key: s.client + '|' + bestMatch.memId,
+                        });
+                        usedMembershipIds.add(bestMatch.memId);
+                    }
                 }
 
-                // Auto-apply confident matches
-                if (autoMapped.length > 0) saveBulkMappings(autoMapped);
-                // Set pending approvals (filter out already dismissed)
+                console.log('[WhopCSV] Suggestions:', suggestions.length, '(name:', suggestions.filter(s => s.matchType === 'name').length, ', date:', suggestions.filter(s => s.matchType === 'date').length, ')');
                 const dismissedSet = new Set(dismissedApprovals);
-                setPendingApprovals(needsApproval.filter(a => !dismissedSet.has(a.key)));
+                setPendingApprovals(suggestions.filter(a => !dismissedSet.has(a.key)));
             }, [whopCsv, setupData, whopSubs]);
 
             useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [aiMessages]);
@@ -4750,27 +4756,39 @@ ${transcript}`;
                     {pendingApprovals.length > 0 && (
                         <div className="card rounded-2xl p-4 border-amber-500/30 bg-amber-500/5">
                             <div className="flex items-center justify-between mb-3">
-                                <div><h3 className="text-sm font-bold text-amber-400">Whop Matching — Needs Your Approval ({pendingApprovals.length})</h3><p className="text-xs text-slate-400 mt-0.5">These clients were matched by similar paid/joined dates. Please verify.</p></div>
-                                <button onClick={() => { const all = pendingApprovals.map(a => ({ client: a.client, membershipId: a.membershipId })); saveBulkMappings(all); setPendingApprovals([]); }} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" style={{cursor:'pointer'}}>Approve All</button>
+                                <div>
+                                    <h3 className="text-sm font-bold text-amber-400">Whop Matching — Needs Your Approval ({pendingApprovals.length})</h3>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                        {pendingApprovals.filter(a => a.matchType === 'name').length > 0 && <span className="text-emerald-400 mr-3">Name/email matches: {pendingApprovals.filter(a => a.matchType === 'name').length}</span>}
+                                        {pendingApprovals.filter(a => a.matchType === 'date').length > 0 && <span className="text-amber-400">Date-based matches: {pendingApprovals.filter(a => a.matchType === 'date').length}</span>}
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    {pendingApprovals.filter(a => a.matchType === 'name').length > 0 && (
+                                        <button onClick={() => { const nameMatches = pendingApprovals.filter(a => a.matchType === 'name'); saveBulkMappings(nameMatches.map(a => ({ client: a.client, membershipId: a.membershipId }))); setPendingApprovals(prev => prev.filter(a => a.matchType !== 'name')); }} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" style={{cursor:'pointer'}}>Approve All Name Matches</button>
+                                    )}
+                                    <button onClick={() => { saveBulkMappings(pendingApprovals.map(a => ({ client: a.client, membershipId: a.membershipId }))); setPendingApprovals([]); }} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20" style={{cursor:'pointer'}}>Approve All</button>
+                                </div>
                             </div>
-                            <div className="space-y-2" style={{maxHeight:'300px',overflow:'auto'}}>
+                            <div className="space-y-2" style={{maxHeight:'400px',overflow:'auto'}}>
                                 {pendingApprovals.map(a => (
                                     <div key={a.key} className="flex items-center gap-3 p-3 rounded-xl" style={{background:'var(--bg-main, #0d1117)'}}>
+                                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${a.matchType === 'name' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>{a.matchType === 'name' ? 'Name' : 'Date'}</span>
                                         <div style={{flex:1,minWidth:0}}>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="text-sm font-medium text-white">{a.client}</span>
                                                 <span className="text-xs text-slate-500">→</span>
                                                 <span className="text-sm text-blue-400">{a.whopName}</span>
                                                 {a.whopEmail && <span className="text-xs text-slate-500">({a.whopEmail})</span>}
                                             </div>
-                                            <div className="flex gap-4 mt-1 text-xs text-slate-500">
-                                                <span>Sheet paid: {a.paidDate}</span>
-                                                <span>Whop joined: {a.whopJoined.split(' ')[0]}</span>
-                                                <span>{a.diffDays === 0 ? 'Same day' : a.diffDays + ' day' + (a.diffDays > 1 ? 's' : '') + ' apart'}</span>
+                                            <div className="flex gap-4 mt-1 text-xs text-slate-500 flex-wrap">
+                                                {a.paidDate && <span>Sheet paid: {a.paidDate}</span>}
+                                                {a.whopJoined && <span>Whop joined: {a.whopJoined.split(' ')[0]}</span>}
+                                                {a.diffDays != null && <span>{a.diffDays === 0 ? 'Same day' : a.diffDays + ' day' + (a.diffDays > 1 ? 's' : '') + ' apart'}</span>}
                                                 {parseFloat(a.whopSpend) > 0 && <span>Whop spend: ${parseFloat(a.whopSpend).toFixed(0)}</span>}
                                             </div>
                                         </div>
-                                        <div className="flex gap-1.5">
+                                        <div className="flex gap-1.5 shrink-0">
                                             <button onClick={() => { saveWhopMapping(a.client, a.membershipId); setPendingApprovals(prev => prev.filter(p => p.key !== a.key)); }} className="px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" style={{cursor:'pointer'}}>Approve</button>
                                             <button onClick={() => { dismissApproval(a.key); setPendingApprovals(prev => prev.filter(p => p.key !== a.key)); }} className="px-2.5 py-1 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20" style={{cursor:'pointer'}}>Reject</button>
                                         </div>
