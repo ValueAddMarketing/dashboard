@@ -21,12 +21,12 @@ export default async function handler(req, res) {
         }
 
         // Helper to fetch all pages of a Stripe list endpoint
-        const fetchAllStripePages = async (endpoint, mapFn) => {
+        const fetchAllStripePages = async (endpoint, mapFn, extraParams) => {
             const items = [];
             let hasMore = true;
             let startingAfter = null;
             while (hasMore) {
-                const params = new URLSearchParams({ limit: '100', 'expand[]': 'data.customer' });
+                const params = new URLSearchParams({ limit: '100', 'expand[]': 'data.customer', ...extraParams });
                 if (startingAfter) params.append('starting_after', startingAfter);
                 const resp = await fetch(`https://api.stripe.com/v1/${endpoint}?${params}`, {
                     headers: { 'Authorization': `Bearer ${STRIPE_SECRET_KEY}` }
@@ -40,11 +40,11 @@ export default async function handler(req, res) {
             return items;
         };
 
-        const getCustomerInfo = (customer) => ({
-            name: typeof customer === 'object' ? (customer.name || customer.email || customer.id) : customer,
-            email: typeof customer === 'object' ? (customer.email || '') : '',
-            id: typeof customer === 'object' ? customer.id : customer,
-        });
+        const getCustomerInfo = (customer) => {
+            if (!customer) return { name: '', email: '', id: '' };
+            if (typeof customer === 'object') return { name: customer.name || customer.email || customer.id || '', email: customer.email || '', id: customer.id || '' };
+            return { name: customer, email: '', id: customer };
+        };
 
         // Run invoices + active subscriptions + one-time charges in parallel
         const [invoices, subscriptions, charges] = await Promise.all([
@@ -69,7 +69,7 @@ export default async function handler(req, res) {
                 };
             }).catch(err => { results.errors.push({ source: 'stripe_invoices', message: err.message }); return []; }),
 
-            fetchAllStripePages('subscriptions?status=active', (sub) => {
+            fetchAllStripePages('subscriptions', (sub) => {
                 const c = getCustomerInfo(sub.customer);
                 return {
                     subscriptionId: sub.id, customerId: c.id,
@@ -81,7 +81,7 @@ export default async function handler(req, res) {
                     cancelAtPeriodEnd: sub.cancel_at_period_end,
                     created: new Date(sub.created * 1000).toISOString().split('T')[0],
                 };
-            }).catch(err => { results.errors.push({ source: 'stripe_upcoming', message: err.message }); return []; }),
+            }, { status: 'active' }).catch(err => { results.errors.push({ source: 'stripe_upcoming', message: err.message }); return []; }),
 
             // Fetch one-time charges (Klarna, payment links, etc.) that aren't tied to invoices
             fetchAllStripePages('charges', (ch) => {
