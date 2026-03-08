@@ -143,7 +143,8 @@
 
         const URLS = {
             clientAdsPerformance: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=964722332&single=true&output=csv',
-            setupTiming: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv'
+            setupTiming: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=646836237&single=true&output=csv',
+            closerForm: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=986050898&single=true&output=csv'
         };
 
         const pn = v => parseFloat(String(v||'0').replace(/[$,%]/g,'').replace(/,/g,''))||0;
@@ -4518,13 +4519,13 @@ ${transcript}`;
                     setWhopCsv(rows);
                 }).catch(err => console.error('[WhopCSV] Failed to load:', err));
 
-                // Also load closing data CSV (has client emails + Whop emails)
-                fetch('/closing-data.csv').then(r => r.text()).then(text => {
+                // Load Closer Form from Google Sheet (has client emails + Whop emails + notes)
+                fetch(URLS.closerForm).then(r => r.text()).then(text => {
                     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
                     const rows = (parsed.data || []).filter(r => r['Client Full Name']);
-                    console.log('[ClosingCSV] Loaded', rows.length, 'clients');
+                    console.log('[CloserForm] Loaded', rows.length, 'clients from Google Sheet');
                     setClosingData(rows);
-                }).catch(err => console.error('[ClosingCSV] Failed to load:', err));
+                }).catch(err => console.error('[CloserForm] Failed to load:', err));
             }, []);
 
             // Build closing data lookup: client name → closing info (emails, notes, etc.)
