@@ -5208,7 +5208,7 @@ ${transcript}`;
                             {(search || filterFlag || filterPlatform) && <button onClick={() => { setSearch(''); setFilterFlag(''); setFilterPlatform(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20">Clear</button>}
                             <span className="text-xs text-slate-500">Showing {displayRows.length} of {enriched.length}</span>
                             <button onClick={exportCSV} className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 ml-auto">Export CSV</button>
-                            <button onClick={() => { ['vam_clients','vam_setup','vam_cache_time','vam_daily_spend','vam_daily_spend_cache_time','vam_subscriptions','vam_subscriptions_cache_time','vam_billing_mappings','vam_billing_invoices','vam_billing_invoices_cache_time'].forEach(k => localStorage.removeItem(k)); window.location.reload(); }} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Clear Cache & Reload</button>
+                            <button onClick={() => { ['vam_clients','vam_setup','vam_cache_time','vam_daily_spend','vam_daily_spend_cache_time','vam_subscriptions','vam_subscriptions_cache_time','vam_billing_mappings','vam_billing_invoices','vam_billing_invoices_cache_time'].forEach(k => localStorage.removeItem(k)); localStorage.setItem('vam_active_tab', 'billing-errors'); window.location.reload(); }} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Clear Cache & Reload</button>
                         </div>
                     </div>}
 
@@ -5896,7 +5896,7 @@ Column definitions:
                             {sortConfig.key && <button onClick={() => setSortConfig({ key: null, dir: 'desc' })} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Reset to Sheet Order</button>}
                             {(activeFilterCount > 0 || searchFilter) && <span className="text-xs text-slate-500">Showing {filtered.length} of {enriched.length}</span>}
                             <button onClick={() => exportCSV(sorted)} className="px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 ml-auto">Export CSV</button>
-                            <button onClick={() => { ['vam_clients','vam_setup','vam_cache_time','vam_daily_spend','vam_daily_spend_cache_time','vam_subscriptions','vam_subscriptions_cache_time','vam_billing_mappings','vam_billing_invoices','vam_billing_invoices_cache_time'].forEach(k => localStorage.removeItem(k)); window.location.reload(); }} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Clear Cache & Reload</button>
+                            <button onClick={() => { ['vam_clients','vam_setup','vam_cache_time','vam_daily_spend','vam_daily_spend_cache_time','vam_subscriptions','vam_subscriptions_cache_time','vam_billing_mappings','vam_billing_invoices','vam_billing_invoices_cache_time'].forEach(k => localStorage.removeItem(k)); localStorage.setItem('vam_active_tab', 'billing-errors'); window.location.reload(); }} className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20">Clear Cache & Reload</button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div><label className="block text-xs text-slate-500 mb-1">Discrepancy Severity</label><select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white"><option value="">All</option><option value="High">High</option><option value="Medium">Medium</option><option value="OK">OK</option></select></div>
@@ -8021,7 +8021,11 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             const [clients, setClients] = useState([]);
             const [setupData, setSetupData] = useState([]);
             const [selected, setSelected] = useState(null);
-            const [tab, setTab] = useState('overview');
+            const [tab, setTab] = useState(() => {
+                const saved = localStorage.getItem('vam_active_tab');
+                if (saved) { localStorage.removeItem('vam_active_tab'); return saved; }
+                return 'overview';
+            });
             const [loading, setLoading] = useState(true);
             const [theme, setTheme] = useState('dark');
 
