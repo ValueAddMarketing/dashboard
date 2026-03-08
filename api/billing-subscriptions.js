@@ -134,9 +134,10 @@ export default async function handler(req, res) {
                     const payData = await payResp.json();
                     const payments = payData.data || [];
                     for (const p of payments) {
-                        // Only use paid subscription payments with a subtotal > 0
+                        // Only use subscription payments with a subtotal > 0
+                        // Whop v5 subtotal is already in dollars (not cents)
                         if (p.plan_id && p.subtotal > 0 && !planPrices[p.plan_id]) {
-                            planPrices[p.plan_id] = p.subtotal / 100; // cents to dollars
+                            planPrices[p.plan_id] = p.subtotal;
                         }
                         // Also capture user info for name resolution
                         if (p.plan_id && p.product_id && !planNames[p.plan_id]) {
