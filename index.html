@@ -4327,38 +4327,56 @@ ${transcript}`;
             const aiEndRef = useRef(null);
 
             useEffect(() => {
-                // Load Stripe invoice data
-                const cached = localStorage.getItem('vam_billing_invoices');
-                const cacheTime = localStorage.getItem('vam_billing_invoices_cache_time');
-                if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 10 * 60 * 1000) {
-                    setInvoiceData(JSON.parse(cached));
-                    setLoadingInvoices(false);
-                } else {
-                    fetch('/api/billing-errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchInvoices' }) })
-                        .then(r => r.json())
-                        .then(d => {
-                            setInvoiceData(d);
-                            try { localStorage.setItem('vam_billing_invoices', JSON.stringify(d)); localStorage.setItem('vam_billing_invoices_cache_time', Date.now().toString()); } catch(e) {}
-                        })
-                        .catch(err => setInvoiceData(prev => ({ ...prev, errors: [{ source: 'fetch', message: err.message }] })))
-                        .finally(() => setLoadingInvoices(false));
-                }
-
-                // Load Whop membership data (has user names, unlike payment records)
+                const invoiceCached = localStorage.getItem('vam_billing_invoices');
+                const invoiceCacheTime = localStorage.getItem('vam_billing_invoices_cache_time');
                 const subsCached = localStorage.getItem('vam_subscriptions');
                 const subsCacheTime = localStorage.getItem('vam_subscriptions_cache_time');
-                if (subsCached && subsCacheTime && (Date.now() - parseInt(subsCacheTime)) < 10 * 60 * 1000) {
-                    const parsed = JSON.parse(subsCached);
-                    setWhopSubs((parsed.whop || []).filter(s => s.source === 'whop'));
-                } else {
-                    fetch('/api/billing-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchAll' }) })
-                        .then(r => r.json())
-                        .then(d => {
-                            setWhopSubs((d.whop || []).filter(s => s.source === 'whop'));
-                            try { localStorage.setItem('vam_subscriptions', JSON.stringify(d)); localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString()); } catch(e) {}
-                        })
-                        .catch(() => {});
+                const cacheValid = (key, time) => key && time && (Date.now() - parseInt(time)) < 10 * 60 * 1000;
+
+                // Load from cache if valid
+                if (cacheValid(invoiceCached, invoiceCacheTime)) {
+                    setInvoiceData(JSON.parse(invoiceCached));
                 }
+                if (cacheValid(subsCached, subsCacheTime)) {
+                    const parsed = JSON.parse(subsCached);
+                    const whop = (parsed.whop || []).filter(s => s.source === 'whop');
+                    setWhopSubs(whop);
+                    console.log('[BillingErrors] Whop subs from cache:', whop.length, 'Sample names:', whop.slice(0, 5).map(s => s.customerName + ' | ' + s.customerEmail));
+                }
+
+                // Fetch both in parallel if either is stale
+                const needInvoices = !cacheValid(invoiceCached, invoiceCacheTime);
+                const needSubs = !cacheValid(subsCached, subsCacheTime);
+
+                if (!needInvoices && !needSubs) { setLoadingInvoices(false); return; }
+
+                const fetches = [];
+                if (needInvoices) {
+                    fetches.push(
+                        fetch('/api/billing-errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchInvoices' }) })
+                            .then(r => r.json())
+                            .then(d => { setInvoiceData(d); try { localStorage.setItem('vam_billing_invoices', JSON.stringify(d)); localStorage.setItem('vam_billing_invoices_cache_time', Date.now().toString()); } catch(e) {} })
+                            .catch(err => setInvoiceData(prev => ({ ...prev, errors: [{ source: 'fetch', message: err.message }] })))
+                    );
+                }
+                if (needSubs) {
+                    fetches.push(
+                        fetch('/api/billing-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchAll' }) })
+                            .then(r => r.json())
+                            .then(d => {
+                                const whop = (d.whop || []).filter(s => s.source === 'whop');
+                                setWhopSubs(whop);
+                                console.log('[BillingErrors] Whop subs fetched:', whop.length, 'Sample:', whop.slice(0, 5).map(s => s.customerName + ' | ' + s.customerEmail));
+                                // Debug: find mauro specifically
+                                const mauro = whop.filter(s => (s.customerName || '').toLowerCase().includes('mauro') || (s.customerEmail || '').toLowerCase().includes('mauro'));
+                                if (mauro.length) console.log('[BillingErrors] Mauro Whop matches:', JSON.stringify(mauro));
+                                else console.log('[BillingErrors] No Whop sub with "mauro" in name/email. Checking for lazyflutter:', whop.filter(s => (s.customerName || '').toLowerCase().includes('lazy')));
+                                try { localStorage.setItem('vam_subscriptions', JSON.stringify(d)); localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString()); } catch(e) {}
+                            })
+                            .catch(err => console.error('[BillingErrors] Whop fetch error:', err))
+                    );
+                }
+                Promise.all(fetches).finally(() => setLoadingInvoices(false));
             }, []);
 
             useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [aiMessages]);
@@ -4455,6 +4473,10 @@ ${transcript}`;
                 return setupData.filter(s => s.client).map(s => {
                     const contractInfo = parseContractNotes(s.contractNotes);
                     const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs);
+                    // Debug Mauro
+                    if (s.client.toLowerCase().includes('mauro')) {
+                        console.log('[BillingErrors] Mauro matching debug:', { client: s.client, nameEmail: s.nameEmail, platform: s.platform, whopSubsTotal: whopSubs.length, whopMatched: whopPayments.length, stripeMatched: stripeInvoices.length });
+                    }
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
