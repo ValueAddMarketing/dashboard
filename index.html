@@ -4322,9 +4322,11 @@ ${transcript}`;
             const [aiMessages, setAiMessages] = useState([]);
             const [aiInput, setAiInput] = useState('');
             const [aiLoading, setAiLoading] = useState(false);
+            const [whopSubs, setWhopSubs] = useState([]);
             const aiEndRef = useRef(null);
 
             useEffect(() => {
+                // Load Stripe invoice data
                 const cached = localStorage.getItem('vam_billing_invoices');
                 const cacheTime = localStorage.getItem('vam_billing_invoices_cache_time');
                 if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 10 * 60 * 1000) {
@@ -4339,6 +4341,22 @@ ${transcript}`;
                         })
                         .catch(err => setInvoiceData(prev => ({ ...prev, errors: [{ source: 'fetch', message: err.message }] })))
                         .finally(() => setLoadingInvoices(false));
+                }
+
+                // Load Whop membership data (has user names, unlike payment records)
+                const subsCached = localStorage.getItem('vam_subscriptions');
+                const subsCacheTime = localStorage.getItem('vam_subscriptions_cache_time');
+                if (subsCached && subsCacheTime && (Date.now() - parseInt(subsCacheTime)) < 10 * 60 * 1000) {
+                    const parsed = JSON.parse(subsCached);
+                    setWhopSubs((parsed.whop || []).filter(s => s.source === 'whop'));
+                } else {
+                    fetch('/api/billing-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchAll' }) })
+                        .then(r => r.json())
+                        .then(d => {
+                            setWhopSubs((d.whop || []).filter(s => s.source === 'whop'));
+                            try { localStorage.setItem('vam_subscriptions', JSON.stringify(d)); localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString()); } catch(e) {}
+                        })
+                        .catch(() => {});
                 }
             }, []);
 
@@ -4384,7 +4402,7 @@ ${transcript}`;
                 };
             };
 
-            const matchPayments = (clientName, nameEmail, invoices, whopPay) => {
+            const matchPayments = (clientName, nameEmail, invoices, whopMemberships) => {
                 const cn = (clientName || '').toLowerCase().trim();
                 if (!cn) return { stripeInvoices: [], whopPayments: [] };
                 const matchName = makeNameMatcher(clientName, nameEmail);
@@ -4392,9 +4410,32 @@ ${transcript}`;
                     const n = (inv.customerName || '').toLowerCase(), e = (inv.customerEmail || '').toLowerCase();
                     return matchName(n, e);
                 });
-                const wMatch = whopPay.filter(p => {
-                    const n = (p.customerName || '').toLowerCase(), e = (p.customerEmail || '').toLowerCase();
+                const wMatch = whopMemberships.filter(m => {
+                    const n = (m.customerName || '').toLowerCase(), e = (m.customerEmail || '').toLowerCase();
                     return matchName(n, e);
+                }).map(m => {
+                    // Estimate payment count from membership dates
+                    const created = m.created ? new Date(m.created) : null;
+                    const periodEnd = m.currentPeriodEnd ? new Date(m.currentPeriodEnd) : null;
+                    let paymentCount = 1;
+                    if (created && periodEnd && m.interval) {
+                        const months = (periodEnd.getFullYear() - created.getFullYear()) * 12 + (periodEnd.getMonth() - created.getMonth());
+                        if (m.interval === 'month') paymentCount = Math.max(1, months);
+                        else if (m.interval === 'year') paymentCount = Math.max(1, Math.round(months / 12));
+                    }
+                    return {
+                        id: m.id,
+                        customerName: m.customerName,
+                        customerEmail: m.customerEmail,
+                        amountPaid: (m.amount || 0) * paymentCount,
+                        amountPerPeriod: m.amount || 0,
+                        paymentCount,
+                        status: m.status,
+                        created: m.created,
+                        currentPeriodEnd: m.currentPeriodEnd,
+                        interval: m.interval,
+                        productName: m.productName
+                    };
                 });
                 return { stripeInvoices: sMatch, whopPayments: wMatch };
             };
@@ -4403,7 +4444,7 @@ ${transcript}`;
                 if (!setupData.length) return [];
                 return setupData.filter(s => s.client).map(s => {
                     const contractInfo = parseContractNotes(s.contractNotes);
-                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, invoiceData.stripe, invoiceData.whop);
+                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, invoiceData.stripe, whopSubs);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail);
                     const upcoming = (invoiceData.stripeUpcoming || []).find(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
@@ -4434,7 +4475,7 @@ ${transcript}`;
                     if (contractInfo.platforms.length > 0 && paymentSources.length > 0 && !contractInfo.platforms.some(p => paymentSources.includes(p))) flags.push('Platform Mismatch');
                     return { client: s.client, setup: s, contractInfo, stripeInvoices, whopPayments, upcoming, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
                 });
-            }, [setupData, invoiceData]);
+            }, [setupData, invoiceData, whopSubs]);
 
             const flagOptions = useMemo(() => { const s = new Set(); enriched.forEach(c => c.flags.forEach(f => s.add(f))); return [...s].sort(); }, [enriched]);
 
@@ -4662,12 +4703,21 @@ ${transcript}`;
                                             ))}</div>
                                         )}
                                     </div>
-                                    <div><h3 className="text-sm font-semibold text-blue-400 mb-2">Whop Payments ({selectedData.whopPayments.length})</h3>
-                                        {selectedData.whopPayments.length === 0 ? <div className="text-xs text-slate-500 p-3 card rounded-xl">No Whop payments found</div> : (
-                                            <div className="space-y-1">{selectedData.whopPayments.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0)).map(p => (
-                                                <div key={p.id} className="card rounded-lg p-3 flex items-center justify-between">
-                                                    <div><div className="text-sm text-white">{fmtC(p.amountPaid)}</div><div className="text-xs text-slate-500">{formatDateStr(new Date(p.created))} {p.productName ? `- ${p.productName}` : ''}</div></div>
-                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.status === 'active' || p.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.status || 'unknown'}</span>
+                                    <div><h3 className="text-sm font-semibold text-blue-400 mb-2">Whop Memberships ({selectedData.whopPayments.length})</h3>
+                                        {selectedData.whopPayments.length === 0 ? <div className="text-xs text-slate-500 p-3 card rounded-xl">No Whop memberships found</div> : (
+                                            <div className="space-y-1">{selectedData.whopPayments.map(p => (
+                                                <div key={p.id} className="card rounded-lg p-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div><div className="text-sm text-white">{fmtC(p.amountPerPeriod)}/{p.interval || 'mo'}</div><div className="text-xs text-slate-500">Matched: {p.customerName || p.customerEmail}</div></div>
+                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.status === 'active' || p.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : p.status === 'trialing' ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.status || 'unknown'}</span>
+                                                    </div>
+                                                    <div className="mt-2 flex gap-4 text-xs text-slate-400">
+                                                        <span>Started: {p.created ? formatDateStr(new Date(p.created)) : '—'}</span>
+                                                        <span>~{p.paymentCount} payment{p.paymentCount !== 1 ? 's' : ''}</span>
+                                                        <span>Est. total: {fmtC(p.amountPaid)}</span>
+                                                    </div>
+                                                    {p.currentPeriodEnd && <div className="text-xs text-slate-500 mt-1">Next renewal: {formatDateStr(new Date(p.currentPeriodEnd))}</div>}
+                                                    {p.productName && <div className="text-xs text-slate-500 mt-1">Product: {p.productName}</div>}
                                                 </div>
                                             ))}</div>
                                         )}
