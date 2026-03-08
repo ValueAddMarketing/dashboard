@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js';
+
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -8,6 +10,8 @@ export default async function handler(req, res) {
 
     const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
     const WHOP_API_KEY = process.env.WHOP_API_KEY;
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ecmhhonjazfbletyvncw.supabase.co';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     const { action } = req.body;
 
@@ -50,7 +54,7 @@ export default async function handler(req, res) {
 
     // ========== FETCH ALL SUBSCRIPTIONS ==========
     if (action === 'fetchAll') {
-        const results = { stripe: [], whop: [], errors: [] };
+        const results = { stripe: [], whop: [], fanbasis: [], errors: [] };
 
         // --- Stripe ---
         if (STRIPE_SECRET_KEY) {
@@ -210,6 +214,40 @@ export default async function handler(req, res) {
             }
         } else {
             results.errors.push({ source: 'whop', message: 'WHOP_API_KEY not configured' });
+        }
+
+        // --- Fanbasis (from Supabase) ---
+        if (SUPABASE_KEY) {
+            try {
+                const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+                const { data, error } = await supabase
+                    .from('fanbasis_subscriptions')
+                    .select('*');
+                if (error) {
+                    results.errors.push({ source: 'fanbasis', message: error.message });
+                } else {
+                    results.fanbasis = (data || []).map(row => ({
+                        id: `fb_${row.id}`,
+                        source: 'fanbasis',
+                        customerName: row.customer_name || '',
+                        customerEmail: row.customer_email || '',
+                        status: row.status || 'active',
+                        currentPeriodEnd: row.current_period_end,
+                        currentPeriodStart: row.current_period_start,
+                        cancelAtPeriodEnd: row.cancel_at_period_end || false,
+                        canceledAt: row.canceled_at,
+                        endedAt: row.ended_at,
+                        cancelAt: null,
+                        amount: row.amount,
+                        currency: row.currency || 'usd',
+                        interval: row.interval || 'month',
+                        productName: row.product_name || 'Fanbasis',
+                        created: row.created_at ? row.created_at.split('T')[0] : null
+                    }));
+                }
+            } catch (err) {
+                results.errors.push({ source: 'fanbasis', message: err.message });
+            }
         }
 
         return res.json(results);

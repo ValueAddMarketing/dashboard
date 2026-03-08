@@ -4546,7 +4546,7 @@ Column definitions:
                 })
                 .then(r => r.json())
                 .then(data => {
-                    const subs = { stripe: data.stripe || [], whop: data.whop || [], errors: data.errors || [] };
+                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
                     setSubscriptions(subs);
                     try {
                         localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
@@ -4558,7 +4558,7 @@ Column definitions:
             }, []);
 
             // Match client to subscription
-            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop], [subscriptions]);
+            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop, ...(subscriptions.fanbasis || [])], [subscriptions]);
 
             const matchSubscription = (clientName) => {
                 // Check manual mapping first
@@ -6336,7 +6336,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 })
                 .then(r => r.json())
                 .then(data => {
-                    const subs = { stripe: data.stripe || [], whop: data.whop || [], errors: data.errors || [] };
+                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
                     setSubscriptions(subs);
                     try {
                         localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
@@ -6347,7 +6347,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 .finally(() => setLoading(false));
             }, []);
 
-            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop], [subscriptions]);
+            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop, ...(subscriptions.fanbasis || [])], [subscriptions]);
 
             const parseDate = (s) => { if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d; };
             const daysBetween = (a, b) => Math.round((b - a) / (1000 * 60 * 60 * 24));
@@ -6709,9 +6709,11 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                 {(() => {
                                     const stripeSubs = dateFilteredSubs.filter(s => s.source === 'stripe' && s.active);
                                     const whopSubs = dateFilteredSubs.filter(s => s.source === 'whop' && s.active);
+                                    const fanbasisSubs = dateFilteredSubs.filter(s => s.source === 'fanbasis' && s.active);
                                     const stripeMRR = stripeSubs.reduce((sum, s) => sum + s.monthly, 0);
                                     const whopMRR = whopSubs.reduce((sum, s) => sum + s.monthly, 0);
-                                    const totalMRR = stripeMRR + whopMRR;
+                                    const fanbasisMRR = fanbasisSubs.reduce((sum, s) => sum + s.monthly, 0);
+                                    const totalMRR = stripeMRR + whopMRR + fanbasisMRR;
                                     return (
                                         <div className="space-y-4">
                                             <div>
@@ -6730,6 +6732,15 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                                 </div>
                                                 <div style={{height:'12px',background:'#262626',borderRadius:'6px',overflow:'hidden'}}>
                                                     <div style={{width:`${totalMRR > 0 ? (whopMRR/totalMRR)*100 : 0}%`,height:'100%',background:'linear-gradient(90deg,#8b5cf6,#a855f7)',borderRadius:'6px'}}></div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="flex justify-between text-sm mb-1">
+                                                    <span className="text-secondary">Fanbasis ({fanbasisSubs.length} active)</span>
+                                                    <span style={{color:'#f472b6'}} className="font-medium">{fmtCurrency(fanbasisMRR)}/mo</span>
+                                                </div>
+                                                <div style={{height:'12px',background:'#262626',borderRadius:'6px',overflow:'hidden'}}>
+                                                    <div style={{width:`${totalMRR > 0 ? (fanbasisMRR/totalMRR)*100 : 0}%`,height:'100%',background:'linear-gradient(90deg,#f472b6,#ec4899)',borderRadius:'6px'}}></div>
                                                 </div>
                                             </div>
                                             <div className="pt-2 border-t border-dark-700 flex justify-between text-sm">
@@ -6806,7 +6817,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                                     {sub.customerEmail && <div className="text-xs text-secondary">{sub.customerEmail}</div>}
                                                 </td>
                                                 <td className="py-3 px-4">
-                                                    <span style={{background: sub.source === 'stripe' ? 'rgba(99,102,241,0.15)' : 'rgba(251,191,36,0.15)', color: sub.source === 'stripe' ? '#818cf8' : '#fbbf24', padding:'2px 8px', borderRadius:'9999px', fontSize:'11px'}}>{sub.source}</span>
+                                                    <span style={{background: sub.source === 'stripe' ? 'rgba(99,102,241,0.15)' : sub.source === 'fanbasis' ? 'rgba(244,114,182,0.15)' : 'rgba(251,191,36,0.15)', color: sub.source === 'stripe' ? '#818cf8' : sub.source === 'fanbasis' ? '#f472b6' : '#fbbf24', padding:'2px 8px', borderRadius:'9999px', fontSize:'11px'}}>{sub.source}</span>
                                                 </td>
                                                 <td className="py-3 px-4"><StatusBadge sub={sub} /></td>
                                                 <td className="py-3 px-4 text-secondary">{sub.productName || '—'}</td>
