@@ -4940,6 +4940,48 @@ ${transcript}`;
                         </div>
                     )}
 
+                    {/* Unmatched Whop Clients — on Whop but no membership matched */}
+                    {(() => {
+                        const unmatchedWhop = enriched.filter(c =>
+                            /whop/i.test(c.setup.platform) &&
+                            c.whopPayments.length === 0 &&
+                            !pendingApprovals.find(a => a.client === c.client)
+                        );
+                        if (unmatchedWhop.length === 0) return null;
+                        return (
+                            <div className="card rounded-2xl p-4 border-red-500/30 bg-red-500/5">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div>
+                                        <h3 className="text-sm font-bold text-red-400">Unmatched Whop Clients ({unmatchedWhop.length})</h3>
+                                        <p className="text-xs text-slate-400 mt-0.5">These clients are on Whop but no membership was auto-matched. Click "Link" to manually match.</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-2" style={{maxHeight:'400px',overflow:'auto'}}>
+                                    {unmatchedWhop.map(c => {
+                                        const cr = closingLookup[c.client.toLowerCase()];
+                                        const email = cr ? (cr['Client Email'] || cr['Client Email '] || '').trim() : '';
+                                        const procEmail = cr ? (cr['Payment processor username or email'] || '').trim() : '';
+                                        return (
+                                            <div key={c.client} className="flex items-center gap-3 p-3 rounded-xl" style={{background:'var(--bg-main, #0d1117)'}}>
+                                                <span className="px-1.5 py-0.5 rounded text-xs font-medium shrink-0 bg-red-500/20 text-red-400">No Match</span>
+                                                <div style={{flex:1,minWidth:0}}>
+                                                    <div className="text-sm font-medium text-white">{c.client}</div>
+                                                    <div className="flex gap-4 mt-1 text-xs text-slate-500 flex-wrap">
+                                                        {email && <span>Email: {email}</span>}
+                                                        {procEmail && <span>Processor: {procEmail}</span>}
+                                                        {c.setup.paidDate && <span>Paid: {c.setup.paidDate}</span>}
+                                                        <span>MRR: {c.setup.mrr || '?'}</span>
+                                                    </div>
+                                                </div>
+                                                <button onClick={() => { setSelectedClient(c.client); setTimeout(() => { setLinkWhopClient(c.client); setLinkWhopSearch(''); }, 100); }} className="px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 shrink-0" style={{cursor:'pointer'}}>Link Whop</button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {/* KPIs */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                         <div className="card rounded-2xl p-5 text-center"><div className="text-2xl font-bold text-red-400">{fmtC(totalRevenueGap)}</div><div className="text-xs text-slate-400 mt-1">Revenue Gap</div></div>
