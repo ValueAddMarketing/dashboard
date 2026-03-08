@@ -57,13 +57,23 @@ export default async function handler(req, res) {
     const event = body.event || body.type || 'new_sale';
 
     // Normalize customer info from Zapier payload
-    const customerName = body.customer_name || body.customerName || body.name || body.full_name || body.buyer_name || '';
-    const customerEmail = body.customer_email || body.customerEmail || body.email || body.buyer_email || '';
-    const amount = parseFloat(body.amount || body.total || body.price || body.subtotal || 0);
-    const productName = body.product_name || body.productName || body.plan_name || body.planName || body.offer_name || 'Fanbasis';
-    const interval = body.interval || body.billing_period || body.frequency || 'month';
-    const transactionId = body.transaction_id || body.transactionId || body.sale_id || body.id || null;
-    const subscriptionId = body.subscription_id || body.subscriptionId || body.membership_id || transactionId;
+    // Fanbasis fields: full_name, email, formatted_total_amount, product_title, sale_id
+    const customerName = body.full_name || body.customer_name || body.name || '';
+    const customerEmail = body.email || body.customer_email || '';
+    // Prefer formatted_total_amount (e.g. "2000.00") over total_amount (e.g. 200000 in cents)
+    let amount = 0;
+    if (body.formatted_total_amount) {
+        amount = parseFloat(body.formatted_total_amount);
+    } else if (body.total_amount) {
+        amount = parseFloat(body.total_amount) / 100;
+    } else if (body.amount) {
+        const raw = parseFloat(body.amount);
+        amount = raw > 10000 ? raw / 100 : raw; // auto-detect cents vs dollars
+    }
+    const productName = body.product_title || body.product_name || 'Fanbasis';
+    const interval = body.interval || 'month';
+    const transactionId = body.sale_id || body.transaction_id || body.id || null;
+    const subscriptionId = body.subscription_id || transactionId;
 
     const now = new Date().toISOString().split('T')[0];
 
