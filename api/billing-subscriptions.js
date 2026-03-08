@@ -202,9 +202,9 @@ export default async function handler(req, res) {
                 const userIds = [...new Set(rawMemberships.map(m => m.user_id).filter(Boolean))];
                 const userMap = {};
 
-                // Fetch users in parallel batches of 10
-                for (let i = 0; i < userIds.length; i += 10) {
-                    const batch = userIds.slice(i, i + 10);
+                // Fetch users in parallel batches of 25
+                for (let i = 0; i < userIds.length; i += 25) {
+                    const batch = userIds.slice(i, i + 25);
                     const userResults = await Promise.all(batch.map(uid =>
                         fetch(`https://api.whop.com/api/v5/company/users/${uid}`, {
                             headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
@@ -214,13 +214,6 @@ export default async function handler(req, res) {
                         if (u && u.id) userMap[u.id] = u;
                     }
                 }
-
-                results._whopDebug = {
-                    totalMemberships: rawMemberships.length,
-                    uniqueUsers: userIds.length,
-                    usersResolved: Object.keys(userMap).length,
-                    sampleUser: Object.values(userMap)[0] ? { username: Object.values(userMap)[0].username, email: Object.values(userMap)[0].email } : null,
-                };
 
                 // Map memberships with user data injected
                 const allMemberships = [];
