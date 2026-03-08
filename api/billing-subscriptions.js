@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js';
+
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -8,6 +10,8 @@ export default async function handler(req, res) {
 
     const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
     const WHOP_API_KEY = process.env.WHOP_API_KEY;
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ecmhhonjazfbletyvncw.supabase.co';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     const { action } = req.body;
 
@@ -17,25 +21,40 @@ export default async function handler(req, res) {
         return String(val).split('T')[0];
     };
 
-    const mapWhopMembership = (m) => ({
-        id: m.id,
-        source: 'whop',
-        customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
-        customerEmail: m.user?.email || m.email || '',
-        status: m.status || (m.valid ? 'active' : 'inactive'),
-        currentPeriodEnd: formatWhopDate(m.renewal_period_end || m.expires_at || m.next_renewal_date),
-        currentPeriodStart: formatWhopDate(m.renewal_period_start || m.created_at),
-        cancelAtPeriodEnd: m.cancel_at_period_end || false,
-        amount: m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null),
-        currency: m.currency || 'usd',
-        interval: m.plan?.renewal_period || m.renewal_period || null,
-        productName: m.plan?.plan_name || m.product?.name || m.product_name || '',
-        created: m.created_at ? (typeof m.created_at === 'number' ? new Date(m.created_at * 1000).toISOString().split('T')[0] : String(m.created_at).split('T')[0]) : null
-    });
+    const mapWhopMembership = (m) => {
+        // Derive billing interval from renewal period timestamps
+        let interval = m.plan?.renewal_period || m.renewal_period || null;
+        if (!interval && m.renewal_period_start && m.renewal_period_end) {
+            const start = typeof m.renewal_period_start === 'number' ? m.renewal_period_start : Date.parse(m.renewal_period_start) / 1000;
+            const end = typeof m.renewal_period_end === 'number' ? m.renewal_period_end : Date.parse(m.renewal_period_end) / 1000;
+            const days = (end - start) / 86400;
+            if (days >= 350) interval = 'year';
+            else if (days >= 25) interval = 'month';
+            else if (days >= 6) interval = 'week';
+        }
+        return {
+            id: m.id,
+            source: 'whop',
+            customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
+            customerEmail: m.user?.email || m.email || '',
+            status: m.status || (m.valid ? 'active' : 'inactive'),
+            currentPeriodEnd: formatWhopDate(m.renewal_period_end || m.expires_at || m.next_renewal_date),
+            currentPeriodStart: formatWhopDate(m.renewal_period_start || m.created_at),
+            cancelAtPeriodEnd: m.cancel_at_period_end || false,
+            canceledAt: formatWhopDate(m.canceled_at || m.cancelled_at),
+            endedAt: formatWhopDate(m.ended_at || m.expired_at),
+            cancelAt: formatWhopDate(m.cancel_at),
+            amount: m._plan_price != null ? m._plan_price : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)),
+            currency: m.currency || 'usd',
+            interval,
+            productName: m._plan_name || m.plan?.plan_name || m.product?.name || m.product_name || '',
+            created: m.created_at ? (typeof m.created_at === 'number' ? new Date(m.created_at * 1000).toISOString().split('T')[0] : String(m.created_at).split('T')[0]) : null
+        };
+    };
 
     // ========== FETCH ALL SUBSCRIPTIONS ==========
     if (action === 'fetchAll') {
-        const results = { stripe: [], whop: [], errors: [] };
+        const results = { stripe: [], whop: [], fanbasis: [], errors: [] };
 
         // --- Stripe ---
         if (STRIPE_SECRET_KEY) {
@@ -76,6 +95,9 @@ export default async function handler(req, res) {
                             currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString().split('T')[0] : null,
                             currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start * 1000).toISOString().split('T')[0] : null,
                             cancelAtPeriodEnd: sub.cancel_at_period_end,
+                            canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString().split('T')[0] : null,
+                            endedAt: sub.ended_at ? new Date(sub.ended_at * 1000).toISOString().split('T')[0] : null,
+                            cancelAt: sub.cancel_at ? new Date(sub.cancel_at * 1000).toISOString().split('T')[0] : null,
                             amount: sub.items?.data?.[0]?.price?.unit_amount ? sub.items.data[0].price.unit_amount / 100 : null,
                             currency: sub.items?.data?.[0]?.price?.currency || 'usd',
                             interval: sub.items?.data?.[0]?.price?.recurring?.interval || null,
@@ -101,65 +123,89 @@ export default async function handler(req, res) {
         // --- Whop ---
         if (WHOP_API_KEY) {
             try {
+                // Fetch payments to build plan_id → price lookup (plans endpoint not available in v5)
+                const planPrices = {};
+                const planNames = {};
+                const planIntervals = {};
+                let payPage = 1;
+                let payHasMore = true;
+                // Fetch up to 5 pages (250 payments) to cover all plan_ids
+                while (payHasMore && payPage <= 5) {
+                    const payResp = await fetch(`https://api.whop.com/api/v5/company/payments?per=50&page=${payPage}`, {
+                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                    });
+                    if (!payResp.ok) break;
+                    const payData = await payResp.json();
+                    const payments = payData.data || [];
+                    for (const p of payments) {
+                        // Only use subscription payments with a subtotal > 0
+                        // Whop v5 subtotal is already in dollars (not cents)
+                        if (p.plan_id && p.subtotal > 0 && !planPrices[p.plan_id]) {
+                            planPrices[p.plan_id] = p.subtotal;
+                        }
+                        // Also capture user info for name resolution
+                        if (p.plan_id && p.product_id && !planNames[p.plan_id]) {
+                            planNames[p.plan_id] = ''; // will be filled from products if needed
+                        }
+                    }
+                    const totalPages = payData.pagination?.total_pages || 1;
+                    if (payPage >= totalPages || payments.length < 50) { payHasMore = false; }
+                    else { payPage++; }
+                }
+
+                // Fetch products for names
+                const productNames = {};
+                let prodPage = 1;
+                let prodHasMore = true;
+                while (prodHasMore) {
+                    const prodResp = await fetch(`https://api.whop.com/api/v5/company/products?per=50&page=${prodPage}`, {
+                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
+                    });
+                    if (!prodResp.ok) break;
+                    const prodData = await prodResp.json();
+                    const products = prodData.data || [];
+                    for (const p of products) {
+                        productNames[p.id] = p.name || p.title || '';
+                    }
+                    if (products.length < 50 || prodPage >= (prodData.pagination?.total_pages || prodPage)) { prodHasMore = false; }
+                    else { prodPage++; }
+                }
+
+                // Now fetch all memberships (page-based pagination for v5)
                 const allMemberships = [];
-                let cursor = null;
+                let page = 1;
                 let hasMore = true;
 
                 while (hasMore) {
-                    const params = new URLSearchParams({ per: '50' });
-                    if (cursor) params.append('cursor', cursor);
-
-                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?${params}`, {
+                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}`, {
                         headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
                     });
 
-                    // If v5 fails, try v2
                     if (!resp.ok) {
                         const errText = await resp.text();
-                        // Try v2 as fallback
-                        const resp2 = await fetch(`https://api.whop.com/api/v2/company/memberships?per=50&page=1`, {
-                            headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                        });
-                        if (!resp2.ok) {
-                            const err2 = await resp2.text();
-                            // Try the newer /memberships endpoint
-                            const resp3 = await fetch(`https://api.whop.com/company/memberships?per=50`, {
-                                headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                            });
-                            if (!resp3.ok) {
-                                const err3 = await resp3.text();
-                                results.errors.push({ source: 'whop', message: `v5: ${errText.substring(0,200)} | v2: ${err2.substring(0,200)} | base: ${err3.substring(0,200)}` });
-                                break;
-                            }
-                            const data3 = await resp3.json();
-                            const memberships3 = data3.data || data3.memberships || data3 || [];
-                            if (Array.isArray(memberships3)) {
-                                for (const m of memberships3) {
-                                    allMemberships.push(mapWhopMembership(m));
-                                }
-                            }
-                            hasMore = false;
-                            break;
-                        }
-                        const data2 = await resp2.json();
-                        const memberships2 = data2.data || data2.memberships || [];
-                        for (const m of memberships2) {
-                            allMemberships.push(mapWhopMembership(m));
-                        }
-                        hasMore = false;
+                        results.errors.push({ source: 'whop', message: `v5 page ${page}: ${errText.substring(0,200)}` });
                         break;
                     }
 
                     const data = await resp.json();
-                    const memberships = data.data || data.memberships || [];
+                    const memberships = data.data || [];
                     if (memberships.length === 0) { hasMore = false; break; }
 
                     for (const m of memberships) {
+                        // Inject plan pricing from payments data
+                        if (m.plan_id && planPrices[m.plan_id] != null) {
+                            m._plan_price = planPrices[m.plan_id];
+                        }
+                        // Inject product name
+                        if (m.product_id && productNames[m.product_id]) {
+                            m._plan_name = productNames[m.product_id];
+                        }
                         allMemberships.push(mapWhopMembership(m));
                     }
 
-                    cursor = data.pagination?.next_cursor || data.next_cursor;
-                    if (!cursor) hasMore = false;
+                    const totalPages = data.pagination?.total_pages || 1;
+                    if (page >= totalPages) { hasMore = false; }
+                    else { page++; }
                 }
 
                 results.whop = allMemberships;
@@ -170,6 +216,40 @@ export default async function handler(req, res) {
             results.errors.push({ source: 'whop', message: 'WHOP_API_KEY not configured' });
         }
 
+        // --- Fanbasis (from Supabase) ---
+        if (SUPABASE_KEY) {
+            try {
+                const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+                const { data, error } = await supabase
+                    .from('fanbasis_subscriptions')
+                    .select('*');
+                if (error) {
+                    results.errors.push({ source: 'fanbasis', message: error.message });
+                } else {
+                    results.fanbasis = (data || []).map(row => ({
+                        id: `fb_${row.id}`,
+                        source: 'fanbasis',
+                        customerName: row.customer_name || '',
+                        customerEmail: row.customer_email || '',
+                        status: row.status || 'active',
+                        currentPeriodEnd: row.current_period_end,
+                        currentPeriodStart: row.current_period_start,
+                        cancelAtPeriodEnd: row.cancel_at_period_end || false,
+                        canceledAt: row.canceled_at,
+                        endedAt: row.ended_at,
+                        cancelAt: null,
+                        amount: row.amount,
+                        currency: row.currency || 'usd',
+                        interval: row.interval || 'month',
+                        productName: row.product_name || 'Fanbasis',
+                        created: row.created_at ? row.created_at.split('T')[0] : null
+                    }));
+                }
+            } catch (err) {
+                results.errors.push({ source: 'fanbasis', message: err.message });
+            }
+        }
+
         return res.json(results);
     }
 
@@ -178,6 +258,26 @@ export default async function handler(req, res) {
         // Mappings are stored client-side in localStorage for now
         // Could be moved to Supabase later
         return res.json({ ok: true });
+    }
+
+    // ========== DEBUG RAW WHOP DATA ==========
+    if (action === 'debugWhop') {
+        if (!WHOP_API_KEY) return res.json({ error: 'No WHOP_API_KEY' });
+        const headers = { 'Authorization': `Bearer ${WHOP_API_KEY}` };
+        const tryFetch = async (url) => {
+            try {
+                const r = await fetch(url, { headers });
+                const text = await r.text();
+                try { return { status: r.status, data: JSON.parse(text) }; } catch { return { status: r.status, text: text.substring(0, 500) }; }
+            } catch (e) { return { error: e.message }; }
+        };
+        const [productPlans, payments, invoices, pricesEndpoint] = await Promise.all([
+            tryFetch('https://api.whop.com/api/v5/company/products/prod_16YCAds3BF2ea/plans?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/payments?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/invoices?per=3'),
+            tryFetch('https://api.whop.com/api/v5/company/prices?per=3'),
+        ]);
+        return res.json({ productPlans, payments, invoices, pricesEndpoint });
     }
 
     return res.status(400).json({ error: 'Invalid action. Use "fetchAll" or "saveMappings".' });

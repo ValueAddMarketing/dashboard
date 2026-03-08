@@ -348,6 +348,7 @@
             { id: 'client-map', name: 'Client Map', icon: '🗺️', desc: 'US map view of all clients by state' },
             { id: 'speed-to-lead', name: 'Speed to Lead', icon: '⚡', desc: 'Track call response times from GHL' },
             { id: 'users', name: 'Users', icon: '👥', desc: 'Registered dashboard users' },
+            { id: 'ltv-churn', name: 'LTV & Churn', icon: '📉', desc: 'Client lifetime value and churn analytics' },
         ];
 
         // ========== LOGIN ==========
@@ -5010,7 +5011,7 @@ Column definitions:
                 })
                 .then(r => r.json())
                 .then(data => {
-                    const subs = { stripe: data.stripe || [], whop: data.whop || [], errors: data.errors || [] };
+                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
                     setSubscriptions(subs);
                     try {
                         localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
@@ -5022,7 +5023,7 @@ Column definitions:
             }, []);
 
             // Match client to subscription
-            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop], [subscriptions]);
+            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop, ...(subscriptions.fanbasis || [])], [subscriptions]);
 
             const matchSubscription = (clientName) => {
                 // Check manual mapping first
@@ -6760,6 +6761,584 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             );
         };
 
+        // ========== LTV & CHURN TAB ==========
+        const LTVChurnTab = () => {
+            const [subscriptions, setSubscriptions] = useState({ stripe: [], whop: [] });
+            const [loading, setLoading] = useState(true);
+            const [view, setView] = useState('overview');
+            const [sortConfig, setSortConfig] = useState({ key: 'created', dir: 'asc' });
+            const [searchFilter, setSearchFilter] = useState('');
+            const [statusFilter, setStatusFilter] = useState('all');
+            const [datePreset, setDatePreset] = useState('all');
+            const [customFrom, setCustomFrom] = useState('');
+            const [customTo, setCustomTo] = useState('');
+
+            const getDateRange = () => {
+                if (datePreset === 'custom') {
+                    return { from: customFrom ? new Date(customFrom) : null, to: customTo ? new Date(customTo + 'T23:59:59') : null };
+                }
+                if (datePreset === 'all') return { from: null, to: null };
+                const now = new Date();
+                const from = new Date(now);
+                const months = { '1m': 1, '3m': 3, '6m': 6, '1y': 12, '2y': 24 }[datePreset] || 0;
+                from.setMonth(from.getMonth() - months);
+                return { from, to: now };
+            };
+
+            const dateRange = getDateRange();
+
+            useEffect(() => {
+                const cached = localStorage.getItem('vam_subscriptions');
+                const cacheTime = localStorage.getItem('vam_subscriptions_cache_time');
+                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
+                if (cached && cacheAge < 30 * 60 * 1000) {
+                    try { setSubscriptions(JSON.parse(cached)); setLoading(false); return; } catch(e) {}
+                }
+                fetch('/api/billing-subscriptions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'fetchAll' })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
+                    setSubscriptions(subs);
+                    try {
+                        localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
+                        localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString());
+                    } catch(e) {}
+                })
+                .catch(() => {})
+                .finally(() => setLoading(false));
+            }, []);
+
+            const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop, ...(subscriptions.fanbasis || [])], [subscriptions]);
+
+            const parseDate = (s) => { if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d; };
+            const daysBetween = (a, b) => Math.round((b - a) / (1000 * 60 * 60 * 24));
+            const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+            const fmtCurrency = (n) => n != null ? '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+            const monthKey = (d) => d ? d.toISOString().slice(0, 7) : null;
+
+            // Normalize monthly amount
+            const monthlyAmount = (sub) => {
+                if (!sub.amount) return 0;
+                if (sub.interval === 'year') return sub.amount / 12;
+                if (sub.interval === 'week') return sub.amount * 4.33;
+                return sub.amount; // default monthly
+            };
+
+            // Determine effective end date for churned clients
+            const getEndDate = (sub) => {
+                if (sub.endedAt) return parseDate(sub.endedAt);
+                if (sub.canceledAt) return parseDate(sub.canceledAt);
+                if (sub.cancelAt) return parseDate(sub.cancelAt);
+                return null;
+            };
+
+            const isChurned = (sub) => {
+                const status = (sub.status || '').toLowerCase();
+                return ['canceled', 'cancelled', 'incomplete_expired', 'unpaid', 'expired', 'inactive'].includes(status);
+            };
+
+            const isActive = (sub) => {
+                const status = (sub.status || '').toLowerCase();
+                return ['active', 'trialing', 'past_due'].includes(status);
+            };
+
+            const isAtRisk = (sub) => {
+                return sub.cancelAtPeriodEnd || (sub.status || '').toLowerCase() === 'past_due';
+            };
+
+            // Enriched subscription data
+            const enrichedSubs = useMemo(() => {
+                return allSubs.map(sub => {
+                    const startDate = parseDate(sub.created);
+                    const endDate = getEndDate(sub);
+                    const churned = isChurned(sub);
+                    const active = isActive(sub);
+                    const atRisk = isAtRisk(sub);
+                    const monthly = monthlyAmount(sub);
+
+                    let lifetimeDays = 0;
+                    let lifetimeMonths = 0;
+                    if (startDate) {
+                        const end = endDate || new Date();
+                        lifetimeDays = Math.max(0, daysBetween(startDate, end));
+                        lifetimeMonths = Math.max(1, Math.round(lifetimeDays / 30.44));
+                    }
+                    const totalRevenue = monthly * lifetimeMonths;
+
+                    return {
+                        ...sub,
+                        startDate,
+                        endDate,
+                        churned,
+                        active,
+                        atRisk,
+                        monthly,
+                        lifetimeDays,
+                        lifetimeMonths,
+                        totalRevenue,
+                        startMonth: monthKey(startDate),
+                        endMonth: endDate ? monthKey(endDate) : null
+                    };
+                }).filter(s => s.startDate); // only include subs with valid start dates
+            }, [allSubs]);
+
+            // Filter enriched subs by date range
+            const dateFilteredSubs = useMemo(() => {
+                const { from, to } = dateRange;
+                if (!from && !to) return enrichedSubs;
+                return enrichedSubs.filter(s => {
+                    if (!s.startDate) return false;
+                    // Include if the subscription was active during the date range
+                    // Started before or during the range AND (still active or ended during/after range start)
+                    const startedBeforeEnd = !to || s.startDate <= to;
+                    const endedAfterStart = !from || !s.endDate || s.endDate >= from;
+                    return startedBeforeEnd && endedAfterStart;
+                });
+            }, [enrichedSubs, dateRange.from?.getTime(), dateRange.to?.getTime()]);
+
+            // KPI calculations
+            const metrics = useMemo(() => {
+                const total = dateFilteredSubs.length;
+                const activeSubs = dateFilteredSubs.filter(s => s.active);
+                const churnedSubs = dateFilteredSubs.filter(s => s.churned);
+                const atRiskSubs = enrichedSubs.filter(s => s.atRisk && s.active);
+
+                const activeCount = activeSubs.length;
+                const churnedCount = churnedSubs.length;
+                const atRiskCount = atRiskSubs.length;
+
+                const mrr = activeSubs.reduce((sum, s) => sum + s.monthly, 0);
+                const atRiskMRR = atRiskSubs.reduce((sum, s) => sum + s.monthly, 0);
+
+                const avgLifetimeAll = total > 0 ? dateFilteredSubs.reduce((sum, s) => sum + s.lifetimeMonths, 0) / total : 0;
+                const avgLifetimeChurned = churnedCount > 0 ? churnedSubs.reduce((sum, s) => sum + s.lifetimeMonths, 0) / churnedCount : 0;
+
+                const avgLTV = total > 0 ? dateFilteredSubs.reduce((sum, s) => sum + s.totalRevenue, 0) / total : 0;
+                const avgActiveLTV = activeCount > 0 ? activeSubs.reduce((sum, s) => sum + s.totalRevenue, 0) / activeCount : 0;
+
+                // Overall churn rate: churned / total
+                const overallChurnRate = total > 0 ? (churnedCount / total) * 100 : 0;
+
+                // Monthly churn data
+                const monthlyData = {};
+                for (const sub of dateFilteredSubs) {
+                    const sm = sub.startMonth;
+                    if (sm) {
+                        if (!monthlyData[sm]) monthlyData[sm] = { started: 0, churned: 0, active: 0 };
+                        monthlyData[sm].started++;
+                    }
+                    if (sub.endMonth && sub.churned) {
+                        if (!monthlyData[sub.endMonth]) monthlyData[sub.endMonth] = { started: 0, churned: 0, active: 0 };
+                        monthlyData[sub.endMonth].churned++;
+                    }
+                }
+
+                // Calculate running active count per month
+                const sortedMonths = Object.keys(monthlyData).sort();
+                let running = 0;
+                for (const m of sortedMonths) {
+                    running += monthlyData[m].started - monthlyData[m].churned;
+                    monthlyData[m].active = running;
+                    monthlyData[m].churnRate = monthlyData[m].active + monthlyData[m].churned > 0
+                        ? (monthlyData[m].churned / (monthlyData[m].active + monthlyData[m].churned) * 100)
+                        : 0;
+                }
+
+                // Recent 3 month churn rate
+                const recent3 = sortedMonths.slice(-3);
+                const recent3Churned = recent3.reduce((sum, m) => sum + monthlyData[m].churned, 0);
+                const recent3Start = recent3.length > 0 && monthlyData[recent3[0]] ? monthlyData[recent3[0]].active + monthlyData[recent3[0]].churned : 1;
+                const recentChurnRate = recent3Start > 0 ? (recent3Churned / recent3Start * 100) : 0;
+
+                return {
+                    total, activeCount, churnedCount, atRiskCount,
+                    mrr, atRiskMRR,
+                    avgLifetimeAll, avgLifetimeChurned,
+                    avgLTV, avgActiveLTV,
+                    overallChurnRate, recentChurnRate,
+                    monthlyData, sortedMonths
+                };
+            }, [dateFilteredSubs]);
+
+            // Cohort retention
+            const cohorts = useMemo(() => {
+                const cohortMap = {};
+                for (const sub of dateFilteredSubs) {
+                    const cm = sub.startMonth;
+                    if (!cm) continue;
+                    if (!cohortMap[cm]) cohortMap[cm] = [];
+                    cohortMap[cm].push(sub);
+                }
+                const cohortKeys = Object.keys(cohortMap).sort();
+                const now = new Date();
+                return cohortKeys.map(ck => {
+                    const subs = cohortMap[ck];
+                    const size = subs.length;
+                    const cohortDate = new Date(ck + '-01');
+                    const maxMonths = Math.min(12, Math.floor(daysBetween(cohortDate, now) / 30.44));
+                    const retention = [];
+                    for (let m = 0; m <= maxMonths; m++) {
+                        const cutoff = new Date(cohortDate);
+                        cutoff.setMonth(cutoff.getMonth() + m);
+                        const retained = subs.filter(s => {
+                            if (!s.endDate) return true;
+                            return s.endDate >= cutoff;
+                        }).length;
+                        retention.push(Math.round((retained / size) * 100));
+                    }
+                    return { month: ck, size, retention };
+                }).filter(c => c.size >= 2); // only show cohorts with 2+ clients
+            }, [dateFilteredSubs]);
+
+            // Sorting & filtering for table
+            const filteredSubs = useMemo(() => {
+                let subs = [...dateFilteredSubs];
+                if (searchFilter) {
+                    const q = searchFilter.toLowerCase();
+                    subs = subs.filter(s => s.customerName.toLowerCase().includes(q) || s.customerEmail.toLowerCase().includes(q));
+                }
+                if (statusFilter === 'active') subs = subs.filter(s => s.active);
+                else if (statusFilter === 'churned') subs = subs.filter(s => s.churned);
+                else if (statusFilter === 'at-risk') subs = subs.filter(s => s.atRisk && s.active);
+
+                const { key, dir } = sortConfig;
+                if (key) {
+                    subs.sort((a, b) => {
+                        let av = a[key], bv = b[key];
+                        if (av instanceof Date) av = av?.getTime() || 0;
+                        if (bv instanceof Date) bv = bv?.getTime() || 0;
+                        if (typeof av === 'string') av = av.toLowerCase();
+                        if (typeof bv === 'string') bv = bv.toLowerCase();
+                        if (av < bv) return dir === 'asc' ? -1 : 1;
+                        if (av > bv) return dir === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                }
+                return subs;
+            }, [dateFilteredSubs, searchFilter, statusFilter, sortConfig]);
+
+            const toggleSort = (key) => {
+                if (sortConfig.key === key) setSortConfig({ key, dir: sortConfig.dir === 'asc' ? 'desc' : 'asc' });
+                else setSortConfig({ key, dir: 'desc' });
+            };
+
+            const SortHeader = ({ label, sortKey }) => (
+                <th className="text-left py-3 px-4 text-xs font-semibold text-secondary uppercase tracking-wide cursor-pointer hover:text-brand-cyan" onClick={() => toggleSort(sortKey)}>
+                    {label} {sortConfig.key === sortKey ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                </th>
+            );
+
+            const KPICard = ({ label, value, sub, color = 'text-white' }) => (
+                <div className="card p-5">
+                    <div className="text-xs text-secondary uppercase tracking-wide mb-1">{label}</div>
+                    <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                    {sub && <div className="text-xs text-secondary mt-1">{sub}</div>}
+                </div>
+            );
+
+            const StatusBadge = ({ sub }) => {
+                if (sub.churned) return <span style={{background:'rgba(239,68,68,0.15)',color:'#f87171',padding:'2px 10px',borderRadius:'9999px',fontSize:'12px'}}>Churned</span>;
+                if (sub.atRisk) return <span style={{background:'rgba(251,191,36,0.15)',color:'#fbbf24',padding:'2px 10px',borderRadius:'9999px',fontSize:'12px'}}>At Risk</span>;
+                if (sub.active) return <span style={{background:'rgba(52,211,153,0.15)',color:'#34d399',padding:'2px 10px',borderRadius:'9999px',fontSize:'12px'}}>Active</span>;
+                return <span style={{background:'rgba(148,163,184,0.15)',color:'#94a3b8',padding:'2px 10px',borderRadius:'9999px',fontSize:'12px'}}>{sub.status}</span>;
+            };
+
+            // Bar chart helper (text-based proportional bars)
+            const maxChurned = metrics.sortedMonths.length > 0 ? Math.max(...metrics.sortedMonths.map(m => metrics.monthlyData[m].churned), 1) : 1;
+
+            if (loading) return (
+                <div className="flex items-center justify-center py-20">
+                    <div style={{width:'200px',height:'4px',background:'#262626',borderRadius:'4px',overflow:'hidden'}}>
+                        <div className="loading-bar" style={{height:'100%',background:'linear-gradient(90deg,#06b6d4,#8b5cf6)',borderRadius:'4px'}}></div>
+                    </div>
+                    <span className="ml-4 text-secondary text-sm">Loading subscription data...</span>
+                </div>
+            );
+
+            return (
+                <div className="p-6 space-y-6">
+                    <div className="flex items-center justify-between mb-2">
+                        <div>
+                            <h2 className="text-2xl font-bold text-primary">LTV & Churn Analytics</h2>
+                            <p className="text-sm text-secondary mt-1">Calculated from {allSubs.length} Stripe + Whop subscriptions</p>
+                        </div>
+                        <div className="flex gap-2">
+                            {['overview', 'clients', 'cohorts'].map(v => (
+                                <button key={v} onClick={() => setView(v)}
+                                    className={'px-4 py-2 rounded-lg text-sm font-medium transition-all ' + (view === v ? 'bg-brand-cyan/20 text-brand-cyan' : 'text-secondary hover:text-white hover:bg-dark-700')}>
+                                    {v === 'overview' ? 'Overview' : v === 'clients' ? 'Client Table' : 'Cohort Retention'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Date Range Filter */}
+                    <div className="card p-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-xs font-semibold text-secondary uppercase tracking-wide">Time Range:</span>
+                            {[
+                                { id: 'all', label: 'All Time' },
+                                { id: '1m', label: '1 Month' },
+                                { id: '3m', label: '3 Months' },
+                                { id: '6m', label: '6 Months' },
+                                { id: '1y', label: '1 Year' },
+                                { id: '2y', label: '2 Years' },
+                                { id: 'custom', label: 'Custom' },
+                            ].map(p => (
+                                <button key={p.id} onClick={() => setDatePreset(p.id)}
+                                    className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-all ' + (datePreset === p.id ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30' : 'text-secondary hover:text-white hover:bg-dark-700 border border-transparent')}>
+                                    {p.label}
+                                </button>
+                            ))}
+                            {datePreset === 'custom' && (
+                                <div className="flex items-center gap-2 ml-2">
+                                    <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="input-field border rounded-lg px-2 py-1.5 text-xs" />
+                                    <span className="text-secondary text-xs">to</span>
+                                    <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="input-field border rounded-lg px-2 py-1.5 text-xs" />
+                                </div>
+                            )}
+                            {datePreset !== 'all' && (
+                                <span className="text-xs text-secondary ml-auto">
+                                    Showing {dateFilteredSubs.length} of {enrichedSubs.length} subscriptions
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* KPI Cards - always visible */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        <KPICard label="Total Clients" value={metrics.total} sub={`${metrics.activeCount} active`} color="text-brand-cyan" />
+                        <KPICard label="Active" value={metrics.activeCount} sub={`${metrics.atRiskCount} at risk`} color="text-emerald-400" />
+                        <KPICard label="Churned" value={metrics.churnedCount} sub={`${metrics.overallChurnRate.toFixed(1)}% all-time`} color="text-red-400" />
+                        <KPICard label="Monthly MRR" value={fmtCurrency(metrics.mrr)} sub={`${fmtCurrency(metrics.atRiskMRR)} at risk`} color="text-brand-purple" />
+                        <KPICard label="Avg LTV" value={fmtCurrency(metrics.avgLTV)} sub={`${metrics.avgLifetimeAll.toFixed(1)} mo avg life`} color="text-brand-cyan" />
+                        <KPICard label="Recent Churn" value={`${metrics.recentChurnRate.toFixed(1)}%`} sub="Last 3 months" color={metrics.recentChurnRate > 10 ? 'text-red-400' : 'text-emerald-400'} />
+                    </div>
+
+                    {/* Overview View */}
+                    {view === 'overview' && (
+                        <div className="grid lg:grid-cols-2 gap-6">
+                            {/* Monthly Churn Trend */}
+                            <div className="card p-5">
+                                <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-4">Monthly Churn Trend</h3>
+                                <div className="space-y-2 max-h-96 overflow-y-auto scrollbar">
+                                    {metrics.sortedMonths.slice(-18).map(m => {
+                                        const d = metrics.monthlyData[m];
+                                        const barWidth = Math.max(4, (d.churned / maxChurned) * 100);
+                                        return (
+                                            <div key={m} className="flex items-center gap-3 text-sm">
+                                                <span className="text-secondary font-mono" style={{minWidth:'70px'}}>{m}</span>
+                                                <div style={{flex:1,display:'flex',alignItems:'center',gap:'8px'}}>
+                                                    <div style={{width:`${barWidth}%`,height:'20px',background:d.churned > 0 ? 'linear-gradient(90deg,rgba(239,68,68,0.6),rgba(239,68,68,0.3))' : 'rgba(52,211,153,0.2)',borderRadius:'4px',minWidth:'4px'}}></div>
+                                                    <span className="text-xs text-secondary">{d.churned} left</span>
+                                                </div>
+                                                <span className="text-xs text-secondary" style={{minWidth:'50px'}}>+{d.started} new</span>
+                                                <span className="text-xs font-medium" style={{minWidth:'45px',color: d.churnRate > 10 ? '#f87171' : '#34d399'}}>{d.churnRate.toFixed(1)}%</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Active vs Churned over time */}
+                            <div className="card p-5">
+                                <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-4">Active Client Growth</h3>
+                                <div className="space-y-2 max-h-96 overflow-y-auto scrollbar">
+                                    {(() => {
+                                        const months = metrics.sortedMonths.slice(-18);
+                                        const maxActive = Math.max(...months.map(m => metrics.monthlyData[m].active), 1);
+                                        return months.map(m => {
+                                            const d = metrics.monthlyData[m];
+                                            const barWidth = Math.max(4, (d.active / maxActive) * 100);
+                                            return (
+                                                <div key={m} className="flex items-center gap-3 text-sm">
+                                                    <span className="text-secondary font-mono" style={{minWidth:'70px'}}>{m}</span>
+                                                    <div style={{flex:1}}>
+                                                        <div style={{width:`${barWidth}%`,height:'20px',background:'linear-gradient(90deg,rgba(6,182,212,0.5),rgba(139,92,246,0.3))',borderRadius:'4px',minWidth:'4px'}}></div>
+                                                    </div>
+                                                    <span className="text-sm font-medium text-brand-cyan" style={{minWidth:'30px'}}>{d.active}</span>
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+                                </div>
+                            </div>
+
+                            {/* Revenue by Source */}
+                            <div className="card p-5">
+                                <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-4">Revenue by Source</h3>
+                                {(() => {
+                                    const stripeSubs = dateFilteredSubs.filter(s => s.source === 'stripe' && s.active);
+                                    const whopSubs = dateFilteredSubs.filter(s => s.source === 'whop' && s.active);
+                                    const fanbasisSubs = dateFilteredSubs.filter(s => s.source === 'fanbasis' && s.active);
+                                    const stripeMRR = stripeSubs.reduce((sum, s) => sum + s.monthly, 0);
+                                    const whopMRR = whopSubs.reduce((sum, s) => sum + s.monthly, 0);
+                                    const fanbasisMRR = fanbasisSubs.reduce((sum, s) => sum + s.monthly, 0);
+                                    const totalMRR = stripeMRR + whopMRR + fanbasisMRR;
+                                    return (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <div className="flex justify-between text-sm mb-1">
+                                                    <span className="text-secondary">Stripe ({stripeSubs.length} active)</span>
+                                                    <span className="text-brand-cyan font-medium">{fmtCurrency(stripeMRR)}/mo</span>
+                                                </div>
+                                                <div style={{height:'12px',background:'#262626',borderRadius:'6px',overflow:'hidden'}}>
+                                                    <div style={{width:`${totalMRR > 0 ? (stripeMRR/totalMRR)*100 : 0}%`,height:'100%',background:'linear-gradient(90deg,#06b6d4,#3b82f6)',borderRadius:'6px'}}></div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="flex justify-between text-sm mb-1">
+                                                    <span className="text-secondary">Whop ({whopSubs.length} active)</span>
+                                                    <span className="text-brand-purple font-medium">{fmtCurrency(whopMRR)}/mo</span>
+                                                </div>
+                                                <div style={{height:'12px',background:'#262626',borderRadius:'6px',overflow:'hidden'}}>
+                                                    <div style={{width:`${totalMRR > 0 ? (whopMRR/totalMRR)*100 : 0}%`,height:'100%',background:'linear-gradient(90deg,#8b5cf6,#a855f7)',borderRadius:'6px'}}></div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="flex justify-between text-sm mb-1">
+                                                    <span className="text-secondary">Fanbasis ({fanbasisSubs.length} active)</span>
+                                                    <span style={{color:'#f472b6'}} className="font-medium">{fmtCurrency(fanbasisMRR)}/mo</span>
+                                                </div>
+                                                <div style={{height:'12px',background:'#262626',borderRadius:'6px',overflow:'hidden'}}>
+                                                    <div style={{width:`${totalMRR > 0 ? (fanbasisMRR/totalMRR)*100 : 0}%`,height:'100%',background:'linear-gradient(90deg,#f472b6,#ec4899)',borderRadius:'6px'}}></div>
+                                                </div>
+                                            </div>
+                                            <div className="pt-2 border-t border-dark-700 flex justify-between text-sm">
+                                                <span className="text-secondary">Total MRR</span>
+                                                <span className="text-white font-bold">{fmtCurrency(totalMRR)}/mo</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm">
+                                                <span className="text-secondary">Projected ARR</span>
+                                                <span className="text-white font-bold">{fmtCurrency(totalMRR * 12)}/yr</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
+                            {/* Avg Lifetime by Status */}
+                            <div className="card p-5">
+                                <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-4">Lifetime Comparison</h3>
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-secondary">Active Clients Avg Lifetime</span>
+                                        <span className="text-lg font-bold text-emerald-400">{metrics.avgLifetimeAll.toFixed(1)} months</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-secondary">Churned Clients Avg Lifetime</span>
+                                        <span className="text-lg font-bold text-red-400">{metrics.avgLifetimeChurned.toFixed(1)} months</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-secondary">Active Client Avg LTV</span>
+                                        <span className="text-lg font-bold text-brand-cyan">{fmtCurrency(metrics.avgActiveLTV)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-secondary">Overall Avg LTV</span>
+                                        <span className="text-lg font-bold text-brand-purple">{fmtCurrency(metrics.avgLTV)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Client Table View */}
+                    {view === 'clients' && (
+                        <div className="card p-5">
+                            <div className="flex flex-wrap items-center gap-3 mb-4">
+                                <input value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Search clients..." className="input-field border rounded-lg px-3 py-2 text-sm" style={{minWidth:'200px'}} />
+                                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field border rounded-lg px-3 py-2 text-sm">
+                                    <option value="all">All Statuses</option>
+                                    <option value="active">Active</option>
+                                    <option value="churned">Churned</option>
+                                    <option value="at-risk">At Risk</option>
+                                </select>
+                                <span className="text-xs text-secondary ml-auto">{filteredSubs.length} clients</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-dark-700">
+                                            <SortHeader label="Client" sortKey="customerName" />
+                                            <SortHeader label="Source" sortKey="source" />
+                                            <SortHeader label="Status" sortKey="status" />
+                                            <SortHeader label="Plan" sortKey="productName" />
+                                            <SortHeader label="Monthly" sortKey="monthly" />
+                                            <SortHeader label="Start Date" sortKey="created" />
+                                            <SortHeader label="End Date" sortKey="endedAt" />
+                                            <SortHeader label="Lifetime" sortKey="lifetimeMonths" />
+                                            <SortHeader label="Est. LTV" sortKey="totalRevenue" />
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredSubs.map(sub => (
+                                            <tr key={sub.id} className="border-b border-dark-700/50 hover:bg-dark-800/50">
+                                                <td className="py-3 px-4">
+                                                    <div className="font-medium text-primary">{sub.customerName || '—'}</div>
+                                                    {sub.customerEmail && <div className="text-xs text-secondary">{sub.customerEmail}</div>}
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <span style={{background: sub.source === 'stripe' ? 'rgba(99,102,241,0.15)' : sub.source === 'fanbasis' ? 'rgba(244,114,182,0.15)' : 'rgba(251,191,36,0.15)', color: sub.source === 'stripe' ? '#818cf8' : sub.source === 'fanbasis' ? '#f472b6' : '#fbbf24', padding:'2px 8px', borderRadius:'9999px', fontSize:'11px'}}>{sub.source}</span>
+                                                </td>
+                                                <td className="py-3 px-4"><StatusBadge sub={sub} /></td>
+                                                <td className="py-3 px-4 text-secondary">{sub.productName || '—'}</td>
+                                                <td className="py-3 px-4 text-primary font-medium">{fmtCurrency(sub.monthly)}</td>
+                                                <td className="py-3 px-4 text-secondary">{fmtDate(sub.created)}</td>
+                                                <td className="py-3 px-4 text-secondary">{sub.endDate ? fmtDate(sub.endDate) : (sub.cancelAtPeriodEnd ? <span className="text-amber-400">Pending</span> : '—')}</td>
+                                                <td className="py-3 px-4 text-primary">{sub.lifetimeMonths} mo</td>
+                                                <td className="py-3 px-4 font-medium text-brand-cyan">{fmtCurrency(sub.totalRevenue)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Cohort Retention View */}
+                    {view === 'cohorts' && (
+                        <div className="card p-5">
+                            <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-4">Cohort Retention Analysis</h3>
+                            <p className="text-xs text-secondary mb-4">Shows % of clients still active after N months since signup. Cohorts with fewer than 2 clients are hidden.</p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-dark-700">
+                                            <th className="text-left py-3 px-3 text-xs font-semibold text-secondary uppercase">Cohort</th>
+                                            <th className="text-center py-3 px-2 text-xs font-semibold text-secondary">Size</th>
+                                            {[...Array(13)].map((_, i) => (
+                                                <th key={i} className="text-center py-3 px-2 text-xs font-semibold text-secondary">M{i}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {cohorts.map(c => (
+                                            <tr key={c.month} className="border-b border-dark-700/50">
+                                                <td className="py-2 px-3 font-mono text-secondary">{c.month}</td>
+                                                <td className="py-2 px-2 text-center text-primary font-medium">{c.size}</td>
+                                                {[...Array(13)].map((_, i) => {
+                                                    const val = c.retention[i];
+                                                    if (val === undefined) return <td key={i} className="py-2 px-2 text-center text-secondary">—</td>;
+                                                    const bg = val >= 80 ? 'rgba(52,211,153,0.25)' : val >= 50 ? 'rgba(251,191,36,0.20)' : 'rgba(239,68,68,0.20)';
+                                                    const color = val >= 80 ? '#34d399' : val >= 50 ? '#fbbf24' : '#f87171';
+                                                    return <td key={i} className="py-2 px-2 text-center text-xs font-medium" style={{background: bg, color: color}}>{val}%</td>;
+                                                })}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {cohorts.length === 0 && <div className="text-center py-8 text-secondary">No cohort data available yet (need cohorts with 2+ clients)</div>}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
         // ========== MAIN APP ==========
         const App = () => {
             const [user, setUser] = useState(null);
@@ -6888,6 +7467,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     case 'client-map': return <ClientMapTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                     case 'speed-to-lead': return <SpeedToLeadTab clients={clients} setupData={setupData} />;
                     case 'users': return <UsersTab />;
+                    case 'ltv-churn': return <LTVChurnTab />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
