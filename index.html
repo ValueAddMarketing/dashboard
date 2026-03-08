@@ -4751,16 +4751,57 @@ ${transcript}`;
                 if (!setupData.length) return [];
                 return setupData.filter(s => s.client).map(s => {
                     const contractInfo = parseContractNotes(s.contractNotes);
-                    // Collect extra emails from closing data CSV for this client
+                    // Collect extra emails from Closer Form sheet for this client
                     const closingRow = closingLookup[s.client.toLowerCase()] || null;
                     const extraEmails = [];
+                    let autoWhopId = whopMappings[s.client] || null; // manual mapping takes priority
                     if (closingRow) {
-                        const ce = (closingRow['Client Email '] || closingRow['Client Email'] || '').trim();
+                        const ce = (closingRow['Client Email'] || closingRow['Client Email '] || '').trim();
                         if (ce) extraEmails.push(ce);
                         const pe = (closingRow['Payment processor username or email'] || '').trim();
-                        if (pe) { const m = pe.match(/[\w.+-]+@[\w.-]+\.\w+/i); if (m) extraEmails.push(m[0]); }
+                        if (pe) {
+                            const peEmail = pe.match(/[\w.+-]+@[\w.-]+\.\w+/i);
+                            if (peEmail) extraEmails.push(peEmail[0]);
+                            // If processor platform is Whop, directly look up membership by email/username
+                            const procPlatform = (closingRow['Payment processor platform'] || '').trim();
+                            if (/whop/i.test(procPlatform) && !autoWhopId) {
+                                // Try email lookup first, then username lookup
+                                const emailKey = peEmail ? peEmail[0].toLowerCase() : null;
+                                const usernameKey = pe.toLowerCase().replace(/\s+/g, '');
+                                const whopRow = (emailKey && whopEmailToMembership[emailKey]) ||
+                                    whopEmailToMembership[usernameKey] ||
+                                    whopEmailToMembership['name:' + usernameKey] ||
+                                    // Also try matching by iterating whopCsv for username match
+                                    whopCsv.find(r => (r['Username'] || '').toLowerCase() === usernameKey || (r['Email'] || '').toLowerCase() === usernameKey);
+                                if (whopRow) {
+                                    const memIds = (whopRow['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                                    if (memIds.length > 0) autoWhopId = memIds[0];
+                                }
+                            }
+                        }
                     }
-                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, whopMappings[s.client], extraEmails);
+                    // Also check Setup Timing platform field for Whop email (e.g. "Whop : user@email.com")
+                    if (!autoWhopId && /whop/i.test(s.platform || '')) {
+                        const platEmail = ((s.platform || '').match(/[\w.+-]+@[\w.-]+\.\w+/i) || [])[0];
+                        if (platEmail) {
+                            const wr = whopEmailToMembership[platEmail.toLowerCase()];
+                            if (wr) {
+                                const mids = (wr['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                                if (mids.length > 0) autoWhopId = mids[0];
+                            }
+                        }
+                        // Try client email from closer form against Whop CSV too
+                        if (!autoWhopId) {
+                            for (const em of extraEmails) {
+                                const wr = whopEmailToMembership[em.toLowerCase()];
+                                if (wr) {
+                                    const mids = (wr['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                                    if (mids.length > 0) { autoWhopId = mids[0]; break; }
+                                }
+                            }
+                        }
+                    }
+                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, autoWhopId, extraEmails);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
@@ -4802,7 +4843,7 @@ ${transcript}`;
                     } : null;
                     return { client: s.client, setup: s, contractInfo, closingNotes, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
                 });
-            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup]);
+            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup, whopEmailToMembership, whopCsv]);
 
             const flagOptions = useMemo(() => { const s = new Set(); enriched.forEach(c => c.flags.forEach(f => s.add(f))); return [...s].sort(); }, [enriched]);
 
