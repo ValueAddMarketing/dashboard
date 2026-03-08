@@ -4759,13 +4759,6 @@ ${transcript}`;
                         const pe = (closingRow['Payment processor username or email'] || '').trim();
                         if (pe) { const m = pe.match(/[\w.+-]+@[\w.-]+\.\w+/i); if (m) extraEmails.push(m[0]); }
                     }
-                    if (s.client.toLowerCase().includes('yuliana')) {
-                        console.log('[DEBUG Yuliana]', { client: s.client, closingRow: !!closingRow, extraEmails, whopSubsCount: whopSubs.length, closingLookupSize: Object.keys(closingLookup).length, nameEmail: s.nameEmail, platform: s.platform });
-                        if (extraEmails.length > 0) {
-                            const matchingWhop = whopSubs.filter(m => extraEmails.some(ex => (m.customerEmail || '').toLowerCase().includes(ex.toLowerCase())));
-                            console.log('[DEBUG Yuliana] Whop subs matching by email:', matchingWhop.length, matchingWhop.map(m => ({ id: m.id, name: m.customerName, email: m.customerEmail })));
-                        }
-                    }
                     const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, whopMappings[s.client], extraEmails);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
