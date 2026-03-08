@@ -4410,6 +4410,7 @@ ${transcript}`;
             const [linkWhopClient, setLinkWhopClient] = useState(null);
             const [linkWhopSearch, setLinkWhopSearch] = useState('');
             const [whopCsv, setWhopCsv] = useState([]);
+            const [closingData, setClosingData] = useState([]);
             const [pendingApprovals, setPendingApprovals] = useState([]);
             const [dismissedApprovals, setDismissedApprovals] = useState(() => {
                 try { return JSON.parse(localStorage.getItem('vam_whop_dismissed') || '[]'); } catch(e) { return []; }
@@ -4516,32 +4517,49 @@ ${transcript}`;
                     console.log('[WhopCSV] Loaded', rows.length, 'rows. Sample:', rows.slice(0, 2).map(r => r['Name'] + ' | ' + r['Email'] + ' | ' + r['Membership IDs']));
                     setWhopCsv(rows);
                 }).catch(err => console.error('[WhopCSV] Failed to load:', err));
+
+                // Also load closing data CSV (has client emails + Whop emails)
+                fetch('/closing-data.csv').then(r => r.text()).then(text => {
+                    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+                    const rows = (parsed.data || []).filter(r => r['Client Full Name']);
+                    console.log('[ClosingCSV] Loaded', rows.length, 'clients');
+                    setClosingData(rows);
+                }).catch(err => console.error('[ClosingCSV] Failed to load:', err));
             }, []);
 
-            // Run auto-matching when CSV + setupData are ready
+            // Build closing data lookup: client name → closing info (emails, notes, etc.)
+            const closingLookup = useMemo(() => {
+                const lookup = {};
+                for (const row of closingData) {
+                    const name = (row['Client Full Name'] || '').trim();
+                    if (name) lookup[name.toLowerCase()] = row;
+                }
+                return lookup;
+            }, [closingData]);
+
+            // Build Whop email → membership lookup from Whop CSV
+            const whopEmailToMembership = useMemo(() => {
+                const lookup = {};
+                for (const row of whopCsv) {
+                    const email = (row['Email'] || '').toLowerCase().trim();
+                    if (email) lookup[email] = row;
+                    const name = (row['Name'] || '').toLowerCase().trim();
+                    if (name) { if (!lookup['name:' + name]) lookup['name:' + name] = row; }
+                }
+                return lookup;
+            }, [whopCsv]);
+
+            // Run auto-matching when CSVs + setupData are ready
             useEffect(() => {
                 if (!whopCsv.length || !setupData.length) return;
                 const existingMapped = new Set(Object.keys(whopMappings));
                 const usedMembershipIds = new Set(Object.values(whopMappings));
                 const suggestions = [];
 
-                const parseDateFlex = (d) => {
-                    if (!d) return null;
-                    // Try MM/DD/YYYY or M/D/YY
-                    const parts = d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-                    if (parts) {
-                        const yr = parts[3].length === 2 ? '20' + parts[3] : parts[3];
-                        return new Date(parseInt(yr), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                    }
-                    // Try ISO / general date string
-                    const t = Date.parse(d);
-                    return isNaN(t) ? null : new Date(t);
-                };
-
                 for (const s of setupData) {
                     if (!s.client || existingMapped.has(s.client)) continue;
 
-                    // Skip if already matched via API (whopSubs has names from CSV enrichment)
+                    // Skip if already matched via API
                     const matcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const apiMatch = whopSubs.find(m => {
                         const n = (m.customerName || '').toLowerCase(), e = (m.customerEmail || '').toLowerCase();
@@ -4549,8 +4567,55 @@ ${transcript}`;
                     });
                     if (apiMatch) continue;
 
-                    // Try CSV name/email match
+                    // Collect all known emails for this client
+                    const clientEmails = new Set();
+                    // From platform field (e.g. "Whop : email@example.com")
+                    const platEmail = ((s.platform || '').match(/[\w.+-]+@[\w.-]+\.\w+/i) || [])[0];
+                    if (platEmail) clientEmails.add(platEmail.toLowerCase());
+                    // From nameEmail field
+                    if (s.nameEmail) { const em = s.nameEmail.match(/[\w.+-]+@[\w.-]+\.\w+/i); if (em) clientEmails.add(em[0].toLowerCase()); }
+                    // From closing data CSV
+                    const closingRow = closingLookup[s.client.toLowerCase()];
+                    if (closingRow) {
+                        const ce = (closingRow['Client Email '] || closingRow['Client Email'] || '').trim();
+                        if (ce) clientEmails.add(ce.toLowerCase());
+                        const pe = (closingRow['Payment processor username or email'] || '').trim();
+                        if (pe) {
+                            // May contain email directly or "username"
+                            const peEmail = pe.match(/[\w.+-]+@[\w.-]+\.\w+/i);
+                            if (peEmail) clientEmails.add(peEmail[0].toLowerCase());
+                            else if (pe.length > 2) clientEmails.add(pe.toLowerCase()); // might be a username
+                        }
+                    }
+
+                    // Try to find Whop member by email match
                     let matched = false;
+                    for (const email of clientEmails) {
+                        const whopRow = whopEmailToMembership[email];
+                        if (!whopRow) continue;
+                        const memIds = (whopRow['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                        if (memIds.some(id => usedMembershipIds.has(id))) continue;
+                        const memId = memIds[0];
+                        if (memId) {
+                            suggestions.push({
+                                client: s.client, membershipId: memId,
+                                matchType: 'email',
+                                matchDetail: email,
+                                whopName: whopRow['Name'] || whopRow['Username'] || '(no name)',
+                                whopEmail: whopRow['Email'] || '',
+                                whopJoined: whopRow['Joined date'] || '',
+                                whopSpend: whopRow['Platform spend (USD)'] || '0',
+                                paidDate: s.paidDate || '',
+                                key: s.client + '|' + memId,
+                            });
+                            usedMembershipIds.add(memId);
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (matched) continue;
+
+                    // Try Whop CSV name match
                     for (const row of whopCsv) {
                         const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
                         if (memIds.some(id => usedMembershipIds.has(id))) continue;
@@ -4568,7 +4633,6 @@ ${transcript}`;
                                     whopJoined: row['Joined date'] || '',
                                     whopSpend: row['Platform spend (USD)'] || '0',
                                     paidDate: s.paidDate || '',
-                                    diffDays: null,
                                     key: s.client + '|' + memId,
                                 });
                                 usedMembershipIds.add(memId);
@@ -4577,44 +4641,12 @@ ${transcript}`;
                             }
                         }
                     }
-                    if (matched) continue;
-
-                    // Date-based fallback
-                    const clientDate = parseDateFlex(s.paidDate);
-                    if (!clientDate) continue;
-
-                    let bestMatch = null, bestDiff = Infinity;
-                    for (const row of whopCsv) {
-                        const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
-                        if (memIds.some(id => usedMembershipIds.has(id))) continue;
-                        const joinedDate = parseDateFlex(row['Joined date']);
-                        if (!joinedDate) continue;
-                        const diffDays = Math.abs((clientDate - joinedDate) / 86400000);
-                        if (diffDays <= 7 && diffDays < bestDiff) {
-                            bestDiff = diffDays;
-                            bestMatch = { row, memId: memIds[0], diffDays: Math.round(diffDays) };
-                        }
-                    }
-                    if (bestMatch) {
-                        suggestions.push({
-                            client: s.client, membershipId: bestMatch.memId,
-                            matchType: 'date',
-                            whopName: bestMatch.row['Name'] || bestMatch.row['Username'] || '(no name)',
-                            whopEmail: bestMatch.row['Email'] || '',
-                            whopJoined: bestMatch.row['Joined date'] || '',
-                            whopSpend: bestMatch.row['Platform spend (USD)'] || '0',
-                            paidDate: s.paidDate || '',
-                            diffDays: bestMatch.diffDays,
-                            key: s.client + '|' + bestMatch.memId,
-                        });
-                        usedMembershipIds.add(bestMatch.memId);
-                    }
                 }
 
-                console.log('[WhopCSV] Suggestions:', suggestions.length, '(name:', suggestions.filter(s => s.matchType === 'name').length, ', date:', suggestions.filter(s => s.matchType === 'date').length, ')');
+                console.log('[WhopMatch] Suggestions:', suggestions.length, '(email:', suggestions.filter(s => s.matchType === 'email').length, ', name:', suggestions.filter(s => s.matchType === 'name').length, ')');
                 const dismissedSet = new Set(dismissedApprovals);
                 setPendingApprovals(suggestions.filter(a => !dismissedSet.has(a.key)));
-            }, [whopCsv, setupData, whopSubs]);
+            }, [whopCsv, closingData, setupData, whopSubs, whopEmailToMembership, closingLookup]);
 
             useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [aiMessages]);
 
@@ -4738,9 +4770,19 @@ ${transcript}`;
                     if (stripeInvoices.length > 0) paymentSources.push('Stripe');
                     if (whopPayments.length > 0) paymentSources.push('Whop');
                     if (contractInfo.platforms.length > 0 && paymentSources.length > 0 && !contractInfo.platforms.some(p => paymentSources.includes(p))) flags.push('Platform Mismatch');
-                    return { client: s.client, setup: s, contractInfo, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
+                    // Attach closing data notes
+                    const closingRow = closingLookup[s.client.toLowerCase()] || null;
+                    const closingNotes = closingRow ? {
+                        generalNotes: closingRow['General notes'] || '',
+                        onboardingNotes: closingRow['Notes To the onboarding specialist only'] || '',
+                        potentialIssue: closingRow['one thing you foresee as a potential issue with this client'] || '',
+                        clientEmail: (closingRow['Client Email '] || closingRow['Client Email'] || '').trim(),
+                        paymentProcessorEmail: (closingRow['Payment processor username or email'] || '').trim(),
+                        closeDate: closingRow['Date of The Close (payment)'] || '',
+                    } : null;
+                    return { client: s.client, setup: s, contractInfo, closingNotes, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
                 });
-            }, [setupData, invoiceData, whopSubs, whopMappings]);
+            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup]);
 
             const flagOptions = useMemo(() => { const s = new Set(); enriched.forEach(c => c.flags.forEach(f => s.add(f))); return [...s].sort(); }, [enriched]);
 
@@ -4999,6 +5041,17 @@ ${transcript}`;
                                         {selectedData.setup.paymentNotes && <div className="mt-2 p-2 rounded text-xs" style={{background:'var(--bg-main, #0d1117)'}}><span className="text-secondary">Payment Notes:</span><div className="text-slate-300 mt-1 whitespace-pre-wrap">{selectedData.setup.paymentNotes}</div></div>}
                                         {selectedData.contractInfo.loanOfficer && <div className="mt-2 p-2 bg-purple-500/10 border border-purple-500/30 rounded text-xs"><span className="text-purple-400 font-medium">Loan Officer involved</span>{selectedData.contractInfo.loanOfficerName && <span className="text-slate-300 ml-1">({selectedData.contractInfo.loanOfficerName})</span>}</div>}
                                     </div>
+                                    {selectedData.closingNotes && (selectedData.closingNotes.generalNotes || selectedData.closingNotes.onboardingNotes || selectedData.closingNotes.potentialIssue) && (
+                                        <div className="card rounded-xl p-4">
+                                            <h3 className="text-sm font-semibold text-amber-400 mb-3">Sales / Onboarding Notes</h3>
+                                            {selectedData.closingNotes.clientEmail && <div className="text-xs mb-2"><span className="text-secondary">Client Email:</span> <span className="text-white ml-1">{selectedData.closingNotes.clientEmail}</span></div>}
+                                            {selectedData.closingNotes.paymentProcessorEmail && <div className="text-xs mb-2"><span className="text-secondary">Payment Processor:</span> <span className="text-white ml-1">{selectedData.closingNotes.paymentProcessorEmail}</span></div>}
+                                            {selectedData.closingNotes.closeDate && <div className="text-xs mb-2"><span className="text-secondary">Close Date:</span> <span className="text-white ml-1">{selectedData.closingNotes.closeDate}</span></div>}
+                                            {selectedData.closingNotes.generalNotes && <div className="mt-2 p-2 rounded text-xs" style={{background:'var(--bg-main, #0d1117)'}}><span className="text-secondary">General Notes:</span><div className="text-slate-300 mt-1 whitespace-pre-wrap">{selectedData.closingNotes.generalNotes}</div></div>}
+                                            {selectedData.closingNotes.onboardingNotes && <div className="mt-2 p-2 rounded text-xs" style={{background:'var(--bg-main, #0d1117)'}}><span className="text-secondary">Onboarding Notes:</span><div className="text-slate-300 mt-1 whitespace-pre-wrap">{selectedData.closingNotes.onboardingNotes}</div></div>}
+                                            {selectedData.closingNotes.potentialIssue && <div className="mt-2 p-2 rounded text-xs bg-amber-500/10 border border-amber-500/30"><span className="text-amber-400 font-medium">Potential Issue:</span><div className="text-slate-300 mt-1 whitespace-pre-wrap">{selectedData.closingNotes.potentialIssue}</div></div>}
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-3 gap-3">
                                         <div className="card rounded-xl p-3 text-center"><div className="text-lg font-bold text-emerald-400">{fmtC(selectedData.totalCollected)}</div><div className="text-xs text-slate-500">Total Collected</div></div>
                                         <div className="card rounded-xl p-3 text-center"><div className="text-lg font-bold text-red-400">{fmtC(selectedData.stripeUnpaidTotal)}</div><div className="text-xs text-slate-500">Unpaid/Failed</div></div>
