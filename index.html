@@ -4550,6 +4550,16 @@ ${transcript}`;
                 return lookup;
             }, [whopCsv]);
 
+            // Build membership ID → Whop CSV row lookup
+            const whopCsvByMemId = useMemo(() => {
+                const lookup = {};
+                for (const row of whopCsv) {
+                    const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim());
+                    for (const mid of memIds) { if (mid) lookup[mid] = row; }
+                }
+                return lookup;
+            }, [whopCsv]);
+
             // Run auto-matching when CSVs + setupData are ready
             useEffect(() => {
                 if (!whopCsv.length || !setupData.length) return;
@@ -4715,7 +4725,7 @@ ${transcript}`;
                 productName: m.productName
             });
 
-            const matchPayments = (clientName, nameEmail, platform, invoices, whopMemberships, manualWhopId, extraEmails) => {
+            const matchPayments = (clientName, nameEmail, platform, invoices, whopMemberships, manualWhopId, extraEmails, csvByMemId) => {
                 const cn = (clientName || '').toLowerCase().trim();
                 if (!cn) return { stripeInvoices: [], whopPayments: [] };
                 const matchName = makeNameMatcher(clientName, nameEmail, platform);
@@ -4739,10 +4749,32 @@ ${transcript}`;
                     const n = (m.customerName || '').toLowerCase(), e = (m.customerEmail || '').toLowerCase();
                     return matchFn(n, e);
                 }).map(mapWhopToPayment);
-                // Add manual mapping if not already matched
+                // Add manual/auto mapping if not already matched
                 if (manualWhopId && !wMatch.find(w => w.id === manualWhopId)) {
                     const manual = whopMemberships.find(m => m.id === manualWhopId);
-                    if (manual) wMatch.push(mapWhopToPayment(manual));
+                    if (manual) {
+                        wMatch.push(mapWhopToPayment(manual));
+                    } else if (csvByMemId) {
+                        // Membership not in API data — build from Whop CSV
+                        const csvRow = csvByMemId[manualWhopId];
+                        if (csvRow) {
+                            const spend = parseFloat(csvRow['Platform spend (USD)'] || '0') || 0;
+                            wMatch.push({
+                                id: manualWhopId,
+                                customerName: csvRow['Name'] || csvRow['Username'] || '',
+                                customerEmail: csvRow['Email'] || '',
+                                amountPaid: spend,
+                                amountPerPeriod: 0,
+                                paymentCount: spend > 0 ? 1 : 0,
+                                payments: spend > 0 ? [{ id: 'csv_' + manualWhopId, amount: spend, status: 'paid', created: (csvRow['Joined date'] || '').split(' ')[0] || null }] : [],
+                                status: 'active',
+                                created: (csvRow['Joined date'] || '').split(' ')[0] || null,
+                                currentPeriodEnd: null,
+                                interval: null,
+                                productName: 'Whop (from CSV)'
+                            });
+                        }
+                    }
                 }
                 return { stripeInvoices: sMatch, whopPayments: wMatch };
             };
@@ -4801,7 +4833,7 @@ ${transcript}`;
                             }
                         }
                     }
-                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, autoWhopId, extraEmails);
+                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, autoWhopId, extraEmails, whopCsvByMemId);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
@@ -4843,7 +4875,7 @@ ${transcript}`;
                     } : null;
                     return { client: s.client, setup: s, contractInfo, closingNotes, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
                 });
-            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup, whopEmailToMembership, whopCsv]);
+            }, [setupData, invoiceData, whopSubs, whopMappings, closingLookup, whopEmailToMembership, whopCsv, whopCsvByMemId]);
 
             const flagOptions = useMemo(() => { const s = new Set(); enriched.forEach(c => c.flags.forEach(f => s.add(f))); return [...s].sort(); }, [enriched]);
 
