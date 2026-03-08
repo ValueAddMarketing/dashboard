@@ -4790,8 +4790,7 @@ ${transcript}`;
                     if (stripeInvoices.length > 0) paymentSources.push('Stripe');
                     if (whopPayments.length > 0) paymentSources.push('Whop');
                     if (contractInfo.platforms.length > 0 && paymentSources.length > 0 && !contractInfo.platforms.some(p => paymentSources.includes(p))) flags.push('Platform Mismatch');
-                    // Attach closing data notes
-                    const closingRow = closingLookup[s.client.toLowerCase()] || null;
+                    // Attach closing data notes (reuses closingRow from above)
                     const closingNotes = closingRow ? {
                         generalNotes: closingRow['General notes'] || '',
                         onboardingNotes: closingRow['Notes To the onboarding specialist only'] || '',
