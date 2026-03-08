@@ -6304,6 +6304,23 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             const [sortConfig, setSortConfig] = useState({ key: 'created', dir: 'asc' });
             const [searchFilter, setSearchFilter] = useState('');
             const [statusFilter, setStatusFilter] = useState('all');
+            const [datePreset, setDatePreset] = useState('all');
+            const [customFrom, setCustomFrom] = useState('');
+            const [customTo, setCustomTo] = useState('');
+
+            const getDateRange = () => {
+                if (datePreset === 'custom') {
+                    return { from: customFrom ? new Date(customFrom) : null, to: customTo ? new Date(customTo + 'T23:59:59') : null };
+                }
+                if (datePreset === 'all') return { from: null, to: null };
+                const now = new Date();
+                const from = new Date(now);
+                const months = { '1m': 1, '3m': 3, '6m': 6, '1y': 12, '2y': 24 }[datePreset] || 0;
+                from.setMonth(from.getMonth() - months);
+                return { from, to: now };
+            };
+
+            const dateRange = getDateRange();
 
             useEffect(() => {
                 const cached = localStorage.getItem('vam_subscriptions');
@@ -6404,11 +6421,25 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 }).filter(s => s.startDate); // only include subs with valid start dates
             }, [allSubs]);
 
+            // Filter enriched subs by date range
+            const dateFilteredSubs = useMemo(() => {
+                const { from, to } = dateRange;
+                if (!from && !to) return enrichedSubs;
+                return enrichedSubs.filter(s => {
+                    if (!s.startDate) return false;
+                    // Include if the subscription was active during the date range
+                    // Started before or during the range AND (still active or ended during/after range start)
+                    const startedBeforeEnd = !to || s.startDate <= to;
+                    const endedAfterStart = !from || !s.endDate || s.endDate >= from;
+                    return startedBeforeEnd && endedAfterStart;
+                });
+            }, [enrichedSubs, dateRange.from?.getTime(), dateRange.to?.getTime()]);
+
             // KPI calculations
             const metrics = useMemo(() => {
-                const total = enrichedSubs.length;
-                const activeSubs = enrichedSubs.filter(s => s.active);
-                const churnedSubs = enrichedSubs.filter(s => s.churned);
+                const total = dateFilteredSubs.length;
+                const activeSubs = dateFilteredSubs.filter(s => s.active);
+                const churnedSubs = dateFilteredSubs.filter(s => s.churned);
                 const atRiskSubs = enrichedSubs.filter(s => s.atRisk && s.active);
 
                 const activeCount = activeSubs.length;
@@ -6418,10 +6449,10 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 const mrr = activeSubs.reduce((sum, s) => sum + s.monthly, 0);
                 const atRiskMRR = atRiskSubs.reduce((sum, s) => sum + s.monthly, 0);
 
-                const avgLifetimeAll = total > 0 ? enrichedSubs.reduce((sum, s) => sum + s.lifetimeMonths, 0) / total : 0;
+                const avgLifetimeAll = total > 0 ? dateFilteredSubs.reduce((sum, s) => sum + s.lifetimeMonths, 0) / total : 0;
                 const avgLifetimeChurned = churnedCount > 0 ? churnedSubs.reduce((sum, s) => sum + s.lifetimeMonths, 0) / churnedCount : 0;
 
-                const avgLTV = total > 0 ? enrichedSubs.reduce((sum, s) => sum + s.totalRevenue, 0) / total : 0;
+                const avgLTV = total > 0 ? dateFilteredSubs.reduce((sum, s) => sum + s.totalRevenue, 0) / total : 0;
                 const avgActiveLTV = activeCount > 0 ? activeSubs.reduce((sum, s) => sum + s.totalRevenue, 0) / activeCount : 0;
 
                 // Overall churn rate: churned / total
@@ -6429,7 +6460,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
                 // Monthly churn data
                 const monthlyData = {};
-                for (const sub of enrichedSubs) {
+                for (const sub of dateFilteredSubs) {
                     const sm = sub.startMonth;
                     if (sm) {
                         if (!monthlyData[sm]) monthlyData[sm] = { started: 0, churned: 0, active: 0 };
@@ -6466,12 +6497,12 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     overallChurnRate, recentChurnRate,
                     monthlyData, sortedMonths
                 };
-            }, [enrichedSubs]);
+            }, [dateFilteredSubs]);
 
             // Cohort retention
             const cohorts = useMemo(() => {
                 const cohortMap = {};
-                for (const sub of enrichedSubs) {
+                for (const sub of dateFilteredSubs) {
                     const cm = sub.startMonth;
                     if (!cm) continue;
                     if (!cohortMap[cm]) cohortMap[cm] = [];
@@ -6496,11 +6527,11 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     }
                     return { month: ck, size, retention };
                 }).filter(c => c.size >= 2); // only show cohorts with 2+ clients
-            }, [enrichedSubs]);
+            }, [dateFilteredSubs]);
 
             // Sorting & filtering for table
             const filteredSubs = useMemo(() => {
-                let subs = [...enrichedSubs];
+                let subs = [...dateFilteredSubs];
                 if (searchFilter) {
                     const q = searchFilter.toLowerCase();
                     subs = subs.filter(s => s.customerName.toLowerCase().includes(q) || s.customerEmail.toLowerCase().includes(q));
@@ -6523,7 +6554,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     });
                 }
                 return subs;
-            }, [enrichedSubs, searchFilter, statusFilter, sortConfig]);
+            }, [dateFilteredSubs, searchFilter, statusFilter, sortConfig]);
 
             const toggleSort = (key) => {
                 if (sortConfig.key === key) setSortConfig({ key, dir: sortConfig.dir === 'asc' ? 'desc' : 'asc' });
@@ -6577,6 +6608,39 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                     {v === 'overview' ? 'Overview' : v === 'clients' ? 'Client Table' : 'Cohort Retention'}
                                 </button>
                             ))}
+                        </div>
+                    </div>
+
+                    {/* Date Range Filter */}
+                    <div className="card p-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-xs font-semibold text-secondary uppercase tracking-wide">Time Range:</span>
+                            {[
+                                { id: 'all', label: 'All Time' },
+                                { id: '1m', label: '1 Month' },
+                                { id: '3m', label: '3 Months' },
+                                { id: '6m', label: '6 Months' },
+                                { id: '1y', label: '1 Year' },
+                                { id: '2y', label: '2 Years' },
+                                { id: 'custom', label: 'Custom' },
+                            ].map(p => (
+                                <button key={p.id} onClick={() => setDatePreset(p.id)}
+                                    className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-all ' + (datePreset === p.id ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30' : 'text-secondary hover:text-white hover:bg-dark-700 border border-transparent')}>
+                                    {p.label}
+                                </button>
+                            ))}
+                            {datePreset === 'custom' && (
+                                <div className="flex items-center gap-2 ml-2">
+                                    <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="input-field border rounded-lg px-2 py-1.5 text-xs" />
+                                    <span className="text-secondary text-xs">to</span>
+                                    <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="input-field border rounded-lg px-2 py-1.5 text-xs" />
+                                </div>
+                            )}
+                            {datePreset !== 'all' && (
+                                <span className="text-xs text-secondary ml-auto">
+                                    Showing {dateFilteredSubs.length} of {enrichedSubs.length} subscriptions
+                                </span>
+                            )}
                         </div>
                     </div>
 
@@ -6643,8 +6707,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             <div className="card p-5">
                                 <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-4">Revenue by Source</h3>
                                 {(() => {
-                                    const stripeSubs = enrichedSubs.filter(s => s.source === 'stripe' && s.active);
-                                    const whopSubs = enrichedSubs.filter(s => s.source === 'whop' && s.active);
+                                    const stripeSubs = dateFilteredSubs.filter(s => s.source === 'stripe' && s.active);
+                                    const whopSubs = dateFilteredSubs.filter(s => s.source === 'whop' && s.active);
                                     const stripeMRR = stripeSubs.reduce((sum, s) => sum + s.monthly, 0);
                                     const whopMRR = whopSubs.reduce((sum, s) => sum + s.monthly, 0);
                                     const totalMRR = stripeMRR + whopMRR;
