@@ -4324,7 +4324,24 @@ ${transcript}`;
             const [aiInput, setAiInput] = useState('');
             const [aiLoading, setAiLoading] = useState(false);
             const [whopSubs, setWhopSubs] = useState([]);
+            const [whopMappings, setWhopMappings] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('vam_whop_mappings') || '{}'); } catch(e) { return {}; }
+            });
+            const [linkWhopClient, setLinkWhopClient] = useState(null);
+            const [linkWhopSearch, setLinkWhopSearch] = useState('');
             const aiEndRef = useRef(null);
+
+            const saveWhopMapping = (clientName, whopMembershipId) => {
+                const updated = { ...whopMappings, [clientName]: whopMembershipId };
+                setWhopMappings(updated);
+                try { localStorage.setItem('vam_whop_mappings', JSON.stringify(updated)); } catch(e) {}
+            };
+            const removeWhopMapping = (clientName) => {
+                const updated = { ...whopMappings };
+                delete updated[clientName];
+                setWhopMappings(updated);
+                try { localStorage.setItem('vam_whop_mappings', JSON.stringify(updated)); } catch(e) {}
+            };
 
             useEffect(() => {
                 const invoiceCached = localStorage.getItem('vam_billing_invoices');
@@ -4423,7 +4440,22 @@ ${transcript}`;
                 };
             };
 
-            const matchPayments = (clientName, nameEmail, platform, invoices, whopMemberships) => {
+            const mapWhopToPayment = (m) => ({
+                id: m.id,
+                customerName: m.customerName,
+                customerEmail: m.customerEmail,
+                amountPaid: m.totalPaid || 0,
+                amountPerPeriod: m.amount || 0,
+                paymentCount: m.paymentCount || 0,
+                payments: m.payments || [],
+                status: m.status,
+                created: m.created,
+                currentPeriodEnd: m.currentPeriodEnd,
+                interval: m.interval,
+                productName: m.productName
+            });
+
+            const matchPayments = (clientName, nameEmail, platform, invoices, whopMemberships, manualWhopId) => {
                 const cn = (clientName || '').toLowerCase().trim();
                 if (!cn) return { stripeInvoices: [], whopPayments: [] };
                 const matchName = makeNameMatcher(clientName, nameEmail, platform);
@@ -4431,23 +4463,16 @@ ${transcript}`;
                     const n = (inv.customerName || '').toLowerCase(), e = (inv.customerEmail || '').toLowerCase();
                     return matchName(n, e);
                 });
+                // Auto-matched
                 const wMatch = whopMemberships.filter(m => {
                     const n = (m.customerName || '').toLowerCase(), e = (m.customerEmail || '').toLowerCase();
                     return matchName(n, e);
-                }).map(m => ({
-                    id: m.id,
-                    customerName: m.customerName,
-                    customerEmail: m.customerEmail,
-                    amountPaid: m.totalPaid || 0,
-                    amountPerPeriod: m.amount || 0,
-                    paymentCount: m.paymentCount || 0,
-                    payments: m.payments || [],
-                    status: m.status,
-                    created: m.created,
-                    currentPeriodEnd: m.currentPeriodEnd,
-                    interval: m.interval,
-                    productName: m.productName
-                }));
+                }).map(mapWhopToPayment);
+                // Add manual mapping if not already matched
+                if (manualWhopId && !wMatch.find(w => w.id === manualWhopId)) {
+                    const manual = whopMemberships.find(m => m.id === manualWhopId);
+                    if (manual) wMatch.push(mapWhopToPayment(manual));
+                }
                 return { stripeInvoices: sMatch, whopPayments: wMatch };
             };
 
@@ -4455,7 +4480,7 @@ ${transcript}`;
                 if (!setupData.length) return [];
                 return setupData.filter(s => s.client).map(s => {
                     const contractInfo = parseContractNotes(s.contractNotes);
-                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs);
+                    const { stripeInvoices, whopPayments } = matchPayments(s.client, s.nameEmail, s.platform, invoiceData.stripe, whopSubs, whopMappings[s.client]);
                     const nameMatcher = makeNameMatcher(s.client, s.nameEmail, s.platform);
                     const allUpcoming = (invoiceData.stripeUpcoming || []).filter(u => {
                         const n = (u.customerName || '').toLowerCase(), e = (u.customerEmail || '').toLowerCase();
@@ -4488,7 +4513,7 @@ ${transcript}`;
                     if (contractInfo.platforms.length > 0 && paymentSources.length > 0 && !contractInfo.platforms.some(p => paymentSources.includes(p))) flags.push('Platform Mismatch');
                     return { client: s.client, setup: s, contractInfo, stripeInvoices, whopPayments, upcoming, crmFees, stripePaidCount, stripeTotalPaid, stripeUnpaidCount, stripeUnpaidTotal, whopTotalPaid, totalCollected, mrrVal, expectedRevenue, revenueGap, moPaymentsCollected, nextBillingDate: upcoming?.nextBillingDate || null, nextBillingAmount: upcoming?.amount || null, totalPayments: stripePaidCount + whopPayments.length, flags, paymentSources };
                 });
-            }, [setupData, invoiceData, whopSubs]);
+            }, [setupData, invoiceData, whopSubs, whopMappings]);
 
             const flagOptions = useMemo(() => { const s = new Set(); enriched.forEach(c => c.flags.forEach(f => s.add(f))); return [...s].sort(); }, [enriched]);
 
@@ -4717,8 +4742,14 @@ ${transcript}`;
                                             ))}</div>
                                         )}
                                     </div>
-                                    <div><h3 className="text-sm font-semibold text-blue-400 mb-2">Whop Memberships ({selectedData.whopPayments.length})</h3>
-                                        {selectedData.whopPayments.length === 0 ? <div className="text-xs text-slate-500 p-3 card rounded-xl">No Whop memberships found</div> : (
+                                    <div><div className="flex items-center justify-between mb-2">
+                                        <h3 className="text-sm font-semibold text-blue-400">Whop Memberships ({selectedData.whopPayments.length})</h3>
+                                        <div className="flex gap-2">
+                                            {whopMappings[selectedClient] && <button onClick={() => removeWhopMapping(selectedClient)} className="px-2 py-1 rounded text-xs bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20" style={{cursor:'pointer'}}>Unlink</button>}
+                                            <button onClick={() => { setLinkWhopClient(selectedClient); setLinkWhopSearch(''); }} className="px-2 py-1 rounded text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20" style={{cursor:'pointer'}}>{selectedData.whopPayments.length > 0 ? 'Re-link Whop' : 'Link Whop'}</button>
+                                        </div>
+                                    </div>
+                                        {selectedData.whopPayments.length === 0 ? <div className="text-xs text-slate-500 p-3 card rounded-xl">No Whop memberships found — click "Link Whop" to manually match</div> : (
                                             <div className="space-y-2">{selectedData.whopPayments.map(p => (
                                                 <div key={p.id} className="card rounded-lg p-3">
                                                     <div className="flex items-center justify-between">
@@ -4743,6 +4774,60 @@ ${transcript}`;
                                             ))}</div>
                                         )}
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Link Whop Modal */}
+                    {linkWhopClient && (
+                        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={() => setLinkWhopClient(null)}>
+                            <div style={{width:'520px',maxWidth:'90vw',maxHeight:'80vh',background:'var(--bg-card, #161b22)',border:'1px solid var(--border, #21262d)',borderRadius:'16px',display:'flex',flexDirection:'column'}} onClick={e => e.stopPropagation()}>
+                                <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border, #21262d)'}}>
+                                    <h3 className="text-sm font-bold text-white">Link Whop Member to {linkWhopClient}</h3>
+                                    <input type="text" value={linkWhopSearch} onChange={e => setLinkWhopSearch(e.target.value)} placeholder="Search by username, email, or product..." className="w-full mt-3 input-field border rounded-lg px-3 py-2 text-sm" autoFocus />
+                                </div>
+                                <div style={{flex:1,overflow:'auto',padding:'8px 12px'}}>
+                                    {(() => {
+                                        const q = linkWhopSearch.toLowerCase().trim();
+                                        const matched = whopSubs.filter(m => {
+                                            if (!q) return true;
+                                            return (m.customerName || '').toLowerCase().includes(q) || (m.customerEmail || '').toLowerCase().includes(q) || (m.productName || '').toLowerCase().includes(q) || (m.id || '').toLowerCase().includes(q);
+                                        }).slice(0, 50);
+                                        // Find which membership IDs are already mapped to other clients
+                                        const usedIds = new Set(Object.values(whopMappings));
+                                        return matched.length === 0 ? (
+                                            <div className="text-xs text-slate-500 text-center py-8">No Whop members match "{linkWhopSearch}"</div>
+                                        ) : (
+                                            <div className="space-y-1">{matched.map(m => {
+                                                const isCurrentMapping = whopMappings[linkWhopClient] === m.id;
+                                                const isMappedElsewhere = usedIds.has(m.id) && !isCurrentMapping;
+                                                const mappedTo = isMappedElsewhere ? Object.entries(whopMappings).find(([k, v]) => v === m.id)?.[0] : null;
+                                                return (
+                                                    <div key={m.id} onClick={() => { if (!isMappedElsewhere) { saveWhopMapping(linkWhopClient, m.id); setLinkWhopClient(null); }}} className={`card rounded-lg p-3 transition ${isMappedElsewhere ? 'opacity-40 cursor-not-allowed' : isCurrentMapping ? 'border-blue-500/50 bg-blue-500/10 cursor-pointer' : 'hover:bg-dark-800 cursor-pointer'}`}>
+                                                        <div className="flex items-center justify-between">
+                                                            <div>
+                                                                <div className="text-sm text-white font-medium">{m.customerName || '(no username)'} {isCurrentMapping && <span className="text-xs text-blue-400 ml-1">(current)</span>}</div>
+                                                                <div className="text-xs text-slate-400">{m.customerEmail || '(no email)'}</div>
+                                                            </div>
+                                                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${m.status === 'active' || m.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>{m.status}</span>
+                                                        </div>
+                                                        <div className="mt-1 flex gap-3 text-xs text-slate-500">
+                                                            {m.totalPaid > 0 && <span>Paid: {fmtC(m.totalPaid)}</span>}
+                                                            {m.paymentCount > 0 && <span>{m.paymentCount} payment{m.paymentCount !== 1 ? 's' : ''}</span>}
+                                                            {m.amount > 0 && <span>{fmtC(m.amount)}/{m.interval || 'mo'}</span>}
+                                                            {m.productName && <span>{m.productName}</span>}
+                                                        </div>
+                                                        {isMappedElsewhere && <div className="text-xs text-amber-400 mt-1">Already linked to: {mappedTo}</div>}
+                                                    </div>
+                                                );
+                                            })}</div>
+                                        );
+                                    })()}
+                                </div>
+                                <div style={{padding:'12px 16px',borderTop:'1px solid var(--border, #21262d)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                                    <span className="text-xs text-slate-500">{whopSubs.length} Whop members total</span>
+                                    <button onClick={() => setLinkWhopClient(null)} className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white" style={{background:'none',border:'1px solid var(--border, #21262d)',cursor:'pointer'}}>Cancel</button>
                                 </div>
                             </div>
                         </div>
