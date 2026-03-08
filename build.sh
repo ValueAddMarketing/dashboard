@@ -4,3 +4,4 @@ cp index.html dashboard.html dist/
 cp client-portal/index.html dist/client-portal/index.html
 cp george/index.html dist/george/index.html
 cp billing-errors/index.html dist/billing-errors/index.html
+cp whop-members.csv dist/whop-members.csv
