@@ -5019,7 +5019,7 @@ ${transcript}`;
                         </div>
                     )}
 
-                    {/* Unmatched Whop Clients — on Whop but no membership matched */}
+                    {/* Unmatched Whop Clients — with date-based suggestions */}
                     {(() => {
                         const unmatchedWhop = enriched.filter(c =>
                             /whop/i.test(c.setup.platform) &&
@@ -5027,32 +5027,89 @@ ${transcript}`;
                             !pendingApprovals.find(a => a.client === c.client)
                         );
                         if (unmatchedWhop.length === 0) return null;
+
+                        // Build set of already-used membership IDs
+                        const usedMemIds = new Set(Object.values(whopMappings));
+                        // Also exclude IDs matched via auto-match or pending approval
+                        for (const a of pendingApprovals) usedMemIds.add(a.membershipId);
+                        for (const c of enriched) {
+                            for (const w of c.whopPayments) usedMemIds.add(w.id);
+                        }
+
+                        // Available Whop CSV members (not yet linked)
+                        const availableWhop = whopCsv.filter(row => {
+                            const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                            return memIds.length > 0 && !memIds.every(id => usedMemIds.has(id));
+                        });
+
+                        const parseDate = (str) => {
+                            if (!str) return null;
+                            // Handle "MM/DD/YYYY" or "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS ..."
+                            const s = String(str).split(' ')[0];
+                            const d = new Date(s.includes('/') ? s : s + 'T00:00:00');
+                            return isNaN(d.getTime()) ? null : d;
+                        };
+
                         return (
                             <div className="card rounded-2xl p-4 border-red-500/30 bg-red-500/5">
                                 <div className="flex items-center justify-between mb-3">
                                     <div>
                                         <h3 className="text-sm font-bold text-red-400">Unmatched Whop Clients ({unmatchedWhop.length})</h3>
-                                        <p className="text-xs text-slate-400 mt-0.5">These clients are on Whop but no membership was auto-matched. Click "Link" to manually match.</p>
+                                        <p className="text-xs text-slate-400 mt-0.5">Pick the best Whop member match for each client. Sorted by closest join date.</p>
                                     </div>
                                 </div>
-                                <div className="space-y-2" style={{maxHeight:'400px',overflow:'auto'}}>
+                                <div className="space-y-3" style={{maxHeight:'600px',overflow:'auto'}}>
                                     {unmatchedWhop.map(c => {
                                         const cr = closingLookup[c.client.toLowerCase()];
                                         const email = cr ? (cr['Client Email'] || cr['Client Email '] || '').trim() : '';
-                                        const procEmail = cr ? (cr['Payment processor username or email'] || '').trim() : '';
+                                        const paidDate = parseDate(c.setup.paidDate);
+
+                                        // Sort available Whop members by date proximity
+                                        const suggestions = availableWhop.map(row => {
+                                            const joinDate = parseDate(row['Joined date']);
+                                            const diffDays = (paidDate && joinDate) ? Math.abs(Math.round((joinDate - paidDate) / 86400000)) : 9999;
+                                            const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim()).filter(Boolean);
+                                            return {
+                                                row,
+                                                memId: memIds[0],
+                                                name: row['Name'] || row['Username'] || '(no name)',
+                                                email: row['Email'] || '',
+                                                username: row['Username'] || '',
+                                                spend: parseFloat(row['Platform spend (USD)'] || '0') || 0,
+                                                joinDate: (row['Joined date'] || '').split(' ')[0],
+                                                diffDays,
+                                            };
+                                        }).sort((a, b) => a.diffDays - b.diffDays).slice(0, 5);
+
                                         return (
-                                            <div key={c.client} className="flex items-center gap-3 p-3 rounded-xl" style={{background:'var(--bg-main, #0d1117)'}}>
-                                                <span className="px-1.5 py-0.5 rounded text-xs font-medium shrink-0 bg-red-500/20 text-red-400">No Match</span>
-                                                <div style={{flex:1,minWidth:0}}>
-                                                    <div className="text-sm font-medium text-white">{c.client}</div>
-                                                    <div className="flex gap-4 mt-1 text-xs text-slate-500 flex-wrap">
-                                                        {email && <span>Email: {email}</span>}
-                                                        {procEmail && <span>Processor: {procEmail}</span>}
-                                                        {c.setup.paidDate && <span>Paid: {c.setup.paidDate}</span>}
-                                                        <span>MRR: {c.setup.mrr || '?'}</span>
+                                            <div key={c.client} className="p-3 rounded-xl" style={{background:'var(--bg-main, #0d1117)'}}>
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <span className="px-1.5 py-0.5 rounded text-xs font-medium shrink-0 bg-red-500/20 text-red-400">No Match</span>
+                                                    <div style={{flex:1}}>
+                                                        <span className="text-sm font-medium text-white">{c.client}</span>
+                                                        <span className="text-xs text-slate-500 ml-3">
+                                                            {email && <span className="mr-3">Email: {email}</span>}
+                                                            {c.setup.paidDate && <span className="mr-3">Paid: {c.setup.paidDate}</span>}
+                                                            <span>MRR: {c.setup.mrr || '?'}</span>
+                                                        </span>
                                                     </div>
+                                                    <button onClick={() => { setLinkWhopClient(c.client); setLinkWhopSearch(''); }} className="px-2 py-1 rounded text-xs bg-slate-500/10 border border-slate-500/30 text-slate-400 hover:bg-slate-500/20 shrink-0" style={{cursor:'pointer'}}>Search All</button>
                                                 </div>
-                                                <button onClick={() => { setSelectedClient(c.client); setTimeout(() => { setLinkWhopClient(c.client); setLinkWhopSearch(''); }, 100); }} className="px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 shrink-0" style={{cursor:'pointer'}}>Link Whop</button>
+                                                <div className="space-y-1 ml-6">
+                                                    {suggestions.map(s => (
+                                                        <div key={s.memId} className="flex items-center gap-2 p-2 rounded-lg hover:bg-dark-800 transition" style={{cursor:'pointer'}} onClick={() => { saveWhopMapping(c.client, s.memId); }}>
+                                                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${s.diffDays <= 3 ? 'bg-emerald-500/20 text-emerald-400' : s.diffDays <= 7 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                                                                {s.diffDays <= 3 ? 'Close' : s.diffDays <= 7 ? 'Near' : s.diffDays === 9999 ? '?' : s.diffDays + 'd'}
+                                                            </span>
+                                                            <span className="text-sm text-blue-400 font-medium" style={{minWidth:'120px'}}>{s.name}</span>
+                                                            <span className="text-xs text-slate-500">{s.username && s.username !== s.name ? '@' + s.username : ''}</span>
+                                                            <span className="text-xs text-slate-500">{s.email}</span>
+                                                            <span className="text-xs text-slate-400 ml-auto shrink-0">Joined: {s.joinDate}</span>
+                                                            <span className="text-xs text-emerald-400 shrink-0">${s.spend.toFixed(0)}</span>
+                                                            {s.diffDays !== 9999 && <span className="text-xs text-slate-600 shrink-0">({s.diffDays}d apart)</span>}
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         );
                                     })}
