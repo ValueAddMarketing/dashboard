@@ -38,6 +38,7 @@ export default async function handler(req, res) {
         const perPeriod = m._plan_price != null ? m._plan_price : (paidPayments.length > 0 ? paidPayments[0].amount : (m.amount_subtotal ? m.amount_subtotal / 100 : (m.final_amount ? m.final_amount / 100 : null)));
         return {
             id: m.id,
+            userId: m.user_id || '',
             source: 'whop',
             customerName: m.user?.username || m.user?.email || m.discord?.username || m.email || '',
             customerEmail: m.user?.email || m.email || '',
@@ -63,176 +64,77 @@ export default async function handler(req, res) {
     if (action === 'fetchAll') {
         const results = { stripe: [], whop: [], fanbasis: [], errors: [] };
 
-        // --- Stripe ---
-        if (STRIPE_SECRET_KEY) {
+        // --- Run Stripe + Whop in parallel ---
+        const stripePromise = (async () => {
+            if (!STRIPE_SECRET_KEY) { results.errors.push({ source: 'stripe', message: 'STRIPE_SECRET_KEY not configured' }); return; }
             try {
-                let hasMore = true;
-                let startingAfter = null;
+                let hasMore = true, startingAfter = null;
                 const allSubs = [];
-
                 while (hasMore) {
-                    const params = new URLSearchParams({
-                        limit: '100',
-                        status: 'all',
-                        'expand[]': 'data.customer'
-                    });
+                    const params = new URLSearchParams({ limit: '100', status: 'all', 'expand[]': 'data.customer' });
                     if (startingAfter) params.append('starting_after', startingAfter);
-
-                    const resp = await fetch(`https://api.stripe.com/v1/subscriptions?${params}`, {
-                        headers: { 'Authorization': `Bearer ${STRIPE_SECRET_KEY}` }
-                    });
+                    const resp = await fetch(`https://api.stripe.com/v1/subscriptions?${params}`, { headers: { 'Authorization': `Bearer ${STRIPE_SECRET_KEY}` } });
                     const data = await resp.json();
-
-                    if (data.error) {
-                        results.errors.push({ source: 'stripe', message: data.error.message });
-                        break;
-                    }
-
+                    if (data.error) { results.errors.push({ source: 'stripe', message: data.error.message }); break; }
                     for (const sub of (data.data || [])) {
                         const customer = sub.customer;
-                        const customerName = typeof customer === 'object' ? (customer.name || customer.email || customer.id) : customer;
-                        const customerEmail = typeof customer === 'object' ? (customer.email || '') : '';
-
-                        allSubs.push({
-                            id: sub.id,
-                            source: 'stripe',
-                            customerName: customerName || '',
-                            customerEmail: customerEmail || '',
-                            status: sub.status,
-                            currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString().split('T')[0] : null,
-                            currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start * 1000).toISOString().split('T')[0] : null,
-                            cancelAtPeriodEnd: sub.cancel_at_period_end,
-                            canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString().split('T')[0] : null,
-                            endedAt: sub.ended_at ? new Date(sub.ended_at * 1000).toISOString().split('T')[0] : null,
-                            cancelAt: sub.cancel_at ? new Date(sub.cancel_at * 1000).toISOString().split('T')[0] : null,
-                            amount: sub.items?.data?.[0]?.price?.unit_amount ? sub.items.data[0].price.unit_amount / 100 : null,
-                            currency: sub.items?.data?.[0]?.price?.currency || 'usd',
-                            interval: sub.items?.data?.[0]?.price?.recurring?.interval || null,
-                            productName: sub.items?.data?.[0]?.price?.product?.name || sub.items?.data?.[0]?.price?.nickname || '',
-                            created: new Date(sub.created * 1000).toISOString().split('T')[0]
-                        });
+                        const cn = typeof customer === 'object' ? (customer.name || customer.email || customer.id) : customer;
+                        const ce = typeof customer === 'object' ? (customer.email || '') : '';
+                        allSubs.push({ id: sub.id, source: 'stripe', customerName: cn || '', customerEmail: ce || '', status: sub.status, currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString().split('T')[0] : null, currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start * 1000).toISOString().split('T')[0] : null, cancelAtPeriodEnd: sub.cancel_at_period_end, canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString().split('T')[0] : null, endedAt: sub.ended_at ? new Date(sub.ended_at * 1000).toISOString().split('T')[0] : null, cancelAt: sub.cancel_at ? new Date(sub.cancel_at * 1000).toISOString().split('T')[0] : null, amount: sub.items?.data?.[0]?.price?.unit_amount ? sub.items.data[0].price.unit_amount / 100 : null, currency: sub.items?.data?.[0]?.price?.currency || 'usd', interval: sub.items?.data?.[0]?.price?.recurring?.interval || null, productName: sub.items?.data?.[0]?.price?.product?.name || sub.items?.data?.[0]?.price?.nickname || '', created: new Date(sub.created * 1000).toISOString().split('T')[0] });
                     }
-
                     hasMore = data.has_more;
-                    if (hasMore && data.data.length > 0) {
-                        startingAfter = data.data[data.data.length - 1].id;
-                    }
+                    if (hasMore && data.data.length > 0) startingAfter = data.data[data.data.length - 1].id;
                 }
-
                 results.stripe = allSubs;
-            } catch (err) {
-                results.errors.push({ source: 'stripe', message: err.message });
-            }
-        } else {
-            results.errors.push({ source: 'stripe', message: 'STRIPE_SECRET_KEY not configured' });
-        }
+            } catch (err) { results.errors.push({ source: 'stripe', message: err.message }); }
+        })();
 
-        // --- Whop ---
+        const whopPromise = (async () => {
         if (WHOP_API_KEY) {
             try {
-                // Fetch ALL payments and group by membership_id
-                const allPayments = [];
-                const planPrices = {};
-                let payPage = 1;
-                let payHasMore = true;
-                while (payHasMore) {
-                    const payResp = await fetch(`https://api.whop.com/api/v5/company/payments?per=50&page=${payPage}`, {
-                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                    });
-                    if (!payResp.ok) break;
-                    const payData = await payResp.json();
-                    const payments = payData.data || [];
-                    for (const p of payments) {
-                        allPayments.push(p);
-                        if (p.plan_id && p.subtotal > 0 && !planPrices[p.plan_id]) {
-                            planPrices[p.plan_id] = p.subtotal;
-                        }
-                    }
-                    const totalPages = payData.pagination?.total_pages || 1;
-                    if (payPage >= totalPages || payments.length < 50) { payHasMore = false; }
-                    else { payPage++; }
-                }
+                const whopHeaders = { 'Authorization': `Bearer ${WHOP_API_KEY}` };
 
-                // Group payments by membership_id
+                const fetchAllPages = async (endpoint) => {
+                    const all = [];
+                    let pg = 1, more = true;
+                    while (more) {
+                        const r = await fetch(`https://api.whop.com/api/v5/company/${endpoint}${endpoint.includes('?') ? '&' : '?'}per=50&page=${pg}`, { headers: whopHeaders });
+                        if (!r.ok) break;
+                        const d = await r.json();
+                        const items = d.data || [];
+                        if (!items.length) break;
+                        all.push(...items);
+                        const tp = d.pagination?.total_pages || 1;
+                        if (pg >= tp || items.length < 50) more = false;
+                        else pg++;
+                    }
+                    return all;
+                };
+
+                // Fetch all three in parallel
+                const [allPayments, allProducts, rawMemberships] = await Promise.all([
+                    fetchAllPages('payments'),
+                    fetchAllPages('products'),
+                    fetchAllPages('memberships'),
+                ]);
+
+                // Build lookups
+                const planPrices = {};
                 const paymentsByMembership = {};
                 for (const p of allPayments) {
+                    if (p.plan_id && p.subtotal > 0 && !planPrices[p.plan_id]) planPrices[p.plan_id] = p.subtotal;
                     const mid = p.membership_id;
-                    if (!mid) continue;
-                    if (!paymentsByMembership[mid]) paymentsByMembership[mid] = [];
-                    paymentsByMembership[mid].push({
-                        id: p.id,
-                        amount: p.final_amount || p.subtotal || 0,
-                        status: p.status,
-                        created: p.created_at ? String(p.created_at).split('T')[0] : null,
-                    });
+                    if (mid) {
+                        if (!paymentsByMembership[mid]) paymentsByMembership[mid] = [];
+                        paymentsByMembership[mid].push({ id: p.id, amount: p.final_amount || p.subtotal || 0, status: p.status, created: p.created_at ? String(p.created_at).split('T')[0] : null });
+                    }
                 }
-
-                // Fetch products for names
                 const productNames = {};
-                let prodPage = 1;
-                let prodHasMore = true;
-                while (prodHasMore) {
-                    const prodResp = await fetch(`https://api.whop.com/api/v5/company/products?per=50&page=${prodPage}`, {
-                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                    });
-                    if (!prodResp.ok) break;
-                    const prodData = await prodResp.json();
-                    const products = prodData.data || [];
-                    for (const p of products) {
-                        productNames[p.id] = p.name || p.title || '';
-                    }
-                    if (products.length < 50 || prodPage >= (prodData.pagination?.total_pages || prodPage)) { prodHasMore = false; }
-                    else { prodPage++; }
-                }
+                for (const p of allProducts) productNames[p.id] = p.name || p.title || '';
 
-                // Fetch all memberships (page-based pagination for v5)
-                const rawMemberships = [];
-                let page = 1;
-                let hasMore = true;
-
-                while (hasMore) {
-                    const resp = await fetch(`https://api.whop.com/api/v5/company/memberships?per=50&page=${page}`, {
-                        headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                    });
-
-                    if (!resp.ok) {
-                        const errText = await resp.text();
-                        results.errors.push({ source: 'whop', message: `v5 page ${page}: ${errText.substring(0,200)}` });
-                        break;
-                    }
-
-                    const data = await resp.json();
-                    const memberships = data.data || [];
-                    if (memberships.length === 0) { hasMore = false; break; }
-
-                    for (const m of memberships) rawMemberships.push(m);
-
-                    const totalPages = data.pagination?.total_pages || 1;
-                    if (page >= totalPages) { hasMore = false; }
-                    else { page++; }
-                }
-
-                // Collect unique user_ids and fetch user details
-                const userIds = [...new Set(rawMemberships.map(m => m.user_id).filter(Boolean))];
-                const userMap = {};
-
-                // Fetch users in parallel batches of 25
-                for (let i = 0; i < userIds.length; i += 25) {
-                    const batch = userIds.slice(i, i + 25);
-                    const userResults = await Promise.all(batch.map(uid =>
-                        fetch(`https://api.whop.com/api/v5/company/users/${uid}`, {
-                            headers: { 'Authorization': `Bearer ${WHOP_API_KEY}` }
-                        }).then(r => r.ok ? r.json() : null).catch(() => null)
-                    ));
-                    for (const u of userResults) {
-                        if (u && u.id) userMap[u.id] = u;
-                    }
-                }
-
-                // Map memberships with user data + payments injected
+                // Map memberships
                 const allMemberships = [];
                 for (const m of rawMemberships) {
-                    if (m.user_id && userMap[m.user_id]) m.user = userMap[m.user_id];
                     if (m.plan_id && planPrices[m.plan_id] != null) m._plan_price = planPrices[m.plan_id];
                     if (m.product_id && productNames[m.product_id]) m._plan_name = productNames[m.product_id];
                     m._payments = paymentsByMembership[m.id] || [];
@@ -246,6 +148,9 @@ export default async function handler(req, res) {
         } else {
             results.errors.push({ source: 'whop', message: 'WHOP_API_KEY not configured' });
         }
+        })();
+
+        await Promise.all([stripePromise, whopPromise]);
 
         // --- Fanbasis (from Supabase) ---
         if (SUPABASE_KEY) {

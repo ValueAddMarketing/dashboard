@@ -4405,6 +4405,29 @@ ${transcript}`;
                 Promise.all(fetches).finally(() => setLoadingInvoices(false));
             }, []);
 
+            // Enrich whopSubs with names/emails from CSV
+            useEffect(() => {
+                if (!whopCsv.length || !whopSubs.length) return;
+                // Build membership ID → CSV row lookup
+                const csvByMembership = {};
+                const csvByUser = {};
+                for (const row of whopCsv) {
+                    const memIds = (row['Membership IDs'] || '').split(',').map(s => s.trim());
+                    for (const mid of memIds) { if (mid) csvByMembership[mid] = row; }
+                    const uid = (row['User ID'] || '').trim();
+                    if (uid) csvByUser[uid] = row;
+                }
+                let changed = false;
+                const enriched = whopSubs.map(sub => {
+                    if (sub.customerName && sub.customerEmail) return sub; // already has data
+                    const csvRow = csvByMembership[sub.id] || csvByUser[sub.userId];
+                    if (!csvRow) return sub;
+                    changed = true;
+                    return { ...sub, customerName: csvRow['Name'] || csvRow['Username'] || sub.customerName, customerEmail: csvRow['Email'] || sub.customerEmail };
+                });
+                if (changed) setWhopSubs(enriched);
+            }, [whopCsv, whopSubs.length]);
+
             // Load Whop CSV and auto-match to clients
             useEffect(() => {
                 fetch('/whop-members.csv').then(r => r.text()).then(text => {
