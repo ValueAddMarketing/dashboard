@@ -46,8 +46,8 @@ export default async function handler(req, res) {
             id: typeof customer === 'object' ? customer.id : customer,
         });
 
-        // Run invoices + active subscriptions in parallel
-        const [invoices, subscriptions] = await Promise.all([
+        // Run invoices + active subscriptions + one-time charges in parallel
+        const [invoices, subscriptions, charges] = await Promise.all([
             fetchAllStripePages('invoices', (inv) => {
                 const c = getCustomerInfo(inv.customer);
                 return {
@@ -65,6 +65,7 @@ export default async function handler(req, res) {
                     invoiceUrl: inv.hosted_invoice_url || null, number: inv.number || null,
                     description: inv.lines?.data?.[0]?.description || '',
                     attemptCount: inv.attempt_count || 0, attempted: inv.attempted || false,
+                    chargeId: inv.charge || null,
                 };
             }).catch(err => { results.errors.push({ source: 'stripe_invoices', message: err.message }); return []; }),
 
@@ -81,9 +82,34 @@ export default async function handler(req, res) {
                     created: new Date(sub.created * 1000).toISOString().split('T')[0],
                 };
             }).catch(err => { results.errors.push({ source: 'stripe_upcoming', message: err.message }); return []; }),
+
+            // Fetch one-time charges (Klarna, payment links, etc.) that aren't tied to invoices
+            fetchAllStripePages('charges', (ch) => {
+                const c = getCustomerInfo(ch.customer);
+                return {
+                    id: ch.id, source: 'stripe', customerId: c.id,
+                    customerName: c.name || '', customerEmail: c.email || '',
+                    subscriptionId: null, status: ch.status === 'succeeded' ? 'paid' : ch.status,
+                    paid: ch.status === 'succeeded', isCharge: true,
+                    amountDue: ch.amount ? ch.amount / 100 : 0,
+                    amountPaid: ch.status === 'succeeded' ? (ch.amount ? ch.amount / 100 : 0) : 0,
+                    amountRemaining: ch.status === 'succeeded' ? 0 : (ch.amount ? ch.amount / 100 : 0),
+                    currency: ch.currency || 'usd',
+                    created: ch.created ? new Date(ch.created * 1000).toISOString().split('T')[0] : null,
+                    periodStart: null, periodEnd: null, dueDate: null,
+                    invoiceUrl: ch.receipt_url || null, number: null,
+                    description: ch.description || (ch.payment_method_details?.type ? `${ch.payment_method_details.type} payment` : 'One-time charge'),
+                    attemptCount: 1, attempted: true,
+                };
+            }).catch(err => { results.errors.push({ source: 'stripe_charges', message: err.message }); return []; }),
         ]);
 
-        results.stripe = invoices;
+        // Merge charges that aren't already covered by invoices (avoid double-counting)
+        // Build set of charge IDs that are already represented by invoices
+        const invoiceChargeIds = new Set(invoices.map(i => i.chargeId).filter(Boolean));
+        const deduped = charges.filter(ch => !invoiceChargeIds.has(ch.id));
+
+        results.stripe = [...invoices, ...deduped];
         results.stripeUpcoming = subscriptions;
 
         return res.json(results);
