@@ -1,19 +1,68 @@
-Customer Email,Customer Name,Billing Start Date,Upfront Amount,Recurring Monthly,Payment Plan Notes,Status,2024 Total,Jan 2025,Feb 2025,Mar 2025,Apr 2025,May 2025,Jun 2025,Jul 2025,Aug 2025,Sep 2025,Oct 2025,Nov 2025,Dec 2025
-lrlvre@yahoo.com,Luis Raygoza,,,,,ACTIVE,,,,,,,,,,,,,
-tony@bayouvistarealty.com,Jose Guerrero,,,,,ACTIVE,,,,,,,,,,,,,
-joel@movewithjoel.com,Joel Velis,,,,,ACTIVE,,,,,,,,,,,,,
-mauricio.granados.re@gmail.com,Mauricio Granados,,,,,ACTIVE,,,,,,,,,,,,,
-realtormariperez@gmail.com,Maritza Perez,,,,,ACTIVE,,,,,,,,,,,,,
-,Mari Arellano,,,,,ACTIVE,,,,,,,,,,,,,
-erican.realtor@gmail.com,Erica Nunez,,,,,ACTIVE,,,,,,,,,,,,,
-juan@premierhomespros.com,Juan Jijon,,,,,ACTIVE,,,,,,,,,,,,,
-,Juan C Jijon,,,,,ACTIVE,,,,,,,,,,,,,
-oscar@teammontalvo.com,Oscar Montalvo,,,,,ACTIVE,,,,,,,,,,,,,
-spadro@nmbnow.com,Suci Padro,,,,"Payment plan - variable",ACTIVE,,750,,750,1500,1500,1500,3000,1500,,,,
-kabadp@gmail.com,Kelvin Abad Payano,,,,,ACTIVE,,,,,,,,,1500,,,,
-closings@mrubinolaw.com,Matthew A. Rubino,,,,,ACTIVE,,,,,,1500,1500,1500,1500,1500,,,
-nraimondi@athccorp.com,atlantic home capital,,,,,ACTIVE,,,,,,1500,1500,1500,1500,1500,,,
-abraham@viprestate.com,Abraham Contreras,,,,,ACTIVE,,,,,,,,,,,15.41,,
-mykyta@clawsonhomegroup.com,Mykyta Kravchenko,,,,,ACTIVE,,,,,,,,,,,,,
-melissatorresrealtor@gmail.com,Melissa Torres,,,,,ACTIVE,,,,,,,,,,,11,,
-evelyn@tuhogardfw.com,Evelyn Ortega,,,,,ACTIVE,,,,,,,,,1200,26.38,,,
+CASHFLOW SCHEDULE & COLLECTION TRACKER,,,,,,,,,,,,,,,,,,,,,,,
+"Fill in: Billing Start, Contract Value, Upfront, Monthly Recurring, and Plan Notes for each client.",,,,,,,,,,,,,,,,,,,,,,,
+"PROJECTED columns (Jan-Dec 2026) auto-populate based on your plan. Override any cell for exceptions.",,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,
+Client Email,Client Name,Status,Contract Value,Upfront Paid,Monthly Recurring,Billing Start,Plan Notes,2024 Paid,Jan 2025,Feb 2025,Mar 2025,Apr 2025,May 2025,Jun 2025,Jul 2025,Aug 2025,Sep 2025,Oct 2025,Nov 2025,Dec 2025,2025 Total,Jan 2026,Feb 2026,Mar 2026
+spadro@nmbnow.com,Suci Padro,ACTIVE,,,,,"Payment plan - variable",,750,,750,1500,1500,3000,1500,1500,1500,1500,,13500,,,
+closings@mrubinolaw.com,Matthew A. Rubino,ACTIVE,,,1500,,Monthly 1500,,,,,,1500,1500,1500,1500,1500,1500,1500,,10500,1500,1500,1500
+nraimondi@athccorp.com,atlantic home capital,ACTIVE,,,1500,,Monthly 1500,,,,,,1500,1500,1500,1500,1500,1500,1500,,10500,1500,1500,1500
+matthewrowack@gmail.com,Matthew Rowack,ACTIVE,,,750,,"1500 then dropped to 750",,,,,,1,1500,1500,1500,750,750,750,750,750,8251,750,750,750
+alex@embracerealtygroup.com,Alex Reyes,ACTIVE,,,1000,,"6100 upfront then 500-1000/mo",6100,,2000,,,,500,500,1000,1000,1000,,6000,1000,1000,1000
+laura_gza@live.com,Laura Garza,ACTIVE,,,250,,"1000 upfront then 500 -> 250",1000,500,,500,500,500,500,500,250,250,250,250,,4000,250,250,250
+rebecatherealtor@outlook.com,Rebeca Bermudez,ACTIVE,,,250,,"1100 upfront then 500 -> 250",1100,500,500,500,500,500,500,250,250,250,250,250,250,4500,250,250,250
+paolo@brunolawgroup.com,Paolo Bruno,ACTIVE,,,1000,,Monthly 1000,,,,,,,,1000,1000,1000,1000,,4000,1000,1000,1000
+josejustsold@gmail.com,Jose Francisco Inoa,ACTIVE,,,,,"Ended?",,,,,,,,1000,1000,1000,1000,,,4000,,,
+giovannitriana@gmail.com,Giovanni Triana,ACTIVE,,,800,,Monthly 800,,,,,,,,,,800,800,,,2400,800,800,800
+tuffhomeinspections@gmail.com,Sabedo Argueta,ACTIVE,,,500,,Monthly 500,,,,,,,,,500,500,500,500,500,500,3000,500,500,500
+ed.laine@exprealty.com,Ed Laine,ACTIVE,,,,,"Variable 500-1000",,,,,,,,500,500,500,650,1000,,3150,,,
+jinoapm@gmail.com,Jose Inoa,ACTIVE,,,620,,Monthly 620,,,,,,,,620,620,620,620,,,2480,620,620,620
+ken@mauisales.com,Kenneth Smith,ACTIVE,,,,,"750 then 1500",,750,750,750,,1500,1500,,,,,,,5250,,,
+mykyta@clawsonhomegroup.com,Mykyta Kravchenko,END,,,,,"Ending",,,,,,,,,,1470,1452.28,1431.39,1,4354.48,,,
+juan@premierhomespros.com,Juan Jijon,ACTIVE,,,,,"Variable",,,,,,,,,,1790,1781.47,1761.84,21.02,5353.85,,,
+lrlvre@yahoo.com,Luis Raygoza,ACTIVE,,,,,,,,,,,,,,,,7080,21.02,32.77,31.02,7164.38,,,
+tony@bayouvistarealty.com,Jose Guerrero,ACTIVE,,,,,,,,,,,,,,,,1,7039,21.19,41.78,83.57,7186.99,,,
+joel@movewithjoel.com,Joel Velis,ACTIVE,,,,,,,,,,,,,,,,,,7013,26.13,,,7039.43,,,
+mauricio.granados.re@gmail.com,Mauricio Granados,ACTIVE,,,,,,,,,,,,,,,,,,3513,285.4,132.22,31.12,3962.04,,,
+realtormariperez@gmail.com,Maritza Perez,ACTIVE,,,,,,,,,,,,,,,,,,3000,11.01,51.4,41.13,3103.54,,,
+erican.realtor@gmail.com,Erica Nunez,ACTIVE,,,,,,,,,,,,,,,,39.44,1971,41.7,32.16,10.01,2094.54,,,
+abraham@viprestate.com,Abraham Contreras,ACTIVE,,,,,,,,,,,,,,,15.41,1490,31.43,31.04,,1567.63,,,
+melissatorresrealtor@gmail.com,Melissa Torres,ACTIVE,,,,,,,,,,,,,,,11,1405,13.01,,,1429.04,,,
+evelyn@tuhogardfw.com,Evelyn Ortega,ACTIVE,,,,,,,,,,,,,,1200,26.38,1275,41.1,1,,2543.31,,,
+oscar@teammontalvo.com,Oscar Montalvo,ACTIVE,,,,,,,,,,,,,,,39.45,1556,21.97,22.16,,1639.43,,,
+kabadp@gmail.com,Kelvin Abad Payano,ACTIVE,,,,,,,,,,,,,,1500,,1500,,,,,3000,,,
+,Mari Arellano,ACTIVE,,,,,,,,,,,,,,23.75,117,20.05,1500,,1660.81,,,
+homesbyheidy@gmail.com,Edwin DeMarco,ACTIVE,,,,,,,,,,,,,,,,1200,,11.13,,1211.13,,,
+sallah@sumsuites.com,Sallah Siddiqui,ACTIVE,,,300,,300 every other month,,,,,,300,,,,300,300,,,900,300,,300
+vazquezeliteproperties@gmail.com,Anahi Vazquez,ACTIVE,,,,,"Variable",,,,,,,,,,672.44,661,1031.15,1061.11,113.79,3539.57,,,
+salvatorevolo.re@gmail.com,Salvatore Volo,ACTIVE,,,,,"Small recurring",,,,,,,,,1,160.15,142,171.57,123.22,111.33,708.89,,,
+Jayamigon1@gmail.com,Jose Amigon,ACTIVE,,,1000,,Monthly 1000,,,,,,1000,1000,1000,1000,1000,,,,5000,1000,1000,1000
+scott@nextgenerationre.com,Scott L Fiechtner,ACTIVE,,,,,"Variable 300-600",,,,,,300,600,300,300,,600,,,2100,,,
+kim@abundantpg.com,Kim Wilkin,ACTIVE,,,500,,Monthly 500,,,,,,,,500,500,500,,,,1500,500,500,500
+bvirgohomes@gmail.com,Barrington Virgo,ACTIVE,,,550,,Monthly 550,,,,,,,,550,550,,,,1100,550,550,550
+mfrank@homestretchky.com,Michael Frank,ACTIVE,,,1000,,Monthly 1000,,,,,,1000,,1000,1000,1000,,,,4000,1000,1000,1000
+doug@okcmetrogroup.com,Doug Arnett,ACTIVE,,,,,"8425 upfront then 480/mo + 400",8425,480,,,,400,,,,,,,,880,,,
+jenn.matesic@compass.com,Jennifer Matesic,ACTIVE,,,,,"2499 upfront then 2500",2499,2500,,,,,,,,,,,,2500,,,
+valueaddmarketingofficial@gmail.com,Svetlana Petrova,ACTIVE,,,1000,,"1000 upfront then 1000/mo",1000,1000,1000,1000,,,,,,,,,,3000,,,
+lesley-anne@1stclassre.com,Lesley-Anne Lawrence,ACTIVE,,,,,"600 then 2200",,600,600,2200,,,,,,,,,,,3400,,,
+randidickman@comcast.net,Randi Dickman,ACTIVE,,,,,"3000 upfront then 3000",3000,,,,,,,3000,,,,,,3000,,,
+petertlatelpa@gmail.com,Peter C Tlatelpa,ACTIVE,,,,,"Variable - go monthly?",,,,2000,,924.38,2000,,,,1000,1000,6924.38,,,
+bhaake@nexamortgage.com,Brian Haake,ACTIVE,,,,,"monthly?",,,,,,,,,,,,1000,1000,1325,3325,,,
+fred@nopointsnoclosingcosts.com,Frederick Solomon,ACTIVE,,,,,"$5.4K over 4 months",,,,,,,,,,,,2640.18,,2640.18,,,
+realestatecaleb22@gmail.com,Caleb De Leon,ACTIVE,,,,,"5 months?",,,,,,,,,,,,,,5000,5000,,,
+maria@mindfulbrokerage.com,Maria Coca,ACTIVE,,,,,,,,,,,,,,,,,,,,7012.15,7012.15,,,
+,,,,,,,,,,,,,,,,,,,,,,,
+PAYMENT PLAN DETAILS,,,,,,,,,,,,,,,,,,,,,,,
+"For clients with non-standard payment arrangements, document the full plan here",,,,,,,,,,,,,,,,,,,,,,,
+Client Name,Total Contract,Upfront,Remaining,Monthly Amount,# Payments Left,Next Due Date,Last Paid,Notes,,,,,,,,,,,,,,
+Suci Padro,,,,,"Variable",,,Started 750 then ramped to 1500,,,,,,,,,,,,,,
+Matthew Rowack,,,,750,,,,Started at 1500 then dropped to 750,,,,,,,,,,,,,,
+Alex Reyes,,,,1000,,,,"6100 upfront, then variable 500-1000",,,,,,,,,,,,,,
+Laura Garza,,,,250,,,,"1000 upfront, was 500/mo, now 250/mo",,,,,,,,,,,,,,
+Rebeca Bermudez,,,,250,,,,"1100 upfront, was 500/mo, now 250/mo",,,,,,,,,,,,,,
+Kenneth Smith,,,,,,,,750 for 3mo then 1500,,,,,,,,,,,,,,
+Peter Tlatelpa,,,,,,,,Variable - considering going monthly,,,,,,,,,,,,,,
+Frederick Solomon,5400,,,,,,,5.4K spread over 4 months,,,,,,,,,,,,,,
+Caleb De Leon,5000,,,,,,,5000 - over 5 months?,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,
+COLLECTION FOLLOW-UP,,,,,,,,,,,,,,,,,,,,,,,
+Client Name,Amount Due,Due Date,Days Overdue,Last Contact,Next Follow-up,Notes,,,,,,,,,,,,,,,,
