@@ -1,0 +1,35 @@
+CASHFLOW SCHEDULE MODEL,,,,,,,,,,,,,,,,,,,,
+"Instructions: Fill in columns A-H for each client. The monthly columns (2024 Total through Dec 2025) are where you enter actual/expected payments.",,,,,,,,,,,,,,,,,,,,
+"For payment plan clients: Enter the upfront amount in the first billing month, then the recurring amount in subsequent months.",,,,,,,,,,,,,,,,,,,,
+"Mark Status as ACTIVE, PAUSED, or CANCELLED to track collection priority.",,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+MONTHLY TOTALS,-,-,-,=SUM(I8:I200),=SUM(J8:J200),=SUM(K8:K200),=SUM(L8:L200),=SUM(M8:M200),=SUM(N8:N200),=SUM(O8:O200),=SUM(P8:P200),=SUM(Q8:Q200),=SUM(R8:R200),=SUM(S8:S200),=SUM(T8:T200),=SUM(U8:U200),=SUM(V8:V200),=SUM(W8:W200),=SUM(X8:X200),=SUM(Y8:Y200)
+Customer Email,Customer Name,Billing Start Date,Upfront Amount,Recurring Monthly,Payment Plan Notes,Status,2024 Total,Jan 2025,Feb 2025,Mar 2025,Apr 2025,May 2025,Jun 2025,Jul 2025,Aug 2025,Sep 2025,Oct 2025,Nov 2025,Dec 2025,CLIENT TOTAL
+lrlvre@yahoo.com,Luis Raygoza,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+tony@bayouvistarealty.com,Jose Guerrero,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+joel@movewithjoel.com,Joel Velis,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+mauricio.granados.re@gmail.com,Mauricio Granados,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+realtormariperez@gmail.com,Maritza Perez,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+,Mari Arellano,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+erican.realtor@gmail.com,Erica Nunez,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+juan@premierhomespros.com,Juan Jijon,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+,Juan C Jijon,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+oscar@teammontalvo.com,Oscar Montalvo,,,,,ACTIVE,,,,,,,,,,,,,,=SUM(H8:S8)
+spadro@nmbnow.com,Suci Padro,,,,Payment plan,ACTIVE,,750,,750,1500,1500,1500,3000,1500,,,=SUM(H8:S8)
+kabadp@gmail.com,Kelvin Abad Payano,,,,,ACTIVE,,,,,,,,,1500,,,=SUM(H8:S8)
+closings@mrubinolaw.com,Matthew A. Rubino,,,,,ACTIVE,,,,,,1500,1500,1500,1500,1500,,,=SUM(H8:S8)
+nraimondi@athccorp.com,atlantic home capital,,,,,ACTIVE,,,,,,1500,1500,1500,1500,1500,,,=SUM(H8:S8)
+abraham@viprestate.com,Abraham Contreras,,,,,ACTIVE,,,,,,,,,,15.41,,=SUM(H8:S8)
+mykyta@clawsonhomegroup.com,Mykyta Kravchenko,,,,,ACTIVE,,,,,,,,,,,,=SUM(H8:S8)
+melissatorresrealtor@gmail.com,Melissa Torres,,,,,ACTIVE,,,,,,,,,,11,,=SUM(H8:S8)
+evelyn@tuhogardfw.com,Evelyn Ortega,,,,,ACTIVE,,,,,,,,,1200,26.38,,=SUM(H8:S8)
+,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+PAYMENT PLAN TRACKER,,,,,,,,,,,,,,,,,,,,
+"Use this section to document non-standard payment arrangements",,,,,,,,,,,,,,,,,,,,
+Client Name,Total Contract Value,Upfront Paid,Remaining Balance,Monthly Payment,# Payments Left,Next Payment Due,Last Payment Date,Notes,,,,,,,,,,,
+Example: John Doe,7000,4000,3000,500,6,2025-04-01,2025-03-01,"4K upfront then 500/mo",,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+COLLECTION FOLLOW-UP LOG,,,,,,,,,,,,,,,,,,,,
+Client Name,Amount Due,Due Date,Status,Follow-up Date,Notes,,,,,,,,,,,,,,
