@@ -352,7 +352,7 @@
             { id: 'speed-to-lead', name: 'Speed to Lead', icon: '⚡', desc: 'Track call response times from GHL' },
             { id: 'users', name: 'Users', icon: '👥', desc: 'Registered dashboard users' },
             { id: 'ltv-churn', name: 'LTV & Churn', icon: '📉', desc: 'Client lifetime value and churn analytics' },
-            { id: 'cashflow', name: 'Cashflow Schedule', icon: '💰', desc: 'Monthly payment projections & collection tracking' },
+            { id: 'cashflow', name: 'Cashflow Schedule', icon: '💰', desc: 'Auto cashflow from Stripe & Whop payments' },
         ];
 
         // ========== LOGIN ==========
@@ -8144,389 +8144,537 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             );
         };
 
-        // ========== CASHFLOW SCHEDULE TAB ==========
+        // ========== CASHFLOW SCHEDULE TAB (Auto from Stripe + Whop) ==========
         const CashflowTab = () => {
             const [cashflowData, setCashflowData] = useState([]);
+            const [activeSubs, setActiveSubs] = useState([]);
             const [loading, setLoading] = useState(true);
+            const [loadingMsg, setLoadingMsg] = useState('Fetching payment data...');
             const [search, setSearch] = useState('');
             const [sortConfig, setSortConfig] = useState({ key: null, dir: 'desc' });
             const [showProjections, setShowProjections] = useState(true);
-            const [filterStatus, setFilterStatus] = useState('active'); // 'all', 'active', 'ended', 'upfront-only'
+            const [filterStatus, setFilterStatus] = useState('all');
+            const [dataSource, setDataSource] = useState('stripe'); // 'stripe', 'whop', 'all'
+            const [yearRange, setYearRange] = useState([2024, 2025, 2026]); // years to show
 
             const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const NOW = new Date();
+            const CURRENT_YEAR = NOW.getFullYear();
+            const CURRENT_MONTH = NOW.getMonth(); // 0-indexed
 
             useEffect(() => {
-                const fetchCashflow = async () => {
+                const fetchAll = async () => {
                     try {
-                        const cacheKey = 'vam_cashflow';
-                        const cacheTimeKey = 'vam_cashflow_cache_time';
+                        const cacheKey = 'vam_auto_cashflow';
+                        const cacheTimeKey = 'vam_auto_cashflow_time';
                         const cached = localStorage.getItem(cacheKey);
                         const cacheTime = localStorage.getItem(cacheTimeKey);
-                        if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 300000) {
-                            setCashflowData(JSON.parse(cached));
+                        if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 600000) {
+                            const parsed = JSON.parse(cached);
+                            setCashflowData(parsed.clients);
+                            setActiveSubs(parsed.subs);
                             setLoading(false);
                             return;
                         }
-                        const res = await fetch(URLS.cashflow);
-                        const text = await res.text();
-                        const parsed = Papa.parse(text, { skipEmptyLines: true });
-                        const rows = parsed.data;
 
-                        // Row 0 = monthly totals, Row 1 = "Sum of Amount", Row 2 = year headers, Row 3 = column headers
-                        // Data starts at row 4
-                        const clients = [];
-                        for (let i = 4; i < rows.length; i++) {
-                            const row = rows[i];
-                            if (!row || row.length < 2) continue;
-                            const email = (row[0] || '').trim();
-                            const name = (row[1] || '').trim();
-                            if (!email && !name) continue;
-                            if (email === 'Grand Total') continue;
+                        // Fetch Stripe invoices/charges and Whop payments in parallel
+                        setLoadingMsg('Fetching Stripe invoices & charges...');
+                        const [stripeRes, whopRes] = await Promise.all([
+                            fetch('/api/billing-errors', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'fetchInvoices' })
+                            }).then(r => r.json()).catch(() => ({ stripe: [], stripeUpcoming: [] })),
+                            fetch('/api/billing-subscriptions', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'fetchAll' })
+                            }).then(r => r.json()).catch(() => ({ stripe: [], whop: [] }))
+                        ]);
 
-                            const parseNum = (v) => {
-                                if (!v || v === '' || v === '-') return 0;
-                                return parseFloat(String(v).replace(/[$,"\s]/g, '')) || 0;
-                            };
+                        setLoadingMsg('Processing payment history...');
 
-                            const total2024 = parseNum(row[2]);
-                            const months2025 = [];
-                            for (let m = 0; m < 12; m++) {
-                                months2025.push(parseNum(row[3 + m]));
+                        // Build client map: email -> { name, months: { '2024-01': amount, ... }, source }
+                        const clientMap = {};
+
+                        const addPayment = (email, name, date, amount, source) => {
+                            if (!date || !amount || amount <= 0) return;
+                            const e = (email || '').toLowerCase().trim();
+                            const n = (name || '').trim();
+                            const key = e || n.toLowerCase();
+                            if (!key) return;
+
+                            const d = new Date(date);
+                            const yr = d.getFullYear();
+                            const mo = d.getMonth();
+                            const monthKey = `${yr}-${String(mo).padStart(2, '0')}`;
+
+                            if (!clientMap[key]) {
+                                clientMap[key] = { email: e, name: n, months: {}, sources: new Set(), subAmount: 0, subInterval: null, subActive: false, cancelAtPeriodEnd: false };
                             }
-                            const total2025 = parseNum(row[15]);
-                            const notes = (row[16] || '').trim();
+                            if (n && !clientMap[key].name) clientMap[key].name = n;
+                            if (e && !clientMap[key].email) clientMap[key].email = e;
+                            clientMap[key].months[monthKey] = (clientMap[key].months[monthKey] || 0) + amount;
+                            clientMap[key].sources.add(source);
+                        };
 
-                            clients.push({ email, name, total2024, months2025, total2025, notes });
+                        // Process Stripe invoices and charges
+                        const stripePayments = stripeRes.stripe || [];
+                        for (const p of stripePayments) {
+                            if (!p.paid && p.status !== 'paid') continue;
+                            const amount = p.amountPaid || p.amountDue || 0;
+                            if (amount <= 0) continue;
+                            addPayment(p.customerEmail, p.customerName, p.created, amount, 'stripe');
                         }
 
-                        localStorage.setItem(cacheKey, JSON.stringify(clients));
+                        // Process active Stripe subscriptions for projections
+                        const stripeSubs = stripeRes.stripeUpcoming || [];
+                        for (const sub of stripeSubs) {
+                            if (sub.status !== 'active') continue;
+                            const e = (sub.customerEmail || '').toLowerCase().trim();
+                            const n = (sub.customerName || '').trim();
+                            const key = e || n.toLowerCase();
+                            if (!key) continue;
+                            if (!clientMap[key]) {
+                                clientMap[key] = { email: e, name: n, months: {}, sources: new Set(), subAmount: 0, subInterval: null, subActive: false, cancelAtPeriodEnd: false };
+                            }
+                            let monthly = sub.amount || 0;
+                            if (sub.interval === 'year') monthly = monthly / 12;
+                            else if (sub.interval === 'week') monthly = monthly * 4.33;
+                            clientMap[key].subAmount = Math.max(clientMap[key].subAmount, monthly);
+                            clientMap[key].subInterval = sub.interval;
+                            clientMap[key].subActive = true;
+                            clientMap[key].cancelAtPeriodEnd = sub.cancelAtPeriodEnd || false;
+                            clientMap[key].sources.add('stripe');
+                        }
+
+                        // Process Whop memberships with payment history
+                        const whopMembers = whopRes.whop || [];
+                        for (const m of whopMembers) {
+                            const payments = m.payments || [];
+                            for (const p of payments) {
+                                if (p.status !== 'paid' && p.status !== 'succeeded') continue;
+                                addPayment(m.customerEmail, m.customerName, p.created, p.amount || 0, 'whop');
+                            }
+                            // Track active whop subs for projection
+                            if (m.status === 'active') {
+                                const e = (m.customerEmail || '').toLowerCase().trim();
+                                const n = (m.customerName || '').trim();
+                                const key = e || n.toLowerCase();
+                                if (key && clientMap[key]) {
+                                    let monthly = m.amount || 0;
+                                    if (m.interval === 'year') monthly = monthly / 12;
+                                    clientMap[key].subAmount = Math.max(clientMap[key].subAmount, monthly);
+                                    clientMap[key].subActive = true;
+                                    clientMap[key].cancelAtPeriodEnd = m.cancelAtPeriodEnd || false;
+                                    clientMap[key].sources.add('whop');
+                                }
+                            }
+                        }
+
+                        // Convert to array and build year/month grids
+                        const clients = Object.values(clientMap).map(c => {
+                            // Build monthly arrays for each year
+                            const yearData = {};
+                            for (const yr of [2024, 2025, 2026]) {
+                                yearData[yr] = new Array(12).fill(0);
+                            }
+                            for (const [monthKey, amount] of Object.entries(c.months)) {
+                                const [yr, mo] = monthKey.split('-').map(Number);
+                                if (yearData[yr]) yearData[yr][mo] = amount;
+                            }
+
+                            // Calculate totals per year
+                            const yearTotals = {};
+                            for (const yr of [2024, 2025, 2026]) {
+                                yearTotals[yr] = yearData[yr].reduce((a, b) => a + b, 0);
+                            }
+
+                            // Determine status based on subscription + payment pattern
+                            let status = 'inactive';
+                            let projectedMonthly = 0;
+
+                            if (c.subActive && !c.cancelAtPeriodEnd) {
+                                status = 'active-sub';
+                                projectedMonthly = c.subAmount;
+                            } else if (c.subActive && c.cancelAtPeriodEnd) {
+                                status = 'canceling';
+                                projectedMonthly = 0;
+                            } else {
+                                // No active sub — check recent payment pattern
+                                const recent2025 = yearData[2025].slice(Math.max(0, CURRENT_MONTH - 3));
+                                const recent2026 = yearData[2026];
+                                const hasRecent = [...recent2025, ...recent2026].some(v => v > 0);
+                                const allPayments = [...yearData[2024], ...yearData[2025], ...yearData[2026]].filter(v => v > 0);
+
+                                if (allPayments.length === 0) {
+                                    status = 'no-payments';
+                                } else if (hasRecent) {
+                                    // Detect recurring from pattern
+                                    const amounts = allPayments.filter(a => a > 5);
+                                    if (amounts.length >= 2) {
+                                        const rounded = amounts.map(a => Math.round(a / 50) * 50);
+                                        const freq = {};
+                                        rounded.forEach(a => { freq[a] = (freq[a] || 0) + 1; });
+                                        const best = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+                                        if (best[1] >= 2 && parseFloat(best[0]) >= 50) {
+                                            status = 'recurring';
+                                            projectedMonthly = parseFloat(best[0]);
+                                        } else {
+                                            status = 'active';
+                                        }
+                                    } else {
+                                        status = 'one-time';
+                                    }
+                                } else {
+                                    // Last payment was a while ago
+                                    const lastMonth2025 = yearData[2025].reduce((last, v, i) => v > 0 ? i : last, -1);
+                                    if (lastMonth2025 >= 0 && lastMonth2025 < CURRENT_MONTH - 3) {
+                                        status = 'churned';
+                                    } else if (yearTotals[2025] === 0 && yearTotals[2024] > 0) {
+                                        status = 'churned';
+                                    } else {
+                                        status = 'inactive';
+                                    }
+                                }
+                            }
+
+                            // Build 2026 projections
+                            const projected2026 = [...yearData[2026]]; // start with actual 2026 data
+                            if (projectedMonthly > 0 && showProjections) {
+                                for (let m = 0; m < 12; m++) {
+                                    const monthDate = new Date(2026, m, 1);
+                                    // Only project future months that don't have actuals
+                                    if (monthDate > NOW && projected2026[m] === 0) {
+                                        projected2026[m] = projectedMonthly;
+                                    }
+                                }
+                            }
+                            const projected2026Total = projected2026.reduce((a, b) => a + b, 0);
+
+                            return {
+                                email: c.email,
+                                name: c.name,
+                                sources: [...c.sources],
+                                status,
+                                subAmount: c.subAmount,
+                                subActive: c.subActive,
+                                cancelAtPeriodEnd: c.cancelAtPeriodEnd,
+                                yearData,
+                                yearTotals,
+                                projected2026,
+                                projected2026Total,
+                                projectedMonthly,
+                                grandTotal: yearTotals[2024] + yearTotals[2025] + projected2026Total
+                            };
+                        });
+
+                        // Cache
+                        localStorage.setItem(cacheKey, JSON.stringify({ clients, subs: stripeSubs }));
                         localStorage.setItem(cacheTimeKey, Date.now().toString());
                         setCashflowData(clients);
+                        setActiveSubs(stripeSubs);
                     } catch (err) {
-                        console.error('Cashflow fetch error:', err);
+                        console.error('Auto cashflow fetch error:', err);
                     }
                     setLoading(false);
                 };
-                fetchCashflow();
+                fetchAll();
             }, []);
-
-            // Project 2026 payments based on recent payment patterns
-            const projectClient = (client) => {
-                const m = client.months2025;
-                // Find the last 3 non-zero payments to detect pattern
-                const nonZero = [];
-                for (let i = 11; i >= 0; i--) {
-                    if (m[i] > 0) nonZero.push({ month: i, amount: m[i] });
-                    if (nonZero.length >= 4) break;
-                }
-
-                if (nonZero.length === 0) return { projected: new Array(12).fill(0), status: 'inactive', confidence: 'none' };
-
-                const lastPaymentMonth = nonZero[0].month;
-                const notes = client.notes.toLowerCase();
-
-                // Check for end/no-renew signals
-                if (notes.includes('end') || notes.includes('no renew')) {
-                    return { projected: new Array(12).fill(0), status: 'ended', confidence: 'high' };
-                }
-
-                // If last payment was only in month 9 (Oct) or earlier with no Nov/Dec, likely ended
-                if (lastPaymentMonth < 10 && nonZero.length <= 2) {
-                    return { projected: new Array(12).fill(0), status: 'likely-ended', confidence: 'medium' };
-                }
-
-                // Check if payments look like one-time large amounts (ISA/setup fees)
-                const uniqueAmounts = [...new Set(nonZero.map(p => Math.round(p.amount)))];
-                const totalPaid = client.total2025 || m.reduce((a, b) => a + b, 0);
-
-                // If only 1 payment ever and it's a large round number, probably one-time
-                if (nonZero.length === 1 && nonZero[0].amount >= 1000) {
-                    // Check if it's in a recent month (could be new client)
-                    if (lastPaymentMonth >= 10) {
-                        return { projected: new Array(12).fill(nonZero[0].amount), status: 'new', confidence: 'low' };
-                    }
-                    return { projected: new Array(12).fill(0), status: 'one-time', confidence: 'medium' };
-                }
-
-                // Detect recurring amount - look for most common payment
-                const amounts = nonZero.map(p => p.amount).filter(a => a > 5); // ignore tiny charges
-                if (amounts.length === 0) return { projected: new Array(12).fill(0), status: 'minimal', confidence: 'low' };
-
-                // Find the most recurring amount (round to nearest 50)
-                const rounded = amounts.map(a => Math.round(a / 50) * 50);
-                const freq = {};
-                rounded.forEach(a => { freq[a] = (freq[a] || 0) + 1; });
-                const mostCommon = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
-                const recurringAmount = parseFloat(mostCommon[0]);
-
-                // If the recurring amount is very small (< $10), these are likely just processing fees
-                if (recurringAmount < 10) {
-                    // But check if there was a large initial payment
-                    const large = amounts.filter(a => a >= 500);
-                    if (large.length > 0) {
-                        return { projected: new Array(12).fill(0), status: 'watch', confidence: 'low' };
-                    }
-                    return { projected: new Array(12).fill(0), status: 'minimal', confidence: 'medium' };
-                }
-
-                // Check notes for monthly amount hints
-                let monthlyAmount = recurringAmount;
-                const monthMatch = notes.match(/(\d+)\s*mon/);
-                if (monthMatch) {
-                    // Has a specific month duration note - project only that many months
-                    const months = parseInt(monthMatch[1]);
-                    const proj = new Array(12).fill(0);
-                    for (let i = 0; i < Math.min(months, 12); i++) proj[i] = monthlyAmount;
-                    return { projected: proj, status: 'payment-plan', confidence: 'medium' };
-                }
-
-                const projected = new Array(12).fill(monthlyAmount);
-                return { projected, status: 'active', confidence: mostCommon[1] >= 2 ? 'high' : 'medium' };
-            };
-
-            const enrichedData = useMemo(() => {
-                return cashflowData.map(client => {
-                    const projection = projectClient(client);
-                    const projected2026Total = projection.projected.reduce((a, b) => a + b, 0);
-                    return { ...client, ...projection, projected2026Total };
-                });
-            }, [cashflowData]);
 
             // Filter and search
             const filteredData = useMemo(() => {
-                let data = enrichedData;
+                let data = cashflowData;
+                // Source filter
+                if (dataSource !== 'all') {
+                    data = data.filter(c => c.sources.includes(dataSource));
+                }
                 if (search) {
                     const s = search.toLowerCase();
                     data = data.filter(c => c.name.toLowerCase().includes(s) || c.email.toLowerCase().includes(s));
                 }
                 if (filterStatus === 'active') {
-                    data = data.filter(c => c.status === 'active' || c.status === 'new' || c.status === 'payment-plan');
-                } else if (filterStatus === 'ended') {
-                    data = data.filter(c => c.status === 'ended' || c.status === 'likely-ended');
-                } else if (filterStatus === 'upfront-only') {
-                    data = data.filter(c => c.total2024 > 0 && c.total2025 === 0);
+                    data = data.filter(c => ['active-sub', 'recurring', 'active'].includes(c.status));
+                } else if (filterStatus === 'canceling') {
+                    data = data.filter(c => c.status === 'canceling');
+                } else if (filterStatus === 'churned') {
+                    data = data.filter(c => c.status === 'churned' || c.status === 'inactive');
+                } else if (filterStatus === 'one-time') {
+                    data = data.filter(c => c.status === 'one-time' || c.status === 'no-payments');
                 }
                 // Sort
                 if (sortConfig.key) {
                     data = [...data].sort((a, b) => {
                         let av, bv;
                         if (sortConfig.key === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
-                        else if (sortConfig.key === 'total2025') { av = a.total2025; bv = b.total2025; }
-                        else if (sortConfig.key === 'total2024') { av = a.total2024; bv = b.total2024; }
-                        else if (sortConfig.key === 'projected2026') { av = a.projected2026Total; bv = b.projected2026Total; }
-                        else { av = a[sortConfig.key]; bv = b[sortConfig.key]; }
+                        else if (sortConfig.key === 'grandTotal') { av = a.grandTotal; bv = b.grandTotal; }
+                        else if (sortConfig.key === 'projected') { av = a.projected2026Total; bv = b.projected2026Total; }
+                        else if (sortConfig.key === 'subAmount') { av = a.subAmount; bv = b.subAmount; }
+                        else if (sortConfig.key.startsWith('year-')) { const yr = parseInt(sortConfig.key.split('-')[1]); av = a.yearTotals[yr] || 0; bv = b.yearTotals[yr] || 0; }
+                        else { av = a[sortConfig.key] || 0; bv = b[sortConfig.key] || 0; }
                         if (av < bv) return sortConfig.dir === 'asc' ? -1 : 1;
                         if (av > bv) return sortConfig.dir === 'asc' ? 1 : -1;
                         return 0;
                     });
                 } else {
-                    // Default: sort by 2025 total desc
-                    data = [...data].sort((a, b) => b.total2025 - a.total2025);
+                    data = [...data].sort((a, b) => b.grandTotal - a.grandTotal);
                 }
                 return data;
-            }, [enrichedData, search, filterStatus, sortConfig]);
+            }, [cashflowData, search, filterStatus, sortConfig, dataSource]);
 
             const handleSort = (key) => {
                 setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
             };
 
-            // Summary stats
+            // Stats
             const stats = useMemo(() => {
-                const active = enrichedData.filter(c => c.status === 'active' || c.status === 'new' || c.status === 'payment-plan');
-                const monthlyTotals2025 = new Array(12).fill(0);
-                const monthlyTotals2026 = new Array(12).fill(0);
-                enrichedData.forEach(c => {
-                    c.months2025.forEach((v, i) => { monthlyTotals2025[i] += v; });
-                    if (c.projected) c.projected.forEach((v, i) => { monthlyTotals2026[i] += v; });
+                const active = cashflowData.filter(c => ['active-sub', 'recurring', 'active'].includes(c.status));
+                const monthlyTotals = {};
+                for (const yr of [2024, 2025, 2026]) {
+                    monthlyTotals[yr] = new Array(12).fill(0);
+                }
+                cashflowData.forEach(c => {
+                    for (const yr of [2024, 2025]) {
+                        if (c.yearData[yr]) c.yearData[yr].forEach((v, i) => { monthlyTotals[yr][i] += v; });
+                    }
+                    c.projected2026.forEach((v, i) => { monthlyTotals[2026][i] += v; });
                 });
-                const total2025 = monthlyTotals2025.reduce((a, b) => a + b, 0);
-                const total2026Projected = monthlyTotals2026.reduce((a, b) => a + b, 0);
-                const avgMonthly2025 = total2025 / 12;
-                const activeClients = active.length;
-                return { monthlyTotals2025, monthlyTotals2026, total2025, total2026Projected, avgMonthly2025, activeClients };
-            }, [enrichedData]);
+                const total2025 = monthlyTotals[2025].reduce((a, b) => a + b, 0);
+                const total2026 = monthlyTotals[2026].reduce((a, b) => a + b, 0);
+                const mrr = active.reduce((sum, c) => sum + (c.projectedMonthly || 0), 0);
+                return { monthlyTotals, total2025, total2026, mrr, activeClients: active.length, totalClients: cashflowData.length };
+            }, [cashflowData]);
 
-            const getStatusBadge = (status, confidence) => {
+            const getStatusBadge = (status) => {
                 const styles = {
-                    'active': 'bg-emerald-500/20 text-emerald-400',
-                    'new': 'bg-blue-500/20 text-blue-400',
-                    'payment-plan': 'bg-amber-500/20 text-amber-400',
-                    'ended': 'bg-red-500/20 text-red-400',
-                    'likely-ended': 'bg-red-500/10 text-red-300',
+                    'active-sub': 'bg-emerald-500/20 text-emerald-400',
+                    'recurring': 'bg-emerald-500/15 text-emerald-300',
+                    'active': 'bg-blue-500/20 text-blue-400',
+                    'canceling': 'bg-amber-500/20 text-amber-400',
+                    'churned': 'bg-red-500/20 text-red-400',
                     'one-time': 'bg-gray-500/20 text-gray-400',
                     'inactive': 'bg-gray-500/10 text-gray-500',
-                    'minimal': 'bg-gray-500/10 text-gray-500',
-                    'watch': 'bg-amber-500/10 text-amber-300',
+                    'no-payments': 'bg-gray-500/10 text-gray-500',
                 };
                 const labels = {
+                    'active-sub': 'Active Sub',
+                    'recurring': 'Recurring',
                     'active': 'Active',
-                    'new': 'New',
-                    'payment-plan': 'Plan',
-                    'ended': 'Ended',
-                    'likely-ended': 'Likely Ended',
+                    'canceling': 'Canceling',
+                    'churned': 'Churned',
                     'one-time': 'One-time',
                     'inactive': 'Inactive',
-                    'minimal': 'Minimal',
-                    'watch': 'Watch',
+                    'no-payments': 'No Pay',
                 };
                 return React.createElement('span', { className: `px-2 py-0.5 rounded text-xs font-medium ${styles[status] || styles.inactive}` }, labels[status] || status);
             };
 
-            const cellColor = (val) => {
+            const sourceBadge = (sources) => {
+                return React.createElement('div', { className: 'flex gap-1' },
+                    sources.includes('stripe') ? React.createElement('span', { className: 'px-1.5 py-0.5 rounded text-xs bg-indigo-500/20 text-indigo-400', style: { fontSize: '9px' } }, 'S') : null,
+                    sources.includes('whop') ? React.createElement('span', { className: 'px-1.5 py-0.5 rounded text-xs bg-orange-500/20 text-orange-400', style: { fontSize: '9px' } }, 'W') : null
+                );
+            };
+
+            const cellColor = (val, isProjected) => {
+                if (val <= 0) return 'text-muted';
+                if (isProjected) {
+                    if (val >= 1000) return 'text-purple-400';
+                    return 'text-purple-300/70';
+                }
                 if (val >= 3000) return 'text-emerald-400 font-semibold';
                 if (val >= 1000) return 'text-emerald-300';
                 if (val >= 500) return 'text-blue-300';
-                if (val > 0) return 'text-secondary';
-                return 'text-muted';
+                return 'text-secondary';
             };
 
-            const projCellColor = (val, confidence) => {
-                if (val <= 0) return 'text-muted';
-                if (confidence === 'high') return 'text-purple-400';
-                if (confidence === 'medium') return 'text-purple-300/70';
-                return 'text-purple-300/40 italic';
+            const isProjectedCell = (yr, mo) => {
+                if (yr < CURRENT_YEAR) return false;
+                if (yr === CURRENT_YEAR && mo <= CURRENT_MONTH) return false;
+                return true;
             };
 
             // CSV export
             const exportCSV = () => {
-                const headers = ['Email', 'Name', 'Status', '2024 Total', ...MONTH_NAMES.map(m => m + ' 2025'), '2025 Total', ...MONTH_NAMES.map(m => m + ' 2026 (Proj)'), '2026 Projected', 'Notes'];
+                const headers = ['Email', 'Name', 'Source', 'Status', 'Active Sub Amount',
+                    ...yearRange.flatMap(yr => MONTH_NAMES.map(m => m + ' ' + yr)),
+                    ...yearRange.map(yr => yr + ' Total'), 'Grand Total'];
                 const rows = filteredData.map(c => [
-                    c.email, c.name, c.status, c.total2024,
-                    ...c.months2025, c.total2025,
-                    ...(c.projected || new Array(12).fill(0)), c.projected2026Total,
-                    c.notes
+                    c.email, c.name, c.sources.join('+'), c.status, c.subAmount,
+                    ...yearRange.flatMap(yr => yr === 2026 ? c.projected2026 : (c.yearData[yr] || new Array(12).fill(0))),
+                    ...yearRange.map(yr => yr === 2026 ? c.projected2026Total : (c.yearTotals[yr] || 0)),
+                    c.grandTotal
                 ]);
                 const csv = [headers, ...rows].map(r => r.map(v => typeof v === 'string' && v.includes(',') ? `"${v}"` : v).join(',')).join('\n');
                 const blob = new Blob([csv], { type: 'text/csv' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url; a.download = 'cashflow_schedule_2026.csv'; a.click();
+                a.href = url; a.download = 'auto_cashflow_schedule.csv'; a.click();
                 URL.revokeObjectURL(url);
             };
 
-            if (loading) return React.createElement('div', { className: 'flex items-center justify-center h-64' },
-                React.createElement('div', { className: 'text-secondary' }, 'Loading cashflow data...')
+            if (loading) return React.createElement('div', { className: 'flex flex-col items-center justify-center h-64 gap-3' },
+                React.createElement('div', { className: 'w-8 h-8 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin' }),
+                React.createElement('div', { className: 'text-secondary text-sm' }, loadingMsg)
             );
+
+            // Build month columns for visible years
+            const visibleYears = showProjections ? yearRange : yearRange.filter(yr => yr <= CURRENT_YEAR + (CURRENT_MONTH > 0 ? 1 : 0));
 
             return React.createElement('div', { className: 'space-y-6' },
                 // Header
                 React.createElement('div', { className: 'flex items-center justify-between' },
                     React.createElement('div', null,
                         React.createElement('h2', { className: 'text-2xl font-bold text-primary' }, 'Cashflow Schedule'),
-                        React.createElement('p', { className: 'text-secondary text-sm mt-1' }, `${enrichedData.length} clients tracked • ${stats.activeClients} projected active`)
+                        React.createElement('p', { className: 'text-secondary text-sm mt-1' }, `Auto-generated from Stripe & Whop • ${stats.totalClients} clients • ${stats.activeClients} active`)
                     ),
                     React.createElement('div', { className: 'flex gap-2' },
                         React.createElement('button', { onClick: () => setShowProjections(!showProjections), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${showProjections ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, showProjections ? '2026 Projections ON' : '2026 Projections OFF'),
-                        React.createElement('button', { onClick: exportCSV, className: 'px-3 py-1.5 rounded-lg text-sm font-medium bg-dark-700 text-secondary hover:bg-dark-600 transition-all' }, 'Export CSV')
+                        React.createElement('button', { onClick: exportCSV, className: 'px-3 py-1.5 rounded-lg text-sm font-medium bg-dark-700 text-secondary hover:bg-dark-600 transition-all' }, 'Export CSV'),
+                        React.createElement('button', { onClick: () => { localStorage.removeItem('vam_auto_cashflow'); localStorage.removeItem('vam_auto_cashflow_time'); window.location.reload(); }, className: 'px-3 py-1.5 rounded-lg text-sm font-medium bg-dark-700 text-secondary hover:bg-dark-600 transition-all' }, 'Refresh')
                     )
                 ),
 
                 // Summary cards
-                React.createElement('div', { className: 'grid grid-cols-4 gap-4' },
+                React.createElement('div', { className: 'grid grid-cols-5 gap-4' },
+                    React.createElement('div', { className: 'card p-4' },
+                        React.createElement('div', { className: 'text-xs text-secondary mb-1' }, 'Monthly Recurring (MRR)'),
+                        React.createElement('div', { className: 'text-xl font-bold text-brand-cyan' }, fmt(stats.mrr))
+                    ),
                     React.createElement('div', { className: 'card p-4' },
                         React.createElement('div', { className: 'text-xs text-secondary mb-1' }, '2025 Revenue'),
                         React.createElement('div', { className: 'text-xl font-bold text-emerald-400' }, fmt(stats.total2025))
                     ),
                     React.createElement('div', { className: 'card p-4' },
-                        React.createElement('div', { className: 'text-xs text-secondary mb-1' }, '2025 Monthly Avg'),
-                        React.createElement('div', { className: 'text-xl font-bold text-blue-400' }, fmt(stats.avgMonthly2025))
-                    ),
-                    React.createElement('div', { className: 'card p-4' },
                         React.createElement('div', { className: 'text-xs text-secondary mb-1' }, '2026 Projected'),
-                        React.createElement('div', { className: 'text-xl font-bold text-purple-400' }, fmt(stats.total2026Projected))
+                        React.createElement('div', { className: 'text-xl font-bold text-purple-400' }, fmt(stats.total2026))
                     ),
                     React.createElement('div', { className: 'card p-4' },
                         React.createElement('div', { className: 'text-xs text-secondary mb-1' }, 'Active Clients'),
                         React.createElement('div', { className: 'text-xl font-bold text-primary' }, stats.activeClients)
+                    ),
+                    React.createElement('div', { className: 'card p-4' },
+                        React.createElement('div', { className: 'text-xs text-secondary mb-1' }, 'Total Clients'),
+                        React.createElement('div', { className: 'text-xl font-bold text-secondary' }, stats.totalClients)
                     )
                 ),
 
-                // Monthly revenue chart (bar style with numbers)
+                // Monthly revenue chart
                 React.createElement('div', { className: 'card p-4' },
-                    React.createElement('h3', { className: 'text-sm font-semibold text-primary mb-3' }, 'Monthly Revenue'),
+                    React.createElement('h3', { className: 'text-sm font-semibold text-primary mb-3' }, 'Monthly Revenue (2025 + 2026 Projected)'),
                     React.createElement('div', { className: 'flex gap-1 items-end', style: { height: '120px' } },
-                        ...[...stats.monthlyTotals2025, ...(showProjections ? stats.monthlyTotals2026 : [])].map((val, i) => {
-                            const maxVal = Math.max(...stats.monthlyTotals2025, ...(showProjections ? stats.monthlyTotals2026 : [1]));
+                        ...[...stats.monthlyTotals[2025], ...(showProjections ? stats.monthlyTotals[2026] : [])].map((val, i) => {
+                            const allVals = [...stats.monthlyTotals[2025], ...(showProjections ? stats.monthlyTotals[2026] : [1])];
+                            const maxVal = Math.max(...allVals);
                             const height = maxVal > 0 ? (val / maxVal) * 100 : 0;
-                            const isProjected = i >= 12;
+                            const isProjMonth = i >= 12;
                             const monthLabel = MONTH_NAMES[i % 12];
                             const yearLabel = i < 12 ? "'25" : "'26";
                             return React.createElement('div', { key: i, className: 'flex flex-col items-center flex-1', style: { minWidth: 0 } },
                                 React.createElement('div', { className: 'text-xs text-secondary mb-1', style: { fontSize: '9px' } }, val > 0 ? (val >= 1000 ? Math.round(val/1000) + 'K' : Math.round(val)) : ''),
-                                React.createElement('div', { className: `w-full rounded-t ${isProjected ? 'bg-purple-500/40' : 'bg-emerald-500/60'}`, style: { height: height + '%', minHeight: val > 0 ? '2px' : '0' } }),
-                                React.createElement('div', { className: 'text-xs text-muted mt-1', style: { fontSize: '8px' } }, (i === 0 || i === 6 || i === 12 || i === 18) ? monthLabel + yearLabel : '')
+                                React.createElement('div', { className: `w-full rounded-t ${isProjMonth ? 'bg-purple-500/40' : 'bg-emerald-500/60'}`, style: { height: height + '%', minHeight: val > 0 ? '2px' : '0' } }),
+                                React.createElement('div', { className: 'text-xs text-muted mt-1', style: { fontSize: '8px' } }, (i % 3 === 0) ? monthLabel + yearLabel : '')
                             );
                         })
                     )
                 ),
 
                 // Filters
-                React.createElement('div', { className: 'flex gap-3 items-center' },
-                    React.createElement('input', { type: 'text', placeholder: 'Search clients...', value: search, onChange: (e) => setSearch(e.target.value), className: 'input-field px-3 py-1.5 rounded-lg text-sm flex-1', style: { maxWidth: '300px' } }),
+                React.createElement('div', { className: 'flex gap-3 items-center flex-wrap' },
+                    React.createElement('input', { type: 'text', placeholder: 'Search clients...', value: search, onChange: (e) => setSearch(e.target.value), className: 'input-field px-3 py-1.5 rounded-lg text-sm', style: { maxWidth: '250px' } }),
                     React.createElement('div', { className: 'flex gap-1' },
-                        ['all', 'active', 'ended', 'upfront-only'].map(f =>
+                        ['all', 'active', 'canceling', 'churned', 'one-time'].map(f =>
                             React.createElement('button', { key: f, onClick: () => setFilterStatus(f), className: `px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${filterStatus === f ? 'bg-brand-cyan/20 text-brand-cyan' : 'text-secondary hover:text-primary'}` },
-                                f === 'all' ? 'All' : f === 'active' ? 'Active' : f === 'ended' ? 'Ended' : 'Upfront Only'
+                                f === 'all' ? 'All' : f === 'active' ? 'Active' : f === 'canceling' ? 'Canceling' : f === 'churned' ? 'Churned' : 'One-time'
                             )
                         )
                     ),
-                    React.createElement('span', { className: 'text-xs text-muted' }, `${filteredData.length} clients`)
+                    React.createElement('div', { className: 'flex gap-1 border-l divider pl-3' },
+                        ['all', 'stripe', 'whop'].map(s =>
+                            React.createElement('button', { key: s, onClick: () => setDataSource(s), className: `px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${dataSource === s ? 'bg-indigo-500/20 text-indigo-400' : 'text-secondary hover:text-primary'}` },
+                                s === 'all' ? 'All Sources' : s === 'stripe' ? 'Stripe' : 'Whop'
+                            )
+                        )
+                    ),
+                    React.createElement('span', { className: 'text-xs text-muted ml-auto' }, `${filteredData.length} clients`)
                 ),
 
                 // Main table
                 React.createElement('div', { className: 'card overflow-hidden' },
                     React.createElement('div', { className: 'overflow-x-auto' },
-                        React.createElement('table', { className: 'w-full text-sm', style: { minWidth: showProjections ? '2200px' : '1200px' } },
+                        React.createElement('table', { className: 'w-full text-sm', style: { minWidth: (visibleYears.length * 12 * 65 + 400) + 'px' } },
                             React.createElement('thead', null,
+                                // Year header row
                                 React.createElement('tr', { className: 'border-b divider' },
-                                    React.createElement('th', { className: 'text-left p-3 text-xs font-semibold text-secondary cursor-pointer hover:text-primary sticky left-0 bg-dark-900', onClick: () => handleSort('name'), style: { minWidth: '180px', zIndex: 10 } }, 'Client', sortConfig.key === 'name' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''),
-                                    React.createElement('th', { className: 'text-right p-3 text-xs font-semibold text-secondary cursor-pointer hover:text-primary', onClick: () => handleSort('total2024'), style: { minWidth: '70px' } }, '2024', sortConfig.key === 'total2024' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''),
-                                    ...MONTH_NAMES.map((m, i) =>
-                                        React.createElement('th', { key: 'h25_'+i, className: 'text-right p-2 text-xs font-semibold text-secondary', style: { minWidth: '65px' } }, m + " '25")
+                                    React.createElement('th', { className: 'sticky left-0 bg-dark-900 p-2', style: { zIndex: 10 } }),
+                                    React.createElement('th', { className: 'p-2' }),
+                                    React.createElement('th', { className: 'p-2' }),
+                                    ...visibleYears.map(yr =>
+                                        React.createElement('th', { key: yr, colSpan: 12, className: `text-center p-2 text-xs font-bold ${yr > CURRENT_YEAR ? 'text-purple-400' : 'text-primary'}` }, yr + (yr > CURRENT_YEAR ? ' (Projected)' : ''))
                                     ),
-                                    React.createElement('th', { className: 'text-right p-3 text-xs font-semibold text-emerald-400 cursor-pointer hover:text-emerald-300', onClick: () => handleSort('total2025'), style: { minWidth: '80px' } }, '2025', sortConfig.key === 'total2025' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''),
-                                    ...(showProjections ? MONTH_NAMES.map((m, i) =>
-                                        React.createElement('th', { key: 'h26_'+i, className: 'text-right p-2 text-xs font-semibold text-purple-400/70', style: { minWidth: '65px' } }, m + " '26")
-                                    ) : []),
-                                    ...(showProjections ? [React.createElement('th', { key: 'h26total', className: 'text-right p-3 text-xs font-semibold text-purple-400 cursor-pointer hover:text-purple-300', onClick: () => handleSort('projected2026'), style: { minWidth: '80px' } }, '2026 Proj', sortConfig.key === 'projected2026' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : '')] : []),
+                                    ...visibleYears.map(yr =>
+                                        React.createElement('th', { key: 'tot'+yr, className: 'p-2' })
+                                    ),
+                                    React.createElement('th', null),
+                                    React.createElement('th', null)
+                                ),
+                                // Month header row
+                                React.createElement('tr', { className: 'border-b divider' },
+                                    React.createElement('th', { className: 'text-left p-2 text-xs font-semibold text-secondary cursor-pointer hover:text-primary sticky left-0 bg-dark-900', onClick: () => handleSort('name'), style: { minWidth: '180px', zIndex: 10 } }, 'Client', sortConfig.key === 'name' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''),
+                                    React.createElement('th', { className: 'text-center p-2 text-xs font-semibold text-secondary', style: { minWidth: '40px' } }, 'Src'),
+                                    React.createElement('th', { className: 'text-right p-2 text-xs font-semibold text-secondary cursor-pointer hover:text-primary', onClick: () => handleSort('subAmount'), style: { minWidth: '60px' } }, 'MRR'),
+                                    ...visibleYears.flatMap(yr =>
+                                        MONTH_NAMES.map((m, i) =>
+                                            React.createElement('th', { key: yr+'_'+i, className: `text-right p-1 text-xs font-semibold ${isProjectedCell(yr, i) ? 'text-purple-400/60' : 'text-secondary'}`, style: { minWidth: '58px', fontSize: '10px' } }, m)
+                                        )
+                                    ),
+                                    ...visibleYears.map(yr =>
+                                        React.createElement('th', { key: 'total'+yr, className: `text-right p-2 text-xs font-bold cursor-pointer hover:text-primary ${yr > CURRENT_YEAR ? 'text-purple-400' : 'text-emerald-400'}`, onClick: () => handleSort('year-'+yr), style: { minWidth: '75px' } }, yr + ' Tot')
+                                    ),
                                     React.createElement('th', { className: 'text-center p-2 text-xs font-semibold text-secondary', style: { minWidth: '70px' } }, 'Status'),
-                                    React.createElement('th', { className: 'text-left p-2 text-xs font-semibold text-secondary', style: { minWidth: '100px' } }, 'Notes')
+                                    React.createElement('th', { className: 'text-right p-2 text-xs font-bold text-primary cursor-pointer hover:text-brand-cyan', onClick: () => handleSort('grandTotal'), style: { minWidth: '75px' } }, 'Total')
                                 )
                             ),
                             React.createElement('tbody', null,
                                 // Monthly totals row
                                 React.createElement('tr', { className: 'border-b divider bg-dark-800/50 font-semibold' },
-                                    React.createElement('td', { className: 'p-3 text-xs text-primary sticky left-0 bg-dark-800/50', style: { zIndex: 10 } }, 'MONTHLY TOTALS'),
-                                    React.createElement('td', { className: 'text-right p-3 text-xs text-primary' }, ''),
-                                    ...stats.monthlyTotals2025.map((v, i) =>
-                                        React.createElement('td', { key: 't25_'+i, className: 'text-right p-2 text-xs text-emerald-400' }, v > 0 ? fmt(v) : '')
+                                    React.createElement('td', { className: 'p-2 text-xs text-primary sticky left-0 bg-dark-800/50', style: { zIndex: 10 } }, 'MONTHLY TOTALS'),
+                                    React.createElement('td', null),
+                                    React.createElement('td', { className: 'text-right p-2 text-xs text-brand-cyan font-bold' }, fmt(stats.mrr)),
+                                    ...visibleYears.flatMap(yr =>
+                                        stats.monthlyTotals[yr].map((v, i) =>
+                                            React.createElement('td', { key: yr+'_'+i, className: `text-right p-1 text-xs ${isProjectedCell(yr, i) ? 'text-purple-400' : 'text-emerald-400'}` }, v > 0 ? fmt(v) : '')
+                                        )
                                     ),
-                                    React.createElement('td', { className: 'text-right p-3 text-xs text-emerald-400 font-bold' }, fmt(stats.total2025)),
-                                    ...(showProjections ? stats.monthlyTotals2026.map((v, i) =>
-                                        React.createElement('td', { key: 't26_'+i, className: 'text-right p-2 text-xs text-purple-400' }, v > 0 ? fmt(v) : '')
-                                    ) : []),
-                                    ...(showProjections ? [React.createElement('td', { key: 't26total', className: 'text-right p-3 text-xs text-purple-400 font-bold' }, fmt(stats.total2026Projected))] : []),
-                                    React.createElement('td', null, ''),
-                                    React.createElement('td', null, '')
+                                    ...visibleYears.map(yr => {
+                                        const tot = stats.monthlyTotals[yr].reduce((a, b) => a + b, 0);
+                                        return React.createElement('td', { key: 'tot'+yr, className: `text-right p-2 text-xs font-bold ${yr > CURRENT_YEAR ? 'text-purple-400' : 'text-emerald-400'}` }, fmt(tot));
+                                    }),
+                                    React.createElement('td', null),
+                                    React.createElement('td', null)
                                 ),
                                 // Client rows
                                 ...filteredData.map((c, idx) =>
                                     React.createElement('tr', { key: idx, className: 'border-b divider hover-bg transition-colors' },
-                                        React.createElement('td', { className: 'p-3 sticky left-0 bg-dark-900', style: { zIndex: 5 } },
+                                        React.createElement('td', { className: 'p-2 sticky left-0 bg-dark-900', style: { zIndex: 5 } },
                                             React.createElement('div', { className: 'text-xs font-medium text-primary truncate', style: { maxWidth: '170px' } }, c.name || c.email),
-                                            c.name && c.email ? React.createElement('div', { className: 'text-xs text-muted truncate', style: { maxWidth: '170px', fontSize: '10px' } }, c.email) : null
+                                            c.name && c.email ? React.createElement('div', { className: 'text-xs text-muted truncate', style: { maxWidth: '170px', fontSize: '9px' } }, c.email) : null
                                         ),
-                                        React.createElement('td', { className: `text-right p-3 text-xs ${c.total2024 > 0 ? 'text-secondary' : 'text-muted'}` }, c.total2024 > 0 ? fmt(c.total2024) : ''),
-                                        ...c.months2025.map((v, i) =>
-                                            React.createElement('td', { key: '25_'+i, className: `text-right p-2 text-xs ${cellColor(v)}` }, v > 0 ? fmtD(v) : '')
-                                        ),
-                                        React.createElement('td', { className: 'text-right p-3 text-xs text-emerald-400 font-semibold' }, c.total2025 > 0 ? fmt(c.total2025) : ''),
-                                        ...(showProjections ? (c.projected || new Array(12).fill(0)).map((v, i) =>
-                                            React.createElement('td', { key: '26_'+i, className: `text-right p-2 text-xs ${projCellColor(v, c.confidence)}` }, v > 0 ? fmt(v) : '')
-                                        ) : []),
-                                        ...(showProjections ? [React.createElement('td', { key: '26total', className: `text-right p-3 text-xs font-semibold ${c.projected2026Total > 0 ? 'text-purple-400' : 'text-muted'}` }, c.projected2026Total > 0 ? fmt(c.projected2026Total) : '')] : []),
-                                        React.createElement('td', { className: 'text-center p-2' }, getStatusBadge(c.status, c.confidence)),
-                                        React.createElement('td', { className: 'p-2 text-xs text-secondary truncate', style: { maxWidth: '120px' } }, c.notes || '')
+                                        React.createElement('td', { className: 'p-1 text-center' }, sourceBadge(c.sources)),
+                                        React.createElement('td', { className: `text-right p-2 text-xs ${c.subAmount > 0 ? 'text-brand-cyan font-medium' : 'text-muted'}` }, c.subAmount > 0 ? fmt(c.subAmount) : ''),
+                                        ...visibleYears.flatMap(yr => {
+                                            const monthData = yr === 2026 ? c.projected2026 : (c.yearData[yr] || new Array(12).fill(0));
+                                            return monthData.map((v, i) => {
+                                                const proj = isProjectedCell(yr, i) && v > 0 && (c.yearData[yr] ? c.yearData[yr][i] === 0 : true);
+                                                return React.createElement('td', { key: yr+'_'+i, className: `text-right p-1 text-xs ${cellColor(v, proj)}` }, v > 0 ? fmtD(v) : '');
+                                            });
+                                        }),
+                                        ...visibleYears.map(yr => {
+                                            const tot = yr === 2026 ? c.projected2026Total : (c.yearTotals[yr] || 0);
+                                            return React.createElement('td', { key: 'tot'+yr, className: `text-right p-2 text-xs font-semibold ${yr > CURRENT_YEAR ? (tot > 0 ? 'text-purple-400' : 'text-muted') : (tot > 0 ? 'text-emerald-400' : 'text-muted')}` }, tot > 0 ? fmt(tot) : '');
+                                        }),
+                                        React.createElement('td', { className: 'text-center p-1' }, getStatusBadge(c.status)),
+                                        React.createElement('td', { className: 'text-right p-2 text-xs font-bold text-primary' }, c.grandTotal > 0 ? fmt(c.grandTotal) : '')
                                     )
                                 )
                             )
