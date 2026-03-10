@@ -1,4 +1,5 @@
 #!/bin/sh
+rm -rf dist
 mkdir -p dist/client-portal dist/george dist/billing-errors
 cp index.html dashboard.html dist/
 cp client-portal/index.html dist/client-portal/index.html
