@@ -287,7 +287,7 @@
 
         // Full setup timing mapping
         const mapSetupTiming = r => ({
-            client: r['VAM'] || '', csmRep: r['CSM'] || '', lastForm: r['Last Form'] || '', lastFormDate: r['Date'] || '',
+            client: r['VAM'] || '', csmRep: r['CSM'] || '', renewal: r['Renewal (NEED TO UPDATE)'] || '', lastForm: r['Last Form'] || '', lastFormDate: r['Date'] || '',
             status: r['Status'] || '', concern: r['Concern'] || '', referral: r['Referral'] || '', testimonial: r['Testmonial'] || '',
             lender: r['Status_1'] || '', state: r['State'] || '', campaign: r['Campaign'] || '', contractCategory: r['Contract Category'] || '',
             spanish: r['Spanish'] || '', mrr: r['MRR'] || '', fulfilled: r['Fullfilled'] || '', info: r['Info'] || '',
@@ -8145,7 +8145,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
         };
 
         // ========== CASHFLOW SCHEDULE TAB (Auto from Stripe + Whop) ==========
-        const CashflowTab = () => {
+        const CashflowTab = ({ setupData = [] }) => {
             const [cashflowData, setCashflowData] = useState([]);
             const [activeSubs, setActiveSubs] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -8502,9 +8502,34 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 return { value: apiValue, isOverride: false };
             };
 
+            // Enrich cashflow data with setupData renewal tag
+            const enrichedCashflow = useMemo(() => {
+                if (!setupData.length) return cashflowData;
+                return cashflowData.map(c => {
+                    const cName = (c.name || '').toLowerCase().trim();
+                    const cEmail = (c.email || '').toLowerCase().trim();
+                    const match = setupData.find(s => {
+                        const sName = (s.client || '').toLowerCase().trim();
+                        if (!sName || !cName) return false;
+                        if (sName === cName) return true;
+                        // Fuzzy: check if significant name parts match
+                        const sParts = sName.split(' ').filter(p => p.length > 2);
+                        const cParts = cName.split(' ').filter(p => p.length > 2);
+                        if (sParts.length >= 2 && cParts.length >= 2) {
+                            return sParts.every(p => cName.includes(p)) || cParts.every(p => sName.includes(p));
+                        }
+                        // Check name/email field
+                        const sNameEmail = (s.nameEmail || '').toLowerCase();
+                        if (cEmail && sNameEmail.includes(cEmail)) return true;
+                        return false;
+                    });
+                    return { ...c, renewal: match ? match.renewal : '', csmRep: match ? match.csmRep : '', setupMatch: !!match };
+                });
+            }, [cashflowData, setupData]);
+
             // Filter and search
             const filteredData = useMemo(() => {
-                let data = cashflowData;
+                let data = enrichedCashflow;
                 // Source filter
                 if (dataSource !== 'all') {
                     data = data.filter(c => c.sources.includes(dataSource));
@@ -8513,7 +8538,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     const s = search.toLowerCase();
                     data = data.filter(c => c.name.toLowerCase().includes(s) || c.email.toLowerCase().includes(s));
                 }
-                if (filterStatus === 'active') {
+                if (filterStatus === 'sheet-active') {
+                    data = data.filter(c => c.renewal && c.renewal.toLowerCase() === 'active');
+                } else if (filterStatus === 'active') {
                     data = data.filter(c => ['active-sub', 'recurring', 'active'].includes(c.status));
                 } else if (filterStatus === 'canceling') {
                     data = data.filter(c => c.status === 'canceling');
@@ -8540,7 +8567,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     data = [...data].sort((a, b) => b.grandTotal - a.grandTotal);
                 }
                 return data;
-            }, [cashflowData, search, filterStatus, sortConfig, dataSource]);
+            }, [enrichedCashflow, search, filterStatus, sortConfig, dataSource]);
 
             const handleSort = (key) => {
                 setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
@@ -8548,12 +8575,13 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
             // Stats
             const stats = useMemo(() => {
-                const active = cashflowData.filter(c => ['active-sub', 'recurring', 'active'].includes(c.status));
+                const active = enrichedCashflow.filter(c => ['active-sub', 'recurring', 'active'].includes(c.status));
+                const sheetActive = enrichedCashflow.filter(c => c.renewal && c.renewal.toLowerCase() === 'active');
                 const monthlyTotals = {};
                 for (const yr of [2024, 2025, 2026]) {
                     monthlyTotals[yr] = new Array(12).fill(0);
                 }
-                cashflowData.forEach(c => {
+                enrichedCashflow.forEach(c => {
                     for (const yr of [2024, 2025]) {
                         if (c.yearData[yr]) c.yearData[yr].forEach((v, i) => { monthlyTotals[yr][i] += v; });
                     }
@@ -8562,8 +8590,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 const total2025 = monthlyTotals[2025].reduce((a, b) => a + b, 0);
                 const total2026 = monthlyTotals[2026].reduce((a, b) => a + b, 0);
                 const mrr = active.reduce((sum, c) => sum + (c.projectedMonthly || 0), 0);
-                return { monthlyTotals, total2025, total2026, mrr, activeClients: active.length, totalClients: cashflowData.length };
-            }, [cashflowData]);
+                return { monthlyTotals, total2025, total2026, mrr, activeClients: active.length, sheetActiveClients: sheetActive.length, totalClients: enrichedCashflow.length };
+            }, [enrichedCashflow]);
 
             const getStatusBadge = (status) => {
                 const styles = {
@@ -8703,9 +8731,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 React.createElement('div', { className: 'flex gap-3 items-center flex-wrap' },
                     React.createElement('input', { type: 'text', placeholder: 'Search clients...', value: search, onChange: (e) => setSearch(e.target.value), className: 'input-field px-3 py-1.5 rounded-lg text-sm', style: { maxWidth: '250px' } }),
                     React.createElement('div', { className: 'flex gap-1' },
-                        ['all', 'active', 'canceling', 'churned', 'one-time'].map(f =>
-                            React.createElement('button', { key: f, onClick: () => setFilterStatus(f), className: `px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${filterStatus === f ? 'bg-brand-cyan/20 text-brand-cyan' : 'text-secondary hover:text-primary'}` },
-                                f === 'all' ? 'All' : f === 'active' ? 'Active' : f === 'canceling' ? 'Canceling' : f === 'churned' ? 'Churned' : 'One-time'
+                        ['all', 'sheet-active', 'active', 'canceling', 'churned', 'one-time'].map(f =>
+                            React.createElement('button', { key: f, onClick: () => setFilterStatus(f), className: `px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${filterStatus === f ? (f === 'sheet-active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-brand-cyan/20 text-brand-cyan') : 'text-secondary hover:text-primary'}` },
+                                f === 'all' ? 'All' : f === 'sheet-active' ? `Active (${stats.sheetActiveClients})` : f === 'active' ? 'Active Sub' : f === 'canceling' ? 'Canceling' : f === 'churned' ? 'Churned' : 'One-time'
                             )
                         )
                     ),
@@ -8720,15 +8748,15 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 ),
 
                 // Main table
-                React.createElement('div', { className: 'card overflow-hidden' },
-                    React.createElement('div', { className: 'overflow-x-auto' },
+                React.createElement('div', { className: 'card', style: { overflow: 'hidden' } },
+                    React.createElement('div', { style: { overflowX: 'auto' } },
                         React.createElement('table', { className: 'w-full text-sm border-collapse' },
                             React.createElement('thead', null,
                                 // Year header row
                                 React.createElement('tr', { className: 'border-b divider' },
-                                    React.createElement('th', { className: 'sticky left-0 bg-dark-900 p-2', style: { zIndex: 20, minWidth: '180px' } }),
-                                    React.createElement('th', { className: 'sticky bg-dark-900 p-2', style: { zIndex: 15, left: '180px', minWidth: '40px' } }),
-                                    React.createElement('th', { className: 'sticky bg-dark-900 p-2', style: { zIndex: 15, left: '220px', minWidth: '60px' } }),
+                                    React.createElement('th', { className: 'bg-dark-900 p-2', style: { position: 'sticky', left: 0, zIndex: 20, minWidth: '180px' } }),
+                                    React.createElement('th', { className: 'bg-dark-900 p-2', style: { position: 'sticky', left: 180, zIndex: 15, minWidth: '40px' } }),
+                                    React.createElement('th', { className: 'bg-dark-900 p-2', style: { position: 'sticky', left: 220, zIndex: 15, minWidth: '60px', boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } }),
                                     ...visibleYears.map(yr => {
                                         const collapsed = collapsedYears.has(yr);
                                         return React.createElement('th', { key: yr, colSpan: collapsed ? 1 : 13, className: `text-center p-2 text-xs font-bold cursor-pointer select-none hover:bg-dark-700/50 transition-colors ${yr > CURRENT_YEAR ? 'text-purple-400' : 'text-primary'}`, onClick: () => toggleYear(yr) },
@@ -8740,9 +8768,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                 ),
                                 // Month header row
                                 React.createElement('tr', { className: 'border-b divider' },
-                                    React.createElement('th', { className: 'text-left p-2 text-xs font-semibold text-secondary cursor-pointer hover:text-primary sticky left-0 bg-dark-900', onClick: () => handleSort('name'), style: { minWidth: '180px', zIndex: 20 } }, 'Client', sortConfig.key === 'name' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''),
-                                    React.createElement('th', { className: 'text-center p-2 text-xs font-semibold text-secondary sticky bg-dark-900', style: { minWidth: '40px', zIndex: 15, left: '180px' } }, 'Src'),
-                                    React.createElement('th', { className: 'text-right p-2 text-xs font-semibold text-secondary cursor-pointer hover:text-primary sticky bg-dark-900', onClick: () => handleSort('subAmount'), style: { minWidth: '60px', zIndex: 15, left: '220px' } }, 'MRR'),
+                                    React.createElement('th', { className: 'text-left p-2 text-xs font-semibold text-secondary cursor-pointer hover:text-primary bg-dark-900', onClick: () => handleSort('name'), style: { position: 'sticky', left: 0, minWidth: '180px', zIndex: 20 } }, 'Client', sortConfig.key === 'name' ? (sortConfig.dir === 'asc' ? ' ↑' : ' ↓') : ''),
+                                    React.createElement('th', { className: 'text-center p-2 text-xs font-semibold text-secondary bg-dark-900', style: { position: 'sticky', left: 180, minWidth: '40px', zIndex: 15 } }, 'Src'),
+                                    React.createElement('th', { className: 'text-right p-2 text-xs font-semibold text-secondary cursor-pointer hover:text-primary bg-dark-900', onClick: () => handleSort('subAmount'), style: { position: 'sticky', left: 220, minWidth: '60px', zIndex: 15, boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } }, 'MRR'),
                                     ...visibleYears.flatMap(yr => {
                                         if (collapsedYears.has(yr)) {
                                             return [React.createElement('th', { key: 'col_'+yr, className: `text-right p-2 text-xs font-bold cursor-pointer hover:text-primary ${yr > CURRENT_YEAR ? 'text-purple-400' : 'text-emerald-400'}`, onClick: () => handleSort('year-'+yr), style: { minWidth: '75px' } }, yr + ' Tot')];
@@ -8761,9 +8789,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             React.createElement('tbody', null,
                                 // Monthly totals row
                                 React.createElement('tr', { className: 'border-b divider bg-dark-800/50 font-semibold' },
-                                    React.createElement('td', { className: 'p-2 text-xs text-primary sticky left-0 bg-dark-800/50', style: { zIndex: 20 } }, 'MONTHLY TOTALS'),
-                                    React.createElement('td', { className: 'sticky bg-dark-800/50', style: { zIndex: 15, left: '180px' } }),
-                                    React.createElement('td', { className: 'text-right p-2 text-xs text-brand-cyan font-bold sticky bg-dark-800/50', style: { zIndex: 15, left: '220px' } }, fmt(stats.mrr)),
+                                    React.createElement('td', { className: 'p-2 text-xs text-primary bg-dark-800/50', style: { position: 'sticky', left: 0, zIndex: 20 } }, 'MONTHLY TOTALS'),
+                                    React.createElement('td', { className: 'bg-dark-800/50', style: { position: 'sticky', left: 180, zIndex: 15 } }),
+                                    React.createElement('td', { className: 'text-right p-2 text-xs text-brand-cyan font-bold bg-dark-800/50', style: { position: 'sticky', left: 220, zIndex: 15, boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } }, fmt(stats.mrr)),
                                     ...visibleYears.flatMap(yr => {
                                         const tot = stats.monthlyTotals[yr].reduce((a, b) => a + b, 0);
                                         if (collapsedYears.has(yr)) {
@@ -8783,7 +8811,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                 ...filteredData.map((c, idx) => {
                                     const clientKey = c.email || c.name.toLowerCase();
                                     return React.createElement('tr', { key: idx, className: 'border-b divider hover-bg transition-colors' },
-                                        React.createElement('td', { className: 'p-2 sticky left-0 bg-dark-900', style: { zIndex: 10 } },
+                                        React.createElement('td', { className: 'p-2 bg-dark-900', style: { position: 'sticky', left: 0, zIndex: 10 } },
                                             React.createElement('div', { className: 'flex items-center gap-1' },
                                                 React.createElement('div', { className: 'flex-1 min-w-0' },
                                                     React.createElement('div', { className: 'text-xs font-medium text-primary truncate', style: { maxWidth: '150px' } }, c.name || c.email),
@@ -8795,8 +8823,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                                 }, '+')
                                             )
                                         ),
-                                        React.createElement('td', { className: 'p-1 text-center sticky bg-dark-900', style: { zIndex: 5, left: '180px' } }, sourceBadge(c.sources)),
-                                        React.createElement('td', { className: `text-right p-2 text-xs sticky bg-dark-900 ${c.subAmount > 0 ? 'text-brand-cyan font-medium' : 'text-muted'}`, style: { zIndex: 5, left: '220px' } }, c.subAmount > 0 ? fmt(c.subAmount) : ''),
+                                        React.createElement('td', { className: 'p-1 text-center bg-dark-900', style: { position: 'sticky', left: 180, zIndex: 5 } }, sourceBadge(c.sources)),
+                                        React.createElement('td', { className: `text-right p-2 text-xs bg-dark-900 ${c.subAmount > 0 ? 'text-brand-cyan font-medium' : 'text-muted'}`, style: { position: 'sticky', left: 220, zIndex: 5, boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } }, c.subAmount > 0 ? fmt(c.subAmount) : ''),
                                         ...visibleYears.flatMap(yr => {
                                             const monthData = yr === 2026 ? c.projected2026 : (c.yearData[yr] || new Array(12).fill(0));
                                             if (collapsedYears.has(yr)) {
@@ -8863,7 +8891,12 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                                 })()
                                             ];
                                         }),
-                                        React.createElement('td', { className: 'text-center p-1' }, getStatusBadge(c.status)),
+                                        React.createElement('td', { className: 'text-center p-1' },
+                                            React.createElement('div', { className: 'flex flex-col items-center gap-0.5' },
+                                                getStatusBadge(c.status),
+                                                c.renewal ? React.createElement('span', { className: `px-2 py-0.5 rounded text-xs font-medium ${c.renewal.toLowerCase() === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/10 text-gray-400'}`, style: { fontSize: '9px' } }, c.renewal) : null
+                                            )
+                                        ),
                                         React.createElement('td', { className: 'text-right p-2 text-xs font-bold text-primary' }, c.grandTotal > 0 ? fmt(c.grandTotal) : '')
                                     );
                                 })
@@ -9052,7 +9085,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     case 'speed-to-lead': return <SpeedToLeadTab clients={clients} setupData={setupData} />;
                     case 'users': return <UsersTab />;
                     case 'ltv-churn': return <LTVChurnTab />;
-                    case 'cashflow': return <CashflowTab />;
+                    case 'cashflow': return <CashflowTab setupData={setupData} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
