@@ -216,5 +216,119 @@ export default async function handler(req, res) {
         return res.json({ productPlans, payments, invoices, pricesEndpoint });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use "fetchAll" or "saveMappings".' });
+    // ========== CASHFLOW OVERRIDES ==========
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    if (action === 'cashflow_init') {
+        try {
+            const { error } = await supabase.rpc('exec_sql', {
+                sql: `
+                    CREATE TABLE IF NOT EXISTS cashflow_overrides (
+                        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                        client_key TEXT NOT NULL,
+                        client_name TEXT,
+                        client_email TEXT,
+                        year INTEGER NOT NULL,
+                        month INTEGER NOT NULL,
+                        amount NUMERIC DEFAULT 0,
+                        notes TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        UNIQUE(client_key, year, month)
+                    );
+                `
+            });
+            if (error) {
+                const { error: selectErr } = await supabase.from('cashflow_overrides').select('id').limit(1);
+                if (selectErr && selectErr.code === '42P01') {
+                    return res.json({ ok: false, message: 'Table does not exist. Please create it in Supabase dashboard.' });
+                }
+                return res.json({ ok: true, message: 'Table exists' });
+            }
+            return res.json({ ok: true });
+        } catch (err) {
+            return res.json({ ok: false, error: err.message });
+        }
+    }
+
+    if (action === 'cashflow_fetchAll') {
+        const { data, error } = await supabase
+            .from('cashflow_overrides')
+            .select('*')
+            .order('client_key', { ascending: true });
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ overrides: data || [] });
+    }
+
+    if (action === 'cashflow_upsert') {
+        const { client_key, client_name, client_email, year, month, amount, notes } = req.body;
+        if (!client_key || year == null || month == null) {
+            return res.status(400).json({ error: 'Missing client_key, year, or month' });
+        }
+        const { data, error } = await supabase
+            .from('cashflow_overrides')
+            .upsert({
+                client_key,
+                client_name: client_name || null,
+                client_email: client_email || null,
+                year: parseInt(year),
+                month: parseInt(month),
+                amount: amount != null ? parseFloat(amount) : 0,
+                notes: notes || null,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'client_key,year,month' })
+            .select()
+            .single();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ ok: true, override: data });
+    }
+
+    if (action === 'cashflow_delete') {
+        const { client_key, year, month } = req.body;
+        if (!client_key || year == null || month == null) {
+            return res.status(400).json({ error: 'Missing client_key, year, or month' });
+        }
+        const { error } = await supabase
+            .from('cashflow_overrides')
+            .delete()
+            .eq('client_key', client_key)
+            .eq('year', parseInt(year))
+            .eq('month', parseInt(month));
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ ok: true });
+    }
+
+    if (action === 'cashflow_deleteClient') {
+        const { client_key } = req.body;
+        if (!client_key) return res.status(400).json({ error: 'Missing client_key' });
+        const { error } = await supabase
+            .from('cashflow_overrides')
+            .delete()
+            .eq('client_key', client_key);
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ ok: true });
+    }
+
+    if (action === 'cashflow_bulkUpsert') {
+        const { entries } = req.body;
+        if (!entries || !entries.length) return res.status(400).json({ error: 'No entries' });
+        const rows = entries.map(e => ({
+            client_key: e.client_key,
+            client_name: e.client_name || null,
+            client_email: e.client_email || null,
+            year: parseInt(e.year),
+            month: parseInt(e.month),
+            amount: e.amount != null ? parseFloat(e.amount) : 0,
+            notes: e.notes || null,
+            updated_at: new Date().toISOString()
+        }));
+        const { data, error } = await supabase
+            .from('cashflow_overrides')
+            .upsert(rows, { onConflict: 'client_key,year,month' })
+            .select();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ ok: true, count: data.length });
+    }
+
+    return res.status(400).json({ error: 'Invalid action' });
 }

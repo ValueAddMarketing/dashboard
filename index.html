@@ -8398,10 +8398,10 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             useEffect(() => {
                 const fetchOverrides = async () => {
                     try {
-                        const res = await fetch('/api/cashflow-overrides', {
+                        const res = await fetch('/api/billing-subscriptions', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'fetchAll' })
+                            body: JSON.stringify({ action: 'cashflow_fetchAll' })
                         });
                         const data = await res.json();
                         if (data.overrides) {
@@ -8423,18 +8423,18 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 try {
                     if (amount === '' || amount === null || amount === undefined) {
                         // Delete override
-                        await fetch('/api/cashflow-overrides', {
+                        await fetch('/api/billing-subscriptions', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'delete', client_key: clientKey, year: yr, month: mo })
+                            body: JSON.stringify({ action: 'cashflow_delete', client_key: clientKey, year: yr, month: mo })
                         });
                         setOverrides(prev => { const n = {...prev}; delete n[key]; return n; });
                     } else {
                         // Upsert
-                        await fetch('/api/cashflow-overrides', {
+                        await fetch('/api/billing-subscriptions', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'upsert', client_key: clientKey, client_name: clientName, client_email: clientEmail, year: yr, month: mo, amount: parseFloat(amount) })
+                            body: JSON.stringify({ action: 'cashflow_upsert', client_key: clientKey, client_name: clientName, client_email: clientEmail, year: yr, month: mo, amount: parseFloat(amount) })
                         });
                         setOverrides(prev => ({...prev, [key]: { amount: parseFloat(amount), notes: null }}));
                     }
@@ -8464,10 +8464,10 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     });
                 }
                 try {
-                    await fetch('/api/cashflow-overrides', {
+                    await fetch('/api/billing-subscriptions', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'bulkUpsert', entries })
+                        body: JSON.stringify({ action: 'cashflow_bulkUpsert', entries })
                     });
                     const newOverrides = {...overrides};
                     for (const e of entries) {
@@ -8482,10 +8482,10 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             // Delete all overrides for a client
             const clearClientOverrides = async (clientKey) => {
                 try {
-                    await fetch('/api/cashflow-overrides', {
+                    await fetch('/api/billing-subscriptions', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'deleteClient', client_key: clientKey })
+                        body: JSON.stringify({ action: 'cashflow_deleteClient', client_key: clientKey })
                     });
                     setOverrides(prev => {
                         const n = {...prev};
