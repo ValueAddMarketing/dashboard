@@ -1385,11 +1385,23 @@ Answer questions directly and specifically using the data above. Use markdown fo
                 Promise.all([
                     // Client Ads Performance - headers in row 2, skip row 1
                     fetch(URLS.clientAdsPerformance)
-                        .then(r => r.text())
+                        .then(r => {
+                            console.log('Fetch response status:', r.status);
+                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                            return r.text();
+                        })
                         .then(csv => {
+                            console.log('CSV length:', csv.length, 'First 200 chars:', csv.substring(0, 200));
                             const lines = csv.split('\n');
+                            console.log('Total lines:', lines.length, 'Line 1 (header):', (lines[1]||'').substring(0, 100));
                             const newCsv = [lines[1], ...lines.slice(2)].join('\n');
-                            return Papa.parse(newCsv, { header: true, skipEmptyLines: true }).data.map(mapClient).filter(r => r.client);
+                            const parsed = Papa.parse(newCsv, { header: true, skipEmptyLines: true });
+                            console.log('Parsed rows:', parsed.data.length, 'Fields:', parsed.meta.fields?.slice(0, 5));
+                            const mapped = parsed.data.map(mapClient);
+                            const filtered = mapped.filter(r => r.client);
+                            console.log('After mapClient:', mapped.length, 'After filter:', filtered.length);
+                            if (filtered.length === 0 && mapped.length > 0) console.log('First mapped row:', JSON.stringify(mapped[0]).substring(0, 300));
+                            return filtered;
                         })
                         .catch(err => {
                             console.error('Error fetching Client Ads Performance:', err);
