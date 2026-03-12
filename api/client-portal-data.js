@@ -5,6 +5,14 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1N
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Generate a random 8-char alphanumeric code
+function generateCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -13,7 +21,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { action, access_code, client_name } = req.body;
+    const { action, access_code, client_name, client_names } = req.body;
 
     // ── Auth: Verify access code ──
     if (action === 'verify') {
@@ -79,6 +87,75 @@ export default async function handler(req, res) {
         notes: notes || [],
         activity: activity || [],
       });
+    }
+
+    // ── Bulk-generate portal access for all clients ──
+    if (action === 'bulkGenerate') {
+      if (!client_names || !Array.isArray(client_names) || client_names.length === 0) {
+        return res.status(400).json({ error: 'client_names array required' });
+      }
+
+      // Get existing portal entries
+      const { data: existing } = await supabase
+        .from('client_portal_access')
+        .select('client_name, access_code, is_active');
+
+      const existingMap = {};
+      (existing || []).forEach(e => { existingMap[e.client_name.toLowerCase().trim()] = e; });
+
+      const created = [];
+      const skipped = [];
+      const toInsert = [];
+
+      for (const name of client_names) {
+        const trimmed = name.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (existingMap[key]) {
+          skipped.push({ client_name: trimmed, access_code: existingMap[key].access_code, status: 'already_exists' });
+        } else {
+          const code = generateCode();
+          toInsert.push({ client_name: trimmed, access_code: code, is_active: true });
+          created.push({ client_name: trimmed, access_code: code, status: 'created' });
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const { error: insertErr } = await supabase
+          .from('client_portal_access')
+          .insert(toInsert);
+        if (insertErr) return res.status(500).json({ error: 'Insert failed: ' + insertErr.message });
+      }
+
+      return res.status(200).json({ created: created.length, skipped: skipped.length, results: [...created, ...skipped] });
+    }
+
+    // ── List all portal links ──
+    if (action === 'listPortals') {
+      const { data, error } = await supabase
+        .from('client_portal_access')
+        .select('id, client_name, access_code, email, is_active, last_login, created_at')
+        .order('client_name', { ascending: true });
+
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ portals: data || [] });
+    }
+
+    // ── Toggle portal active status ──
+    if (action === 'togglePortal') {
+      if (!access_code) return res.status(400).json({ error: 'access_code required' });
+      const { data: current } = await supabase
+        .from('client_portal_access')
+        .select('id, is_active')
+        .eq('access_code', access_code)
+        .single();
+      if (!current) return res.status(404).json({ error: 'Not found' });
+      const { error: upErr } = await supabase
+        .from('client_portal_access')
+        .update({ is_active: !current.is_active })
+        .eq('id', current.id);
+      if (upErr) return res.status(500).json({ error: upErr.message });
+      return res.status(200).json({ success: true, is_active: !current.is_active });
     }
 
     return res.status(400).json({ error: 'Unknown action' });

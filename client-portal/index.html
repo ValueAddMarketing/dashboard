@@ -1236,10 +1236,15 @@
             const [isLoggedIn, setIsLoggedIn] = useState(false);
             const [checking, setChecking] = useState(true);
 
-            // Check stored session on mount
+            // Check stored session on mount (also accept ?code= URL param)
             useEffect(() => {
                 const verify = async () => {
-                    const code = localStorage.getItem('cp_access_code');
+                    const urlCode = new URLSearchParams(window.location.search).get('code');
+                    const code = urlCode || localStorage.getItem('cp_access_code');
+                    if (urlCode) {
+                        // Clean URL without reloading
+                        window.history.replaceState({}, '', window.location.pathname);
+                    }
                     if (!code) { setChecking(false); return; }
                     try {
                         const resp = await fetch('/api/client-portal-data', {

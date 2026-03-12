@@ -353,6 +353,7 @@
             { id: 'users', name: 'Users', icon: '👥', desc: 'Registered dashboard users' },
             { id: 'ltv-churn', name: 'LTV & Churn', icon: '📉', desc: 'Client lifetime value and churn analytics' },
             { id: 'cashflow', name: 'Cashflow Schedule', icon: '💰', desc: 'Auto cashflow from Stripe & Whop payments' },
+            { id: 'client-portals', name: 'Client Portals', icon: '🔗', desc: 'Manage client portal access links' },
         ];
 
         // ========== LOGIN ==========
@@ -8952,6 +8953,197 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             );
         };
 
+        // ========== CLIENT PORTALS TAB ==========
+        const ClientPortalsTab = ({ clients = [], setupData = [] }) => {
+            const [portals, setPortals] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [generating, setGenerating] = useState(false);
+            const [search, setSearch] = useState('');
+            const [statusMsg, setStatusMsg] = useState('');
+
+            const PORTAL_BASE = window.location.origin + '/portal?code=';
+
+            const loadPortals = async () => {
+                try {
+                    const resp = await fetch('/api/client-portal-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'listPortals' })
+                    });
+                    const data = await resp.json();
+                    setPortals(data.portals || []);
+                } catch (e) { console.error(e); }
+                setLoading(false);
+            };
+
+            useEffect(() => { loadPortals(); }, []);
+
+            // Get unique client names from setupData (primary source) merged with clients
+            const allClientNames = useMemo(() => {
+                const names = new Set();
+                setupData.forEach(s => { if (s.client) names.add(s.client.trim()); });
+                clients.forEach(c => { if (c.client) names.add(c.client.trim()); });
+                return [...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+            }, [clients, setupData]);
+
+            const generateAll = async () => {
+                setGenerating(true);
+                setStatusMsg('Generating portal links...');
+                try {
+                    const resp = await fetch('/api/client-portal-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'bulkGenerate', client_names: allClientNames })
+                    });
+                    const data = await resp.json();
+                    setStatusMsg('Created ' + data.created + ' new portals, ' + data.skipped + ' already existed.');
+                    await loadPortals();
+                } catch (e) {
+                    setStatusMsg('Error: ' + e.message);
+                }
+                setGenerating(false);
+            };
+
+            const toggleActive = async (code) => {
+                try {
+                    await fetch('/api/client-portal-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'togglePortal', access_code: code })
+                    });
+                    await loadPortals();
+                } catch (e) { console.error(e); }
+            };
+
+            const copyLink = (code) => {
+                navigator.clipboard.writeText(PORTAL_BASE + code);
+                setStatusMsg('Link copied!');
+                setTimeout(() => setStatusMsg(''), 2000);
+            };
+
+            const exportCSV = () => {
+                const header = 'Client Name,Portal URL,Access Code,Active,Last Login,Created At';
+                const rows = filtered.map(p =>
+                    [p.client_name, PORTAL_BASE + p.access_code, p.access_code, p.is_active ? 'Yes' : 'No', p.last_login || 'Never', p.created_at].map(v => '"' + (v || '') + '"').join(',')
+                );
+                const csv = header + '\n' + rows.join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'client_portal_links.csv';
+                a.click();
+            };
+
+            const filtered = portals.filter(p => !search || p.client_name.toLowerCase().includes(search.toLowerCase()));
+
+            const clientsWithoutPortal = allClientNames.filter(name =>
+                !portals.some(p => p.client_name.toLowerCase().trim() === name.toLowerCase().trim())
+            );
+
+            if (loading) return React.createElement('div', { className: 'flex items-center justify-center h-64 text-secondary' }, 'Loading portal data...');
+
+            return React.createElement('div', { className: 'space-y-6' },
+                // Header
+                React.createElement('div', { className: 'flex flex-wrap items-center justify-between gap-4' },
+                    React.createElement('div', null,
+                        React.createElement('h2', { className: 'text-2xl font-bold text-primary' }, '🔗 Client Portal Links'),
+                        React.createElement('p', { className: 'text-secondary text-sm mt-1' },
+                            portals.length + ' portals created · ' + clientsWithoutPortal.length + ' clients without portals · ' + allClientNames.length + ' total clients'
+                        )
+                    ),
+                    React.createElement('div', { className: 'flex gap-3' },
+                        React.createElement('button', {
+                            onClick: generateAll,
+                            disabled: generating || clientsWithoutPortal.length === 0,
+                            className: 'px-4 py-2 rounded-lg text-sm font-medium transition-colors ' +
+                                (clientsWithoutPortal.length === 0 ? 'bg-dark-700 text-slate-500 cursor-not-allowed' : 'bg-brand-cyan/20 text-brand-cyan hover:bg-brand-cyan/30'),
+                            style: { opacity: generating ? 0.5 : 1 }
+                        }, generating ? 'Generating...' : clientsWithoutPortal.length === 0 ? 'All Clients Have Portals' : 'Generate for All ' + allClientNames.length + ' Clients'),
+                        React.createElement('button', {
+                            onClick: exportCSV,
+                            disabled: portals.length === 0,
+                            className: 'px-4 py-2 rounded-lg text-sm font-medium bg-brand-purple/20 text-brand-purple hover:bg-brand-purple/30 transition-colors'
+                        }, '📥 Export CSV')
+                    )
+                ),
+
+                // Status message
+                statusMsg ? React.createElement('div', { className: 'px-4 py-2 rounded-lg bg-brand-cyan/10 text-brand-cyan text-sm' }, statusMsg) : null,
+
+                // Search
+                React.createElement('input', {
+                    type: 'text',
+                    placeholder: 'Search clients...',
+                    value: search,
+                    onChange: e => setSearch(e.target.value),
+                    className: 'w-full input-field border rounded-lg px-4 py-2 text-sm'
+                }),
+
+                // Table
+                React.createElement('div', { className: 'glass rounded-xl overflow-hidden' },
+                    React.createElement('table', { className: 'w-full text-sm' },
+                        React.createElement('thead', null,
+                            React.createElement('tr', { className: 'border-b divider' },
+                                React.createElement('th', { className: 'text-left px-4 py-3 text-secondary font-medium' }, 'Client'),
+                                React.createElement('th', { className: 'text-left px-4 py-3 text-secondary font-medium' }, 'Portal Link'),
+                                React.createElement('th', { className: 'text-left px-4 py-3 text-secondary font-medium' }, 'Access Code'),
+                                React.createElement('th', { className: 'text-center px-4 py-3 text-secondary font-medium' }, 'Active'),
+                                React.createElement('th', { className: 'text-left px-4 py-3 text-secondary font-medium' }, 'Last Login'),
+                                React.createElement('th', { className: 'text-center px-4 py-3 text-secondary font-medium' }, 'Actions')
+                            )
+                        ),
+                        React.createElement('tbody', null,
+                            filtered.length === 0
+                                ? React.createElement('tr', null,
+                                    React.createElement('td', { colSpan: 6, className: 'text-center py-8 text-secondary' },
+                                        portals.length === 0 ? 'No portals yet. Click "Generate for All Clients" to create them.' : 'No matching clients.'
+                                    )
+                                )
+                                : filtered.map(p =>
+                                    React.createElement('tr', { key: p.id, className: 'border-b divider hover-bg' },
+                                        React.createElement('td', { className: 'px-4 py-3 text-primary font-medium' }, p.client_name),
+                                        React.createElement('td', { className: 'px-4 py-3' },
+                                            React.createElement('span', {
+                                                className: 'text-brand-cyan text-xs cursor-pointer hover:underline',
+                                                onClick: () => copyLink(p.access_code),
+                                                title: 'Click to copy'
+                                            }, PORTAL_BASE + p.access_code)
+                                        ),
+                                        React.createElement('td', { className: 'px-4 py-3 font-mono text-xs text-secondary' }, p.access_code),
+                                        React.createElement('td', { className: 'px-4 py-3 text-center' },
+                                            React.createElement('span', { className: 'inline-block w-2 h-2 rounded-full ' + (p.is_active ? 'bg-emerald-400' : 'bg-red-400') })
+                                        ),
+                                        React.createElement('td', { className: 'px-4 py-3 text-xs text-secondary' },
+                                            p.last_login ? new Date(p.last_login).toLocaleDateString() : 'Never'
+                                        ),
+                                        React.createElement('td', { className: 'px-4 py-3 text-center' },
+                                            React.createElement('div', { className: 'flex items-center justify-center gap-2' },
+                                                React.createElement('button', {
+                                                    onClick: () => copyLink(p.access_code),
+                                                    className: 'px-2 py-1 rounded text-xs bg-dark-700 text-secondary hover:text-primary transition-colors',
+                                                    title: 'Copy link'
+                                                }, '📋'),
+                                                React.createElement('button', {
+                                                    onClick: () => toggleActive(p.access_code),
+                                                    className: 'px-2 py-1 rounded text-xs transition-colors ' + (p.is_active ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'),
+                                                    title: p.is_active ? 'Deactivate' : 'Activate'
+                                                }, p.is_active ? '🚫' : '✅'),
+                                                React.createElement('a', {
+                                                    href: PORTAL_BASE + p.access_code,
+                                                    target: '_blank',
+                                                    className: 'px-2 py-1 rounded text-xs bg-dark-700 text-secondary hover:text-primary transition-colors',
+                                                    title: 'Open portal'
+                                                }, '🔗')
+                                            )
+                                        )
+                                    )
+                                )
+                        )
+                    )
+                )
+            );
+        };
+
         // ========== MAIN APP ==========
         const App = () => {
             const [user, setUser] = useState(null);
@@ -9086,6 +9278,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     case 'users': return <UsersTab />;
                     case 'ltv-churn': return <LTVChurnTab />;
                     case 'cashflow': return <CashflowTab setupData={setupData} />;
+                    case 'client-portals': return <ClientPortalsTab clients={clients} setupData={setupData} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
@@ -9179,7 +9372,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                             {s && s.mrr && <span className="text-emerald-400 text-sm">MRR: {s.mrr}</span>}
                                         </div>
                                     ) : (
-                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : tab === 'billing-audit' ? '💲 Billing Audit' : tab === 'client-map' ? '🗺️ Client Map' : tab === 'speed-to-lead' ? '⚡ Speed to Lead' : tab === 'users' ? '👥 Users' : 'Select a client to get started'}</h2>
+                                        <h2 className="text-xl text-secondary">{tab === 'overview' ? '📊 Overview' : tab === 'redflags' ? '🚩 Red Flags Dashboard' : tab === 'timeline' ? '📅 Renewals Timeline' : tab === 'meta-settings' ? '⚙️ Meta Ad Settings' : tab === 'pipeline' ? '🤝 Deal Pipeline' : tab === 'billing-audit' ? '💲 Billing Audit' : tab === 'client-map' ? '🗺️ Client Map' : tab === 'speed-to-lead' ? '⚡ Speed to Lead' : tab === 'users' ? '👥 Users' : tab === 'client-portals' ? '🔗 Client Portals' : 'Select a client to get started'}</h2>
                                     )}
                                 </div>
                                 <button 
