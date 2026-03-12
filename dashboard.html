@@ -1358,8 +1358,7 @@ Answer questions directly and specifically using the data above. Use markdown fo
             }, []);
 
             useEffect(() => {
-                console.log('Data useEffect - user:', !!user, user?.email);
-                if (!user) { console.log('No user, skipping data fetch'); return; }
+                if (!user) return;
 
                 // Try to load from cache first for instant display
                 const cachedClients = localStorage.getItem('vam_clients');
@@ -1383,27 +1382,22 @@ Answer questions directly and specifically using the data above. Use markdown fo
             }, [user]);
 
             const fetchFreshData = (updateLoading) => {
-                console.log('fetchFreshData called, updateLoading:', updateLoading);
                 Promise.all([
                     // Client Ads Performance - headers in row 2, skip row 1
                     fetch(URLS.clientAdsPerformance)
-                        .then(r => {
-                            console.log('Fetch response status:', r.status);
-                            if (!r.ok) throw new Error('HTTP ' + r.status);
-                            return r.text();
-                        })
+                        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
                         .then(csv => {
-                            console.log('CSV length:', csv.length, 'First 200 chars:', csv.substring(0, 200));
-                            const lines = csv.split('\n');
-                            console.log('Total lines:', lines.length, 'Line 1 (header):', (lines[1]||'').substring(0, 100));
-                            const newCsv = [lines[1], ...lines.slice(2)].join('\n');
-                            const parsed = Papa.parse(newCsv, { header: true, skipEmptyLines: true });
-                            console.log('Parsed rows:', parsed.data.length, 'Fields:', parsed.meta.fields?.slice(0, 5));
-                            const mapped = parsed.data.map(mapClient);
-                            const filtered = mapped.filter(r => r.client);
-                            console.log('After mapClient:', mapped.length, 'After filter:', filtered.length);
-                            if (filtered.length === 0 && mapped.length > 0) console.log('First mapped row:', JSON.stringify(mapped[0]).substring(0, 300));
-                            return filtered;
+                            // Parse without headers first to handle multi-line quoted cells
+                            const raw = Papa.parse(csv, { header: false, skipEmptyLines: true });
+                            // Row 0 is summary, Row 1 is headers, Row 2+ is data
+                            const headers = raw.data[1] || [];
+                            const dataRows = raw.data.slice(2);
+                            const withHeaders = dataRows.map(row => {
+                                const obj = {};
+                                headers.forEach((h, i) => { obj[h] = row[i] || ''; });
+                                return obj;
+                            });
+                            return withHeaders.map(mapClient).filter(r => r.client);
                         })
                         .catch(err => {
                             console.error('Error fetching Client Ads Performance:', err);
@@ -1411,10 +1405,18 @@ Answer questions directly and specifically using the data above. Use markdown fo
                         }),
                     // Setup Timing - headers in row 1, skip row 2
                     fetch(URLS.setupTiming)
-                        .then(r => r.text())
-                        .then(csv => { 
-                            const lines = csv.split('\n'); 
-                            return Papa.parse([lines[0], ...lines.slice(2)].join('\n'), { header: true, skipEmptyLines: true }).data.map(mapSetupTiming).filter(r => r.client); 
+                        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                        .then(csv => {
+                            const raw = Papa.parse(csv, { header: false, skipEmptyLines: true });
+                            // Row 0 is headers, Row 1 is sub-header/skip, Row 2+ is data
+                            const headers = raw.data[0] || [];
+                            const dataRows = raw.data.slice(2);
+                            const withHeaders = dataRows.map(row => {
+                                const obj = {};
+                                headers.forEach((h, i) => { obj[h] = row[i] || ''; });
+                                return obj;
+                            });
+                            return withHeaders.map(mapSetupTiming).filter(r => r.client);
                         })
                         .catch(err => {
                             console.error('Error fetching Setup Timing:', err);
