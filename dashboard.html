@@ -1358,8 +1358,9 @@ Answer questions directly and specifically using the data above. Use markdown fo
             }, []);
 
             useEffect(() => {
-                if (!user) return;
-                
+                console.log('Data useEffect - user:', !!user, user?.email);
+                if (!user) { console.log('No user, skipping data fetch'); return; }
+
                 // Try to load from cache first for instant display
                 const cachedClients = localStorage.getItem('vam_clients');
                 const cachedSetup = localStorage.getItem('vam_setup');
@@ -1382,6 +1383,7 @@ Answer questions directly and specifically using the data above. Use markdown fo
             }, [user]);
 
             const fetchFreshData = (updateLoading) => {
+                console.log('fetchFreshData called, updateLoading:', updateLoading);
                 Promise.all([
                     // Client Ads Performance - headers in row 2, skip row 1
                     fetch(URLS.clientAdsPerformance)
