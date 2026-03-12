@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Exchange authorization code for tokens
+        // Exchange authorization code for tokens (Company-level for batch access)
         const tokenResp = await fetch(GHL_TOKEN_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
                 client_secret: GHL_CLIENT_SECRET,
                 grant_type: 'authorization_code',
                 code,
-                user_type: 'Location',
+                user_type: 'Company',
                 redirect_uri: `${getBaseUrl(req)}/api/oauth-callback`
             }).toString()
         });
@@ -43,38 +43,85 @@ export default async function handler(req, res) {
             return res.status(400).send(`Token exchange failed: ${JSON.stringify(tokenData)}`);
         }
 
-        const { access_token, locationId, companyId } = tokenData;
+        const { access_token, refresh_token, expires_in, locationId, companyId } = tokenData;
 
         if (!SUPABASE_URL || !SUPABASE_KEY) {
             return res.status(500).send('Supabase not configured');
         }
 
-        let updated = false;
+        const expiresAt = new Date(Date.now() + (expires_in || 86400) * 1000).toISOString();
 
-        // Store token directly in client_ghl_locations for the matching location
-        if (locationId) {
-            const patchResp = await fetch(
-                `${SUPABASE_URL}/rest/v1/client_ghl_locations?ghl_location_id=eq.${encodeURIComponent(locationId)}`,
+        // Store agency-level token in ghl_oauth_tokens (upsert by company_id)
+        if (companyId) {
+            await fetch(
+                `${SUPABASE_URL}/rest/v1/ghl_oauth_tokens`,
                 {
-                    method: 'PATCH',
+                    method: 'POST',
                     headers: {
                         'apikey': SUPABASE_KEY,
                         'Authorization': `Bearer ${SUPABASE_KEY}`,
                         'Content-Type': 'application/json',
-                        'Prefer': 'return=representation'
+                        'Prefer': 'resolution=merge-duplicates'
                     },
-                    body: JSON.stringify({ ghl_token: access_token })
+                    body: JSON.stringify({
+                        company_id: companyId,
+                        access_token,
+                        refresh_token: refresh_token || '',
+                        expires_at: expiresAt,
+                        user_type: 'Company',
+                        location_id: locationId || null,
+                        updated_at: new Date().toISOString()
+                    })
                 }
             );
-            const patchResult = await patchResp.json();
-            if (Array.isArray(patchResult) && patchResult.length > 0) {
-                updated = true;
-            }
         }
 
+        // Also generate location tokens for all mapped sub-accounts
+        let tokensGenerated = 0;
+        try {
+            const mappingsResp = await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?select=*`, {
+                headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+            });
+            const mappings = await mappingsResp.json();
+
+            if (Array.isArray(mappings) && mappings.length > 0 && companyId) {
+                for (const mapping of mappings) {
+                    try {
+                        // Generate location-level token from agency token
+                        const locResp = await fetch('https://services.leadconnectorhq.com/oauth/locationToken', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${access_token}`,
+                                'Version': '2021-07-28',
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({ companyId, locationId: mapping.ghl_location_id })
+                        });
+                        const locData = await locResp.json();
+                        if (locData.access_token) {
+                            await fetch(
+                                `${SUPABASE_URL}/rest/v1/client_ghl_locations?ghl_location_id=eq.${encodeURIComponent(mapping.ghl_location_id)}`,
+                                {
+                                    method: 'PATCH',
+                                    headers: {
+                                        'apikey': SUPABASE_KEY,
+                                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({ ghl_token: locData.access_token })
+                                }
+                            );
+                            tokensGenerated++;
+                        }
+                    } catch (e) { /* skip failed locations */ }
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            }
+        } catch (e) { /* non-blocking */ }
+
         // Redirect to dashboard with result
-        const clientName = updated ? 'location' : 'unknown';
-        return res.redirect(302, `/?ghl_token_saved=${updated ? 'true' : 'false'}&locationId=${locationId || 'none'}`);
+        return res.redirect(302, `/?ghl_oauth=success&company=${companyId || 'none'}&tokens_generated=${tokensGenerated}`);
 
     } catch (error) {
         return res.status(500).send(`OAuth error: ${error.message}`);
