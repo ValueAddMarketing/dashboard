@@ -10,6 +10,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <script>
@@ -75,34 +76,7 @@
         const fmtN = v => (pn(v)).toLocaleString('en-US',{maximumFractionDigits:0});
 
         const parseCSV = (text) => {
-            const lines = text.split('\n');
-            if (lines.length < 2) return [];
-            const headers = [];
-            let current = '';
-            let inQuotes = false;
-            for (let i = 0; i < lines[0].length; i++) {
-                const ch = lines[0][i];
-                if (ch === '"') { inQuotes = !inQuotes; }
-                else if (ch === ',' && !inQuotes) { headers.push(current.trim()); current = ''; }
-                else { current += ch; }
-            }
-            headers.push(current.trim());
-
-            return lines.slice(1).filter(l => l.trim()).map(line => {
-                const values = [];
-                let val = '';
-                let inQ = false;
-                for (let i = 0; i < line.length; i++) {
-                    const ch = line[i];
-                    if (ch === '"') { inQ = !inQ; }
-                    else if (ch === ',' && !inQ) { values.push(val.trim()); val = ''; }
-                    else { val += ch; }
-                }
-                values.push(val.trim());
-                const row = {};
-                headers.forEach((h, i) => { row[h] = values[i] || ''; });
-                return row;
-            });
+            return Papa.parse(text, { header: true, skipEmptyLines: true }).data;
         };
 
         const toArr = (v) => {
@@ -294,9 +268,11 @@
                         if (portalResp.ok) setClientData(portal);
 
                         // Parse sheets — Client Ads Performance has headers in row 2 (skip row 1)
-                        const adsLines = sheetsResp.split('\n');
-                        const adsCsv = adsLines.length > 2 ? [adsLines[1], ...adsLines.slice(2)].join('\n') : sheetsResp;
-                        const allClients = parseCSV(adsCsv);
+                        const adsRaw = Papa.parse(sheetsResp, { header: false, skipEmptyLines: true });
+                        const adsHeaders = adsRaw.data[1] || [];
+                        const allClients = adsRaw.data.slice(2).map(row => {
+                            const obj = {}; adsHeaders.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj;
+                        });
                         const clientLower = clientName.toLowerCase();
                         const clientParts = clientLower.split(/\s+/);
                         const findClient = (rows, nameKey) => {
@@ -322,9 +298,11 @@
                         if (myData) setSheetData(myData);
 
                         // Setup Timing — headers in row 1, skip row 2 (summary row)
-                        const setupLines = setupResp.split('\n');
-                        const setupCsv = setupLines.length > 2 ? [setupLines[0], ...setupLines.slice(2)].join('\n') : setupResp;
-                        const allSetup = parseCSV(setupCsv);
+                        const setupRaw = Papa.parse(setupResp, { header: false, skipEmptyLines: true });
+                        const setupHeaders = setupRaw.data[0] || [];
+                        const allSetup = setupRaw.data.slice(2).map(row => {
+                            const obj = {}; setupHeaders.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj;
+                        });
                         const mySetup = findClient(allSetup, 'VAM');
                         if (mySetup) setSetupData(mySetup);
 
