@@ -9206,20 +9206,27 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 Promise.all([
                     // Client Ads Performance - headers in row 2, skip row 1
                     fetch(URLS.clientAdsPerformance).then(r => r.text()).then(csv => {
+                        console.log('[CSH] Ads CSV length:', csv.length);
                         const raw = Papa.parse(csv, { header: false, skipEmptyLines: true });
                         const headers = raw.data[1] || [];
-                        return raw.data.slice(2).map(row => {
+                        console.log('[CSH] Ads headers:', headers.slice(0, 5), 'Total rows:', raw.data.length);
+                        const result = raw.data.slice(2).map(row => {
                             const obj = {}; headers.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj;
                         }).map(mapClient).filter(r => r.client);
-                    }),
+                        console.log('[CSH] Ads clients after filter:', result.length);
+                        return result;
+                    }).catch(err => { console.error('[CSH] Ads fetch error:', err); return []; }),
                     // Setup Timing - headers in row 1, skip row 2
                     fetch(URLS.setupTiming).then(r => r.text()).then(csv => {
+                        console.log('[CSH] Setup CSV length:', csv.length);
                         const raw = Papa.parse(csv, { header: false, skipEmptyLines: true });
                         const headers = raw.data[0] || [];
-                        return raw.data.slice(2).map(row => {
+                        const result = raw.data.slice(2).map(row => {
                             const obj = {}; headers.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj;
                         }).map(mapSetupTiming).filter(r => r.client);
-                    }),
+                        console.log('[CSH] Setup clients after filter:', result.length);
+                        return result;
+                    }).catch(err => { console.error('[CSH] Setup fetch error:', err); return []; }),
                     // Meta Ads - real-time data from Meta Marketing API
                     fetchMetaAdData()
                 ]).then(([c, s, metaAds]) => {
