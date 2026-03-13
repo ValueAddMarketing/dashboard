@@ -384,7 +384,7 @@
         };
 
         // ========== ALL CLIENTS OVERVIEW ==========
-        const AllClientsView = ({ clients, setupData, onClientClick, metaRecentData, metaLifetimeData, metaLoading, recentPeriod, onRecentPeriodChange }) => {
+        const AllClientsView = ({ clients, setupData, onClientClick, metaRecentData, metaLifetimeData, metaLoading, recentPeriod, onRecentPeriodChange, todaySpendData }) => {
             const [sortBy, setSortBy] = useState('client');
             const [sortDir, setSortDir] = useState('asc');
             const [filter, setFilter] = useState('');
@@ -414,7 +414,10 @@
                 });
             };
 
-            const enrichedClients = clients.map(c => mergeClientWithMeta(c, metaRecentData, metaLifetimeData));
+            const enrichedClients = clients.map(c => ({
+                ...mergeClientWithMeta(c, metaRecentData, metaLifetimeData),
+                todaySpend: todaySpendData && todaySpendData[c.client] !== undefined ? todaySpendData[c.client] : null
+            }));
 
             const uniqueValues = (key) => [...new Set(enrichedClients.map(c => c[key]).filter(Boolean))].sort();
             const statuses = uniqueValues('status');
@@ -459,6 +462,7 @@
             });
 
             const linkedCount = enrichedClients.filter(c => c.hasMetaLink).length;
+            const todaySpendTotal = enrichedClients.reduce((s, c) => s + (c.todaySpend || 0), 0);
             const recentSpendTotal = enrichedClients.reduce((s, c) => s + (c.metaRecentSpend || 0), 0);
             const recentLeadsTotal = enrichedClients.reduce((s, c) => s + (c.metaRecentLeads || 0), 0);
             const avgCPL = recentLeadsTotal > 0 ? recentSpendTotal / recentLeadsTotal : 0;
@@ -607,8 +611,9 @@
                     </div>
 
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                         <div className="card p-4"><div className="text-slate-400 text-sm">Total Clients</div><div className="text-2xl font-bold text-white">{clients.length} <span className="text-sm text-slate-500">({linkedCount} linked)</span></div></div>
+                        <div className="card p-4 border-l-4 border-emerald-500"><div className="text-slate-400 text-sm">Today's Spend</div><div className="text-2xl font-bold text-emerald-400">{todaySpendTotal > 0 ? fmtD(todaySpendTotal) : '--'}</div></div>
                         <div className="card p-4"><div className="text-slate-400 text-sm">{periodLabel} Spend</div><div className="text-2xl font-bold text-brand-cyan">{fmt(recentSpendTotal)}</div></div>
                         <div className="card p-4"><div className="text-slate-400 text-sm">{periodLabel} Leads</div><div className="text-2xl font-bold text-brand-purple">{fmtN(recentLeadsTotal)}</div></div>
                         <div className="card p-4"><div className="text-slate-400 text-sm">Avg CPL</div><div className={'text-2xl font-bold ' + (avgCPL > 50 ? 'text-red-400' : avgCPL > 25 ? 'text-amber-400' : 'text-emerald-400')}>{avgCPL > 0 ? fmtD(avgCPL) : '--'}</div></div>
@@ -665,6 +670,8 @@
                                             { key: 'overallStanding', label: 'Standing' },
                                             { key: 'callingStatus', label: 'Calling' },
                                             { key: 'days', label: 'Days' },
+                                            { key: 'todaySpend', label: 'Today Spend' },
+                                            { key: 'dailySetAdSpend', label: 'Set Budget' },
                                             { key: 'metaRecentSpend', label: periodLabel + ' Spend' },
                                             { key: 'metaRecentLeads', label: periodLabel + ' Leads' },
                                             { key: 'metaRecentCPL', label: periodLabel + ' CPL' },
@@ -720,6 +727,8 @@
                                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${callingBadge}`}>{c.callingStatus || '—'}</span>
                                                 </td>
                                                 <td className="px-4 py-3 text-slate-300">{c.days}</td>
+                                                <td className={'px-4 py-3 font-medium ' + (c.todaySpend !== null ? (c.todaySpend > 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500')}>{c.todaySpend !== null ? fmtD(c.todaySpend) : '--'}</td>
+                                                <td className="px-4 py-3 text-slate-300">{c.dailySetAdSpend > 0 ? fmt(c.dailySetAdSpend) : '--'}</td>
                                                 <td className="px-4 py-3 text-brand-cyan">{metaVal(c.metaRecentSpend, fmt)}</td>
                                                 <td className={`px-4 py-3 font-medium ${c.hasMetaLink && c.metaRecentLeads === 0 ? 'text-red-400' : 'text-brand-cyan'}`}>{metaVal(c.metaRecentLeads, fmtN)}</td>
                                                 <td className="px-4 py-3 text-white font-medium">{metaVal(c.metaRecentCPL, fmtD)}</td>
@@ -849,6 +858,357 @@
                                     )}
                                 </div>
                             </div>
+                </div>
+            );
+        };
+
+        // ========== ADS MANAGER TAB ==========
+        const META_MANAGE_API = '/api/meta-ads-manage';
+
+        const AdsManagerTab = ({ clients }) => {
+            const [structures, setStructures] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [expandedClients, setExpandedClients] = useState({});
+            const [expandedCampaigns, setExpandedCampaigns] = useState({});
+            const [expandedAdSets, setExpandedAdSets] = useState({});
+            const [updatingStatus, setUpdatingStatus] = useState({});
+            const [editingBudget, setEditingBudget] = useState(null);
+            const [budgetValue, setBudgetValue] = useState('');
+            const [savingBudget, setSavingBudget] = useState(false);
+            const [statusMessage, setStatusMessage] = useState(null);
+            const [searchFilter, setSearchFilter] = useState('');
+            const [todaySpend, setTodaySpend] = useState({});
+
+            useEffect(() => {
+                loadStructures();
+                loadTodaySpend();
+            }, []);
+
+            const loadStructures = async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                    const resp = await fetch(META_MANAGE_API, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'fetchAllStructures' })
+                    });
+                    const data = await resp.json();
+                    if (data.error) throw new Error(data.error);
+                    setStructures(data.results || {});
+                } catch (err) {
+                    setError(err.message);
+                }
+                setLoading(false);
+            };
+
+            const loadTodaySpend = async () => {
+                try {
+                    const resp = await fetch(META_MANAGE_API, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'fetchTodaySpend' })
+                    });
+                    const data = await resp.json();
+                    if (data.results) setTodaySpend(data.results);
+                } catch (err) { console.error('Today spend error:', err); }
+            };
+
+            const toggleStatus = async (objectId, currentStatus, objectType) => {
+                const newStatus = currentStatus === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+                setUpdatingStatus(prev => ({ ...prev, [objectId]: true }));
+                setStatusMessage(null);
+                try {
+                    const resp = await fetch(META_MANAGE_API, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'updateStatus', objectId, newStatus })
+                    });
+                    const data = await resp.json();
+                    if (data.error) throw new Error(data.error);
+                    // Update local state
+                    setStructures(prev => {
+                        const updated = JSON.parse(JSON.stringify(prev));
+                        for (const clientName of Object.keys(updated)) {
+                            for (const campaign of updated[clientName]) {
+                                if (campaign.id === objectId) { campaign.status = newStatus; break; }
+                                for (const adSet of campaign.adSets || []) {
+                                    if (adSet.id === objectId) { adSet.status = newStatus; break; }
+                                    for (const ad of adSet.ads || []) {
+                                        if (ad.id === objectId) { ad.status = newStatus; break; }
+                                    }
+                                }
+                            }
+                        }
+                        return updated;
+                    });
+                    setStatusMessage({ type: 'success', text: `${objectType} ${newStatus === 'ACTIVE' ? 'activated' : 'paused'} successfully` });
+                } catch (err) {
+                    setStatusMessage({ type: 'error', text: `Failed: ${err.message}` });
+                }
+                setUpdatingStatus(prev => ({ ...prev, [objectId]: false }));
+            };
+
+            const saveBudget = async () => {
+                if (!editingBudget) return;
+                const { objectId, budgetType } = editingBudget;
+                const amount = parseFloat(budgetValue);
+                if (isNaN(amount) || amount < 1) {
+                    setStatusMessage({ type: 'error', text: 'Budget must be at least $1.00' });
+                    return;
+                }
+                setSavingBudget(true);
+                setStatusMessage(null);
+                try {
+                    const resp = await fetch(META_MANAGE_API, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'updateBudget', objectId, budgetType, amount })
+                    });
+                    const data = await resp.json();
+                    if (data.error) throw new Error(data.error);
+                    // Update local state
+                    setStructures(prev => {
+                        const updated = JSON.parse(JSON.stringify(prev));
+                        for (const clientName of Object.keys(updated)) {
+                            for (const campaign of updated[clientName]) {
+                                if (campaign.id === objectId) { campaign[budgetType === 'daily_budget' ? 'daily_budget' : 'lifetime_budget'] = data.amount; break; }
+                                for (const adSet of campaign.adSets || []) {
+                                    if (adSet.id === objectId) { adSet[budgetType === 'daily_budget' ? 'daily_budget' : 'lifetime_budget'] = data.amount; break; }
+                                }
+                            }
+                        }
+                        return updated;
+                    });
+                    setStatusMessage({ type: 'success', text: `Budget updated to $${data.amount}` });
+                    setEditingBudget(null);
+                    setBudgetValue('');
+                } catch (err) {
+                    setStatusMessage({ type: 'error', text: `Failed: ${err.message}` });
+                }
+                setSavingBudget(false);
+            };
+
+            const toggleClient = (name) => setExpandedClients(prev => ({ ...prev, [name]: !prev[name] }));
+            const toggleCampaign = (id) => setExpandedCampaigns(prev => ({ ...prev, [id]: !prev[id] }));
+            const toggleAdSet = (id) => setExpandedAdSets(prev => ({ ...prev, [id]: !prev[id] }));
+
+            const StatusBadge = ({ status, objectId, objectType }) => {
+                const isUpdating = updatingStatus[objectId];
+                const isActive = status === 'ACTIVE';
+                return (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); toggleStatus(objectId, status, objectType); }}
+                        disabled={isUpdating}
+                        className={'px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ' +
+                            (isUpdating ? 'opacity-50 cursor-wait ' : 'hover:opacity-80 ') +
+                            (isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                             status === 'PAUSED' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                             'bg-slate-500/20 text-slate-400 border border-slate-500/30')}
+                        title={isActive ? 'Click to pause' : 'Click to activate'}
+                    >
+                        {isUpdating ? '...' : status}
+                    </button>
+                );
+            };
+
+            const BudgetDisplay = ({ objectId, dailyBudget, lifetimeBudget }) => {
+                const budget = dailyBudget || lifetimeBudget;
+                const budgetType = dailyBudget ? 'daily_budget' : 'lifetime_budget';
+                const label = dailyBudget ? '/day' : 'lifetime';
+
+                if (editingBudget && editingBudget.objectId === objectId) {
+                    return (
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <span className="text-xs text-slate-500">$</span>
+                            <input
+                                type="number"
+                                value={budgetValue}
+                                onChange={e => setBudgetValue(e.target.value)}
+                                className="w-20 bg-dark-800 border border-brand-cyan/50 rounded px-2 py-1 text-xs text-white"
+                                autoFocus
+                                onKeyDown={e => { if (e.key === 'Enter') saveBudget(); if (e.key === 'Escape') { setEditingBudget(null); setBudgetValue(''); } }}
+                            />
+                            <button onClick={saveBudget} disabled={savingBudget} className="px-2 py-1 bg-brand-cyan/20 text-brand-cyan rounded text-xs hover:bg-brand-cyan/30">{savingBudget ? '...' : 'Save'}</button>
+                            <button onClick={() => { setEditingBudget(null); setBudgetValue(''); }} className="px-2 py-1 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600">Cancel</button>
+                        </div>
+                    );
+                }
+
+                if (!budget) return <span className="text-xs text-slate-600">No budget set</span>;
+
+                return (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setEditingBudget({ objectId, budgetType }); setBudgetValue(budget); }}
+                        className="text-xs text-brand-cyan hover:text-brand-purple transition-colors cursor-pointer"
+                        title="Click to edit budget"
+                    >
+                        ${budget} <span className="text-slate-500">{label}</span> <span className="text-slate-600 ml-1">✎</span>
+                    </button>
+                );
+            };
+
+            const filteredClientNames = Object.keys(structures)
+                .filter(name => !searchFilter || name.toLowerCase().includes(searchFilter.toLowerCase()))
+                .sort();
+
+            const totalCampaigns = Object.values(structures).reduce((s, camps) => s + camps.length, 0);
+            const activeCampaigns = Object.values(structures).reduce((s, camps) => s + camps.filter(c => c.status === 'ACTIVE').length, 0);
+            const totalTodaySpend = Object.values(todaySpend).reduce((s, v) => s + v, 0);
+
+            if (loading) return (
+                <div className="text-center py-12">
+                    <div className="text-4xl mb-4">⏳</div>
+                    <div className="text-secondary">Loading campaign structures from Meta...</div>
+                    <div className="text-xs text-slate-500 mt-2">This may take a moment for many accounts</div>
+                </div>
+            );
+
+            if (error) return (
+                <div className="text-center py-12">
+                    <div className="text-4xl mb-4">⚠️</div>
+                    <div className="text-red-400 font-medium">{error}</div>
+                    <button onClick={loadStructures} className="mt-4 px-4 py-2 bg-brand-cyan/20 text-brand-cyan rounded-lg text-sm">Retry</button>
+                </div>
+            );
+
+            return (
+                <div className="space-y-6">
+                    {statusMessage && (
+                        <div className={'p-3 rounded-lg text-sm ' + (statusMessage.type === 'success' ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400' : 'bg-red-500/20 border border-red-500/30 text-red-400')}>
+                            {statusMessage.text}
+                        </div>
+                    )}
+
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="card p-4 text-center">
+                            <div className="text-2xl font-bold text-white">{Object.keys(structures).length}</div>
+                            <div className="text-xs text-secondary">Linked Clients</div>
+                        </div>
+                        <div className="card p-4 text-center">
+                            <div className="text-2xl font-bold text-brand-cyan">{totalCampaigns}</div>
+                            <div className="text-xs text-secondary">Total Campaigns</div>
+                        </div>
+                        <div className="card p-4 text-center">
+                            <div className="text-2xl font-bold text-emerald-400">{activeCampaigns}</div>
+                            <div className="text-xs text-secondary">Active Campaigns</div>
+                        </div>
+                        <div className="card p-4 text-center border-l-4 border-emerald-500">
+                            <div className="text-2xl font-bold text-emerald-400">{totalTodaySpend > 0 ? fmtD(totalTodaySpend) : '--'}</div>
+                            <div className="text-xs text-secondary">Today's Total Spend</div>
+                        </div>
+                    </div>
+
+                    {/* Search */}
+                    <div className="card p-4 flex items-center gap-3">
+                        <input type="text" value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Search clients..." className="w-64 bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white" />
+                        <button onClick={loadStructures} className="px-4 py-2 bg-brand-cyan/10 text-brand-cyan rounded-lg text-sm hover:bg-brand-cyan/20 border border-brand-cyan/20">Refresh</button>
+                        <span className="text-xs text-slate-500 ml-auto">Click status badges to toggle. Click budgets to edit.</span>
+                    </div>
+
+                    {/* Client Campaign Trees */}
+                    {filteredClientNames.length === 0 ? (
+                        <div className="card p-8 text-center text-secondary">No linked clients found. Go to Account Mappings to link clients.</div>
+                    ) : (
+                        <div className="space-y-3">
+                            {filteredClientNames.map(clientName => {
+                                const campaigns = structures[clientName] || [];
+                                const isExpanded = expandedClients[clientName];
+                                const clientTodaySpend = todaySpend[clientName];
+                                const activeCount = campaigns.filter(c => c.status === 'ACTIVE').length;
+                                return (
+                                    <div key={clientName} className="card overflow-hidden">
+                                        <div
+                                            onClick={() => toggleClient(clientName)}
+                                            className="p-4 flex items-center justify-between cursor-pointer hover-bg transition-colors"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-slate-500">{isExpanded ? '▼' : '▶'}</span>
+                                                <div>
+                                                    <div className="font-semibold text-primary">{clientName}</div>
+                                                    <div className="text-xs text-secondary">{campaigns.length} campaigns · {activeCount} active</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                {clientTodaySpend !== undefined && (
+                                                    <div className="text-right">
+                                                        <div className={'font-bold ' + (clientTodaySpend > 0 ? 'text-emerald-400' : 'text-slate-500')}>{fmtD(clientTodaySpend)}</div>
+                                                        <div className="text-xs text-slate-500">today</div>
+                                                    </div>
+                                                )}
+                                                <span className={'px-2 py-1 rounded-full text-xs font-medium ' + (activeCount > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400')}>
+                                                    {activeCount > 0 ? 'Running' : 'All Paused'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {isExpanded && (
+                                            <div className="border-t divider">
+                                                {campaigns.length === 0 ? (
+                                                    <div className="p-4 text-sm text-slate-500">No campaigns found</div>
+                                                ) : (
+                                                    campaigns.map(campaign => (
+                                                        <div key={campaign.id}>
+                                                            <div
+                                                                onClick={() => toggleCampaign(campaign.id)}
+                                                                className="px-6 py-3 flex items-center justify-between cursor-pointer hover-bg transition-colors border-b divider"
+                                                            >
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className="text-slate-600 text-xs">{expandedCampaigns[campaign.id] ? '▼' : '▶'}</span>
+                                                                    <div>
+                                                                        <div className="font-medium text-sm text-primary">{campaign.name}</div>
+                                                                        <div className="text-xs text-slate-500">{campaign.objective} · {(campaign.adSets || []).length} ad sets</div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-3">
+                                                                    <BudgetDisplay objectId={campaign.id} dailyBudget={campaign.daily_budget} lifetimeBudget={campaign.lifetime_budget} />
+                                                                    <StatusBadge status={campaign.status} objectId={campaign.id} objectType="Campaign" />
+                                                                </div>
+                                                            </div>
+
+                                                            {expandedCampaigns[campaign.id] && (campaign.adSets || []).map(adSet => (
+                                                                <div key={adSet.id}>
+                                                                    <div
+                                                                        onClick={() => toggleAdSet(adSet.id)}
+                                                                        className="px-10 py-2.5 flex items-center justify-between cursor-pointer hover-bg transition-colors border-b divider"
+                                                                        style={{ background: 'rgba(255,255,255,0.02)' }}
+                                                                    >
+                                                                        <div className="flex items-center gap-3">
+                                                                            <span className="text-slate-600 text-xs">{expandedAdSets[adSet.id] ? '▼' : '▶'}</span>
+                                                                            <div>
+                                                                                <div className="text-sm text-primary">{adSet.name}</div>
+                                                                                <div className="text-xs text-slate-500">{(adSet.ads || []).length} ads</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-3">
+                                                                            <BudgetDisplay objectId={adSet.id} dailyBudget={adSet.daily_budget} lifetimeBudget={adSet.lifetime_budget} />
+                                                                            <StatusBadge status={adSet.status} objectId={adSet.id} objectType="Ad Set" />
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {expandedAdSets[adSet.id] && (adSet.ads || []).map(ad => (
+                                                                        <div key={ad.id} className="px-14 py-2 flex items-center justify-between border-b divider" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                                                                            <div className="flex items-center gap-3">
+                                                                                <span className="text-slate-600 text-xs">●</span>
+                                                                                <span className="text-sm text-secondary">{ad.name}</span>
+                                                                            </div>
+                                                                            <StatusBadge status={ad.status} objectId={ad.id} objectType="Ad" />
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -1342,6 +1702,7 @@ Answer questions directly and specifically using the data above. Use markdown fo
             const [metaLifetimeData, setMetaLifetimeData] = useState({});
             const [metaLoading, setMetaLoading] = useState(true);
             const [recentPeriod, setRecentPeriod] = useState('last_7d');
+            const [todaySpendData, setTodaySpendData] = useState({});
             const metaInitRef = React.useRef(false);
 
             // Theme toggle function
@@ -1443,6 +1804,29 @@ Answer questions directly and specifically using the data above. Use markdown fo
                 });
             };
 
+            // Fetch today's spend
+            const fetchTodaySpend = async () => {
+                try {
+                    const cachedSpend = localStorage.getItem('vam_today_spend');
+                    const cachedTime = localStorage.getItem('vam_today_spend_time');
+                    if (cachedSpend && cachedTime && (Date.now() - parseInt(cachedTime)) < 300000) {
+                        setTodaySpendData(JSON.parse(cachedSpend));
+                        return;
+                    }
+                    const resp = await fetch('/api/meta-ads-manage', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'fetchTodaySpend' })
+                    });
+                    const data = await resp.json();
+                    if (data.results) {
+                        setTodaySpendData(data.results);
+                        localStorage.setItem('vam_today_spend', JSON.stringify(data.results));
+                        localStorage.setItem('vam_today_spend_time', Date.now().toString());
+                    }
+                } catch (err) { console.error('Today spend error:', err); }
+            };
+
             // Fetch Meta API data after clients load
             useEffect(() => {
                 if (!user || loading) return;
@@ -1458,6 +1842,7 @@ Answer questions directly and specifically using the data above. Use markdown fo
                         setMetaRecentData(recent);
                         setMetaLifetimeData(lifetime);
                         metaInitRef.current = true;
+                        fetchTodaySpend();
                     } else {
                         const recent = await fetchMetaAdData(recentPeriod);
                         if (cancelled) return;
@@ -1519,6 +1904,10 @@ Answer questions directly and specifically using the data above. Use markdown fo
                                         <span className="text-lg">🔗</span>
                                         <div><div className="text-sm font-medium">Account Mappings</div><div className="text-xs text-muted">Link clients to Meta ad accounts</div></div>
                                     </button>
+                                    <button onClick={() => setTab('ads-manager')} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === 'ads-manager' ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
+                                        <span className="text-lg">🎛️</span>
+                                        <div><div className="text-sm font-medium">Ads Manager</div><div className="text-xs text-muted">Toggle ads, edit budgets</div></div>
+                                    </button>
                                     <button onClick={() => setTab('ai-briefing')} className={'w-full flex items-start gap-3 px-5 py-3 text-left ' + (tab === 'ai-briefing' ? 'tab-active text-primary' : 'text-secondary hover-bg')}>
                                         <span className="text-lg">🧠</span>
                                         <div><div className="text-sm font-medium">AI Briefing</div><div className="text-xs text-muted">Daily analysis & ask questions</div></div>
@@ -1531,8 +1920,8 @@ Answer questions directly and specifically using the data above. Use markdown fo
                             <main className="flex-1 flex flex-col">
                                 <header className="header-bar backdrop-blur border-b px-8 py-4 flex items-center justify-between divider">
                                     <div>
-                                        <h2 className="text-xl font-bold text-primary">{tab === 'clients' ? 'Media Buyer Overview' : tab === 'ai-briefing' ? '🧠 AI Briefing' : '🔗 Account Mappings'}</h2>
-                                        <p className="text-secondary text-sm">{tab === 'clients' ? 'All clients at a glance' : tab === 'ai-briefing' ? 'AI-powered daily analysis and Q&A for your ad accounts' : 'Link clients to their Meta ad accounts'}</p>
+                                        <h2 className="text-xl font-bold text-primary">{tab === 'clients' ? 'Media Buyer Overview' : tab === 'ads-manager' ? '🎛️ Ads Manager' : tab === 'ai-briefing' ? '🧠 AI Briefing' : '🔗 Account Mappings'}</h2>
+                                        <p className="text-secondary text-sm">{tab === 'clients' ? 'All clients at a glance' : tab === 'ads-manager' ? 'Toggle campaign status and edit budgets directly' : tab === 'ai-briefing' ? 'AI-powered daily analysis and Q&A for your ad accounts' : 'Link clients to their Meta ad accounts'}</p>
                                     </div>
                                     <button
                                         onClick={toggleTheme}
@@ -1542,8 +1931,9 @@ Answer questions directly and specifically using the data above. Use markdown fo
                                     </button>
                                 </header>
                                 <div className="flex-1 overflow-y-auto p-8 scrollbar">
-                                    {tab === 'clients' && <AllClientsView clients={clients} setupData={setupData} onClientClick={handleClientClick} metaRecentData={metaRecentData} metaLifetimeData={metaLifetimeData} metaLoading={metaLoading} recentPeriod={recentPeriod} onRecentPeriodChange={setRecentPeriod} />}
+                                    {tab === 'clients' && <AllClientsView clients={clients} setupData={setupData} onClientClick={handleClientClick} metaRecentData={metaRecentData} metaLifetimeData={metaLifetimeData} metaLoading={metaLoading} recentPeriod={recentPeriod} onRecentPeriodChange={setRecentPeriod} todaySpendData={todaySpendData} />}
                                     {tab === 'mappings' && <MetaAdSettingsTab clients={clients} />}
+                                    {tab === 'ads-manager' && <AdsManagerTab clients={clients} />}
                                     {tab === 'ai-briefing' && <DailyBriefingView clients={clients} setupData={setupData} metaData={metaRecentData} />}
                                 </div>
                             </main>
