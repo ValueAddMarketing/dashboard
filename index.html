@@ -10209,10 +10209,10 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             const fetchFreshData = (clientParam, updateLoading) => {
                 // Try server-side proxy first (faster, cached, with validation), fall back to direct sheet fetch
                 const fetchViaProxy = async () => {
-                    const resp = await fetch('/api/sheets', {
+                    const resp = await fetch('/api/meta-ads', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'fetchAll' })
+                        body: JSON.stringify({ action: 'sheetsAll' })
                     });
                     if (!resp.ok) throw new Error('Proxy HTTP ' + resp.status);
                     return resp.json();

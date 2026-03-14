@@ -863,7 +863,7 @@
         };
 
         // ========== ADS MANAGER TAB ==========
-        const META_MANAGE_API = '/api/meta-ads-manage';
+        const META_MANAGE_API = '/api/meta-ads';
 
         const AdsManagerTab = ({ clients }) => {
             const [structures, setStructures] = useState({});
@@ -1745,10 +1745,10 @@ Answer questions directly and specifically using the data above. Use markdown fo
 
             const fetchFreshData = (updateLoading) => {
                 const fetchViaProxy = async () => {
-                    const resp = await fetch('/api/sheets', {
+                    const resp = await fetch('/api/meta-ads', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'fetchAll' })
+                        body: JSON.stringify({ action: 'sheetsAll' })
                     });
                     if (!resp.ok) throw new Error('Proxy HTTP ' + resp.status);
                     return resp.json();
@@ -1813,7 +1813,7 @@ Answer questions directly and specifically using the data above. Use markdown fo
                         setTodaySpendData(JSON.parse(cachedSpend));
                         return;
                     }
-                    const resp = await fetch('/api/meta-ads-manage', {
+                    const resp = await fetch('/api/meta-ads', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ action: 'fetchTodaySpend' })
