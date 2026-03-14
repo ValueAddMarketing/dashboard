@@ -355,6 +355,7 @@
             { id: 'cashflow', name: 'Cashflow Schedule', icon: '💰', desc: 'Auto cashflow from Stripe & Whop payments' },
             { id: 'client-portals', name: 'Client Portals', icon: '🔗', desc: 'Manage client portal access links' },
             { id: 'call-tracking', name: 'Call Tracking', icon: '📞', desc: 'Call recordings, metrics & accountability' },
+            { id: 'contract-billing', name: 'Contract Billing', icon: '📋', desc: 'Contract notes & manual rebilling dates' },
         ];
 
         // ========== LOGIN ==========
@@ -9145,6 +9146,457 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             );
         };
 
+        // ========== CONTRACT BILLING TAB ==========
+        const ContractBillingTab = ({ setupData = [] }) => {
+            const [search, setSearch] = useState('');
+            const [filterType, setFilterType] = useState('all');
+            const [sortConfig, setSortConfig] = useState({ key: 'nextRebillDate', dir: 'asc' });
+            const [selectedClient, setSelectedClient] = useState(null);
+
+            // Parse contract notes to extract rebilling info
+            const parseRebillingInfo = (s) => {
+                const notes = (s.contractNotes || '').trim();
+                const payNotes = (s.paymentNotes || '').trim();
+                const combined = notes + ' ' + payNotes;
+                const hasNotes = notes.length > 0;
+
+                // Extract billing frequency from notes
+                let billingFrequency = null;
+                if (/monthly|every\s*month|per\s*month|\/mo/i.test(combined)) billingFrequency = 'monthly';
+                else if (/bi.?weekly|every\s*2\s*weeks|biweekly/i.test(combined)) billingFrequency = 'biweekly';
+                else if (/weekly|every\s*week/i.test(combined)) billingFrequency = 'weekly';
+                else if (/quarterly|every\s*3\s*months|every\s*quarter/i.test(combined)) billingFrequency = 'quarterly';
+                else if (/annually|yearly|every\s*year|per\s*year/i.test(combined)) billingFrequency = 'annually';
+
+                // Try to get billing cycle from setup timing sheet
+                const billingCycle = (s.billingCycle || '').trim();
+                if (!billingFrequency && billingCycle) {
+                    if (/month/i.test(billingCycle)) billingFrequency = 'monthly';
+                    else if (/bi.?week/i.test(billingCycle)) billingFrequency = 'biweekly';
+                    else if (/week/i.test(billingCycle)) billingFrequency = 'weekly';
+                    else if (/quarter/i.test(billingCycle)) billingFrequency = 'quarterly';
+                }
+
+                // Extract specific dates from notes (e.g., "rebill on the 15th", "bills on 1st", "next payment 3/15")
+                let rebillDayOfMonth = null;
+                const dayMatch = combined.match(/(?:rebill|bill|charge|pay(?:ment)?|due)\s*(?:on\s*)?(?:the\s*)?(\d{1,2})(?:st|nd|rd|th)?(?:\s*of\s*(?:each|every)\s*month)?/i);
+                if (dayMatch) rebillDayOfMonth = parseInt(dayMatch[1]);
+
+                // Try date patterns like "3/15", "03/15/2026"
+                const dateMatch = combined.match(/(?:rebill|bill|charge|next|due|pay)\s*(?:date)?[:\s-]*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/i);
+                let explicitNextDate = null;
+                if (dateMatch) {
+                    const month = parseInt(dateMatch[1]);
+                    const day = parseInt(dateMatch[2]);
+                    const year = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : new Date().getFullYear();
+                    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                        explicitNextDate = new Date(year, month - 1, day);
+                        if (explicitNextDate < new Date()) {
+                            // If the date is in the past, move to next occurrence
+                            if (!dateMatch[3]) {
+                                explicitNextDate = new Date(new Date().getFullYear(), month - 1, day);
+                                if (explicitNextDate < new Date()) explicitNextDate.setFullYear(explicitNextDate.getFullYear() + 1);
+                            }
+                        }
+                    }
+                }
+
+                // Compute next rebill date
+                let nextRebillDate = null;
+                let nextRebillSource = null;
+
+                // Priority 1: Next Billing Date from sheet
+                if (s.nextBillingDateSheet) {
+                    const parsed = new Date(s.nextBillingDateSheet);
+                    if (!isNaN(parsed.getTime())) {
+                        nextRebillDate = parsed;
+                        nextRebillSource = 'sheet';
+                    }
+                }
+
+                // Priority 2: Explicit date found in contract notes
+                if (!nextRebillDate && explicitNextDate) {
+                    nextRebillDate = explicitNextDate;
+                    nextRebillSource = 'contract_notes';
+                }
+
+                // Priority 3: Compute from paid date + billing frequency + day of month
+                if (!nextRebillDate && s.paidDate) {
+                    const paidDate = new Date(s.paidDate);
+                    if (!isNaN(paidDate.getTime())) {
+                        const freq = billingFrequency || 'monthly';
+                        const today = new Date();
+                        let next = new Date(paidDate);
+
+                        if (rebillDayOfMonth) {
+                            // Use the specific day of month
+                            next = new Date(today.getFullYear(), today.getMonth(), rebillDayOfMonth);
+                            if (next <= today) next.setMonth(next.getMonth() + 1);
+                        } else {
+                            // Advance from paid date by billing frequency until we're in the future
+                            while (next <= today) {
+                                if (freq === 'weekly') next.setDate(next.getDate() + 7);
+                                else if (freq === 'biweekly') next.setDate(next.getDate() + 14);
+                                else if (freq === 'quarterly') next.setMonth(next.getMonth() + 3);
+                                else if (freq === 'annually') next.setFullYear(next.getFullYear() + 1);
+                                else next.setMonth(next.getMonth() + 1); // default monthly
+                            }
+                        }
+                        nextRebillDate = next;
+                        nextRebillSource = 'computed';
+                    }
+                }
+
+                // Priority 4: Use due payment field
+                if (!nextRebillDate && s.duePayment && !/overdue/i.test(s.duePayment)) {
+                    const dueParsed = new Date(s.duePayment);
+                    if (!isNaN(dueParsed.getTime())) {
+                        nextRebillDate = dueParsed;
+                        nextRebillSource = 'due_payment';
+                    }
+                }
+
+                // Days until next rebill
+                let daysUntilRebill = null;
+                if (nextRebillDate) {
+                    daysUntilRebill = Math.ceil((nextRebillDate - new Date()) / (1000 * 60 * 60 * 24));
+                }
+
+                // Detect manual billing indicators
+                const isManualBilling = /manual|invoice|venmo|zelle|cash|check|wire|ach|paypal/i.test(combined);
+                const isOverdue = /overdue/i.test(s.duePayment || '');
+
+                // Extract amount from notes
+                let notesAmount = null;
+                const amtMatch = combined.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+                if (amtMatch) notesAmount = parseFloat(amtMatch[1].replace(/,/g, ''));
+
+                // Flags
+                const flags = [];
+                if (isOverdue) flags.push('Overdue');
+                if (isManualBilling) flags.push('Manual Billing');
+                if (/loan\s*officer|lo\s+pay|lender/i.test(combined)) flags.push('Loan Officer');
+                if (/split|half|shared|50.?50/i.test(combined)) flags.push('Split Billing');
+                if (/pause|hold|frozen/i.test(combined)) flags.push('Paused');
+                if (/cancel|churn/i.test(combined)) flags.push('Cancelled');
+                if (/discount|promo|special/i.test(combined)) flags.push('Discount');
+                if (/free\s*trial|trial/i.test(combined)) flags.push('Trial');
+
+                return {
+                    client: s.client,
+                    contractNotes: notes,
+                    paymentNotes: payNotes,
+                    hasNotes,
+                    billingFrequency: billingFrequency || (s.billingCycle || null),
+                    rebillDayOfMonth,
+                    nextRebillDate,
+                    nextRebillSource,
+                    daysUntilRebill,
+                    isManualBilling,
+                    isOverdue,
+                    notesAmount,
+                    flags,
+                    mrr: s.mrr || '',
+                    status: s.status || '',
+                    platform: s.platform || '',
+                    paidDate: s.paidDate || '',
+                    billingCycle: s.billingCycle || '',
+                    duePayment: s.duePayment || '',
+                    contractLength: s.contractLength || '',
+                    contractEndDate: s.contractEndDate || '',
+                    nameEmail: s.nameEmail || '',
+                    csmRep: s.csmRep || ''
+                };
+            };
+
+            const allClients = useMemo(() => {
+                return setupData.filter(s => s.client).map(parseRebillingInfo);
+            }, [setupData]);
+
+            const filtered = useMemo(() => {
+                return allClients.filter(c => {
+                    if (search && !c.client.toLowerCase().includes(search.toLowerCase())) return false;
+                    if (filterType === 'with-notes' && !c.hasNotes) return false;
+                    if (filterType === 'no-notes' && c.hasNotes) return false;
+                    if (filterType === 'manual' && !c.isManualBilling) return false;
+                    if (filterType === 'overdue' && !c.isOverdue) return false;
+                    if (filterType === 'upcoming-7' && (c.daysUntilRebill == null || c.daysUntilRebill > 7 || c.daysUntilRebill < 0)) return false;
+                    if (filterType === 'upcoming-30' && (c.daysUntilRebill == null || c.daysUntilRebill > 30 || c.daysUntilRebill < 0)) return false;
+                    if (filterType === 'past-due' && (c.daysUntilRebill == null || c.daysUntilRebill >= 0)) return false;
+                    if (filterType === 'loan-officer' && !c.flags.includes('Loan Officer')) return false;
+                    if (filterType === 'split' && !c.flags.includes('Split Billing')) return false;
+                    return true;
+                });
+            }, [allClients, search, filterType]);
+
+            const sorted = useMemo(() => {
+                return [...filtered].sort((a, b) => {
+                    const { key, dir } = sortConfig;
+                    let va, vb;
+                    switch (key) {
+                        case 'client': va = a.client; vb = b.client; return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+                        case 'nextRebillDate':
+                            va = a.nextRebillDate ? a.nextRebillDate.getTime() : (dir === 'asc' ? Infinity : -Infinity);
+                            vb = b.nextRebillDate ? b.nextRebillDate.getTime() : (dir === 'asc' ? Infinity : -Infinity);
+                            break;
+                        case 'daysUntilRebill':
+                            va = a.daysUntilRebill != null ? a.daysUntilRebill : (dir === 'asc' ? Infinity : -Infinity);
+                            vb = b.daysUntilRebill != null ? b.daysUntilRebill : (dir === 'asc' ? Infinity : -Infinity);
+                            break;
+                        case 'mrr':
+                            va = parseFloat((a.mrr || '0').replace(/[$,]/g, '')) || 0;
+                            vb = parseFloat((b.mrr || '0').replace(/[$,]/g, '')) || 0;
+                            break;
+                        case 'flags': va = a.flags.length; vb = b.flags.length; break;
+                        default: va = 0; vb = 0;
+                    }
+                    return dir === 'asc' ? va - vb : vb - va;
+                });
+            }, [filtered, sortConfig]);
+
+            const handleSort = (key) => setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'client' ? 'asc' : 'desc' });
+            const sortArrow = (key) => sortConfig.key === key ? (sortConfig.dir === 'asc' ? ' \u2191' : ' \u2193') : '';
+
+            const getDaysColor = (days) => {
+                if (days == null) return 'text-slate-500';
+                if (days < 0) return 'text-red-400';
+                if (days <= 3) return 'text-orange-400';
+                if (days <= 7) return 'text-yellow-400';
+                if (days <= 14) return 'text-green-400';
+                return 'text-emerald-400';
+            };
+
+            const getDaysBadge = (days) => {
+                if (days == null) return { label: 'No Date', color: 'bg-slate-700 text-slate-400' };
+                if (days < 0) return { label: Math.abs(days) + 'd Overdue', color: 'bg-red-500/20 text-red-400' };
+                if (days === 0) return { label: 'Today', color: 'bg-orange-500/20 text-orange-400' };
+                if (days <= 3) return { label: days + 'd', color: 'bg-orange-500/20 text-orange-400' };
+                if (days <= 7) return { label: days + 'd', color: 'bg-yellow-500/20 text-yellow-400' };
+                if (days <= 14) return { label: days + 'd', color: 'bg-green-500/20 text-green-400' };
+                return { label: days + 'd', color: 'bg-emerald-500/20 text-emerald-400' };
+            };
+
+            const getSourceLabel = (src) => {
+                if (src === 'sheet') return 'Sheet';
+                if (src === 'contract_notes') return 'Notes';
+                if (src === 'computed') return 'Computed';
+                if (src === 'due_payment') return 'Due Payment';
+                return '\u2014';
+            };
+
+            // Stats
+            const stats = useMemo(() => {
+                const withNotes = allClients.filter(c => c.hasNotes).length;
+                const withRebill = allClients.filter(c => c.nextRebillDate).length;
+                const overdue = allClients.filter(c => c.daysUntilRebill != null && c.daysUntilRebill < 0).length;
+                const next7 = allClients.filter(c => c.daysUntilRebill != null && c.daysUntilRebill >= 0 && c.daysUntilRebill <= 7).length;
+                const manual = allClients.filter(c => c.isManualBilling).length;
+                const loClients = allClients.filter(c => c.flags.includes('Loan Officer')).length;
+                return { total: allClients.length, withNotes, withRebill, overdue, next7, manual, loClients };
+            }, [allClients]);
+
+            // Export
+            const exportCSV = () => {
+                const headers = ['Client', 'CSM', 'Status', 'MRR', 'Billing Cycle', 'Platform', 'Next Rebill Date', 'Days Until Rebill', 'Source', 'Contract Notes', 'Payment Notes', 'Flags'];
+                const rows = sorted.map(c => [
+                    `"${c.client}"`, `"${c.csmRep}"`, `"${c.status}"`, `"${c.mrr}"`, `"${c.billingFrequency || c.billingCycle || ''}"`,
+                    `"${c.platform}"`, c.nextRebillDate ? c.nextRebillDate.toLocaleDateString() : '', c.daysUntilRebill != null ? c.daysUntilRebill : '',
+                    `"${c.nextRebillSource || ''}"`, `"${(c.contractNotes || '').replace(/"/g, '""')}"`, `"${(c.paymentNotes || '').replace(/"/g, '""')}"`, `"${c.flags.join('; ')}"`
+                ].join(','));
+                const csv = [headers.join(','), ...rows].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = `contract_billing_${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url);
+            };
+
+            // Detail view
+            if (selectedClient) {
+                const c = allClients.find(x => x.client === selectedClient);
+                if (!c) { setSelectedClient(null); return null; }
+                const daysBadge = getDaysBadge(c.daysUntilRebill);
+
+                return (
+                    React.createElement('div', { className: 'space-y-6' },
+                        React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
+                            React.createElement('button', { onClick: () => setSelectedClient(null), className: 'text-brand-cyan hover:text-brand-cyan/80 text-sm' }, '\u2190 Back'),
+                            React.createElement('h2', { className: 'text-xl font-bold text-white' }, c.client),
+                            c.flags.map(f => React.createElement('span', { key: f, className: 'px-2 py-1 rounded text-xs font-semibold bg-brand-purple/20 text-brand-purple' }, f))
+                        ),
+
+                        // Key info cards
+                        React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' },
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Next Rebill Date'),
+                                React.createElement('p', { className: `text-lg font-bold ${getDaysColor(c.daysUntilRebill)}` },
+                                    c.nextRebillDate ? c.nextRebillDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '\u2014'
+                                ),
+                                c.nextRebillSource && React.createElement('p', { className: 'text-xs text-slate-600 mt-1' }, 'Source: ' + getSourceLabel(c.nextRebillSource))
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Days Until Rebill'),
+                                React.createElement('p', { className: `text-2xl font-bold ${getDaysColor(c.daysUntilRebill)}` },
+                                    c.daysUntilRebill != null ? (c.daysUntilRebill < 0 ? Math.abs(c.daysUntilRebill) + ' overdue' : c.daysUntilRebill) : '\u2014'
+                                )
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'MRR'),
+                                React.createElement('p', { className: 'text-2xl font-bold text-white' }, c.mrr || '\u2014')
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Billing Frequency'),
+                                React.createElement('p', { className: 'text-lg font-bold text-white' }, c.billingFrequency || c.billingCycle || '\u2014')
+                            )
+                        ),
+
+                        // Details grid
+                        React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' },
+                            React.createElement('div', { className: 'card p-4' },
+                                React.createElement('h3', { className: 'text-sm font-semibold text-white mb-3' }, 'Client Details'),
+                                React.createElement('div', { className: 'space-y-2' },
+                                    [
+                                        ['CSM', c.csmRep], ['Status', c.status], ['Platform', c.platform],
+                                        ['Contract Length', c.contractLength ? c.contractLength + ' months' : '\u2014'],
+                                        ['Contract End', c.contractEndDate || '\u2014'], ['Paid Date', c.paidDate || '\u2014'],
+                                        ['Due Payment', c.duePayment || '\u2014'], ['Name/Email', c.nameEmail || '\u2014']
+                                    ].map(([label, val]) => React.createElement('div', { key: label, className: 'flex justify-between items-center' },
+                                        React.createElement('span', { className: 'text-xs text-slate-400' }, label),
+                                        React.createElement('span', { className: `text-sm ${label === 'Due Payment' && /overdue/i.test(val) ? 'text-red-400 font-semibold' : 'text-white'}` }, val || '\u2014')
+                                    ))
+                                )
+                            ),
+                            React.createElement('div', { className: 'card p-4' },
+                                React.createElement('h3', { className: 'text-sm font-semibold text-white mb-3' }, 'Contract Notes'),
+                                React.createElement('div', { className: 'space-y-3' },
+                                    c.contractNotes
+                                        ? React.createElement('p', { className: 'text-sm text-slate-300 whitespace-pre-wrap bg-dark-800 rounded-lg p-3' }, c.contractNotes)
+                                        : React.createElement('p', { className: 'text-sm text-slate-600 italic' }, 'No contract notes'),
+                                    c.paymentNotes && React.createElement('div', null,
+                                        React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Payment Notes'),
+                                        React.createElement('p', { className: 'text-sm text-slate-300 whitespace-pre-wrap bg-dark-800 rounded-lg p-3' }, c.paymentNotes)
+                                    )
+                                )
+                            )
+                        ),
+
+                        // Amount from notes
+                        c.notesAmount && React.createElement('div', { className: 'card p-4' },
+                            React.createElement('div', { className: 'flex items-center gap-3' },
+                                React.createElement('span', { className: 'text-xs text-slate-400' }, 'Amount referenced in notes:'),
+                                React.createElement('span', { className: 'text-lg font-bold text-emerald-400' }, '$' + c.notesAmount.toLocaleString())
+                            )
+                        )
+                    )
+                );
+            }
+
+            // Main view
+            return (
+                React.createElement('div', { className: 'space-y-6' },
+                    // Header
+                    React.createElement('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
+                        React.createElement('h2', { className: 'text-2xl font-bold text-white' }, 'Contract Billing'),
+                        React.createElement('button', { onClick: exportCSV, className: 'px-3 py-2 bg-dark-700 hover:bg-dark-600 text-slate-300 rounded-lg text-sm' }, 'Export CSV')
+                    ),
+
+                    // Stats cards
+                    React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' },
+                        React.createElement('div', { className: 'card p-4 text-center cursor-pointer hover:opacity-80', onClick: () => setFilterType('overdue') },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Past Due'),
+                            React.createElement('p', { className: `text-2xl font-bold ${stats.overdue > 0 ? 'text-red-400' : 'text-emerald-400'}` }, stats.overdue)
+                        ),
+                        React.createElement('div', { className: 'card p-4 text-center cursor-pointer hover:opacity-80', onClick: () => setFilterType('upcoming-7') },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Due Next 7 Days'),
+                            React.createElement('p', { className: `text-2xl font-bold ${stats.next7 > 0 ? 'text-yellow-400' : 'text-emerald-400'}` }, stats.next7)
+                        ),
+                        React.createElement('div', { className: 'card p-4 text-center cursor-pointer hover:opacity-80', onClick: () => setFilterType('manual') },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Manual Billing'),
+                            React.createElement('p', { className: 'text-2xl font-bold text-brand-purple' }, stats.manual)
+                        ),
+                        React.createElement('div', { className: 'card p-4 text-center cursor-pointer hover:opacity-80', onClick: () => setFilterType('with-notes') },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'With Contract Notes'),
+                            React.createElement('p', { className: 'text-2xl font-bold text-white' }, stats.withNotes + ' / ' + stats.total)
+                        )
+                    ),
+
+                    // Filters
+                    React.createElement('div', { className: 'flex gap-3 flex-wrap items-center' },
+                        React.createElement('input', { type: 'text', value: search, onChange: (e) => setSearch(e.target.value), placeholder: 'Search clients...', className: 'input-field border rounded-lg px-4 py-2 text-sm', style: { maxWidth: '280px' } }),
+                        React.createElement('select', { value: filterType, onChange: (e) => setFilterType(e.target.value), className: 'input-field border rounded-lg px-3 py-2 text-sm' },
+                            React.createElement('option', { value: 'all' }, 'All Clients (' + allClients.length + ')'),
+                            React.createElement('option', { value: 'with-notes' }, 'With Contract Notes (' + stats.withNotes + ')'),
+                            React.createElement('option', { value: 'no-notes' }, 'No Contract Notes (' + (stats.total - stats.withNotes) + ')'),
+                            React.createElement('option', { value: 'overdue' }, 'Past Due (' + stats.overdue + ')'),
+                            React.createElement('option', { value: 'upcoming-7' }, 'Due in 7 Days (' + stats.next7 + ')'),
+                            React.createElement('option', { value: 'upcoming-30' }, 'Due in 30 Days'),
+                            React.createElement('option', { value: 'past-due' }, 'Past Due Date'),
+                            React.createElement('option', { value: 'manual' }, 'Manual Billing (' + stats.manual + ')'),
+                            React.createElement('option', { value: 'loan-officer' }, 'Loan Officer (' + stats.loClients + ')'),
+                            React.createElement('option', { value: 'split' }, 'Split Billing')
+                        ),
+                        React.createElement('span', { className: 'text-xs text-slate-500 ml-auto' }, sorted.length + ' clients')
+                    ),
+
+                    // Table
+                    sorted.length > 0 && React.createElement('div', { className: 'card overflow-hidden' },
+                        React.createElement('div', { className: 'overflow-x-auto' },
+                            React.createElement('table', { className: 'w-full' },
+                                React.createElement('thead', null,
+                                    React.createElement('tr', { className: 'text-xs text-slate-500 border-b border-dark-700' },
+                                        React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('client') }, 'Client' + sortArrow('client')),
+                                        React.createElement('th', { className: 'text-left px-4 py-3' }, 'Contract Notes'),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('mrr') }, 'MRR' + sortArrow('mrr')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3' }, 'Frequency'),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('nextRebillDate') }, 'Next Rebill' + sortArrow('nextRebillDate')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('daysUntilRebill') }, 'Days' + sortArrow('daysUntilRebill')),
+                                        React.createElement('th', { className: 'text-left px-4 py-3' }, 'Source'),
+                                        React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('flags') }, 'Flags' + sortArrow('flags'))
+                                    )
+                                ),
+                                React.createElement('tbody', null,
+                                    sorted.map(c => {
+                                        const daysBadge = getDaysBadge(c.daysUntilRebill);
+                                        return React.createElement('tr', { key: c.client, className: 'border-b border-dark-800 hover:bg-dark-800/50 cursor-pointer', onClick: () => setSelectedClient(c.client) },
+                                            React.createElement('td', { className: 'px-4 py-3' },
+                                                React.createElement('div', { className: 'text-sm text-white font-medium' }, c.client),
+                                                React.createElement('div', { className: 'text-xs text-slate-500' }, c.csmRep || '')
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3', style: { maxWidth: '300px' } },
+                                                c.contractNotes
+                                                    ? React.createElement('p', { className: 'text-xs text-slate-300 truncate', title: c.contractNotes }, c.contractNotes)
+                                                    : React.createElement('span', { className: 'text-xs text-slate-600 italic' }, 'None')
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center text-white font-medium' }, c.mrr || '\u2014'),
+                                            React.createElement('td', { className: 'px-4 py-3 text-xs text-center text-slate-400' }, c.billingFrequency || c.billingCycle || '\u2014'),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center' },
+                                                React.createElement('span', { className: getDaysColor(c.daysUntilRebill) },
+                                                    c.nextRebillDate ? c.nextRebillDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '\u2014'
+                                                )
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3 text-center' },
+                                                React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${daysBadge.color}` }, daysBadge.label)
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3 text-xs text-slate-500' }, getSourceLabel(c.nextRebillSource)),
+                                            React.createElement('td', { className: 'px-4 py-3' },
+                                                React.createElement('div', { className: 'flex flex-wrap gap-1' },
+                                                    c.flags.map(f => React.createElement('span', { key: f, className: `px-1.5 py-0.5 rounded text-xs font-medium ${f === 'Overdue' ? 'bg-red-500/20 text-red-400' : f === 'Manual Billing' ? 'bg-brand-purple/20 text-brand-purple' : f === 'Loan Officer' ? 'bg-blue-500/20 text-blue-400' : f === 'Split Billing' ? 'bg-yellow-500/20 text-yellow-400' : f === 'Paused' ? 'bg-orange-500/20 text-orange-400' : f === 'Cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-400'}` }, f))
+                                                )
+                                            )
+                                        );
+                                    })
+                                )
+                            )
+                        )
+                    ),
+
+                    // Empty state
+                    sorted.length === 0 && React.createElement('div', { className: 'card p-8 text-center' },
+                        React.createElement('p', { className: 'text-slate-400 mb-2' }, 'No clients match the current filters'),
+                        React.createElement('button', { onClick: () => { setSearch(''); setFilterType('all'); }, className: 'px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm mt-2' }, 'Clear Filters')
+                    )
+                )
+            );
+        };
+
         // ========== CALL TRACKING TAB ==========
         const CallTrackingTab = ({ clients = [], setupData = [] }) => {
             const [callData, setCallData] = useState({});
@@ -9870,6 +10322,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     case 'cashflow': return <CashflowTab setupData={setupData} />;
                     case 'client-portals': return <ClientPortalsTab clients={clients} setupData={setupData} />;
                     case 'call-tracking': return <CallTrackingTab clients={clients} setupData={setupData} />;
+                    case 'contract-billing': return <ContractBillingTab setupData={setupData} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
