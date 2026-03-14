@@ -8196,6 +8196,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             const [planStartYear, setPlanStartYear] = useState('2026');
             const [planMonths, setPlanMonths] = useState('12');
             const [planNote, setPlanNote] = useState('');
+            const [hideInactive, setHideInactive] = useState(true);
+            const [highlightSheetClients, setHighlightSheetClients] = useState(false);
 
             const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             const NOW = new Date();
@@ -8542,13 +8544,39 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                         if (cEmail && sNameEmail.includes(cEmail)) return true;
                         return false;
                     });
-                    return { ...c, renewal: match ? match.renewal : '', csmRep: match ? match.csmRep : '', setupMatch: !!match };
+                    // Calculate last payment month as a Date for filtering
+                    let lastPaymentDate = null;
+                    for (const yr of [2026, 2025, 2024]) {
+                        if (c.yearData[yr]) {
+                            for (let m = 11; m >= 0; m--) {
+                                if (c.yearData[yr][m] > 0) {
+                                    lastPaymentDate = new Date(yr, m, 1);
+                                    break;
+                                }
+                            }
+                        }
+                        if (lastPaymentDate) break;
+                    }
+                    return { ...c, renewal: match ? match.renewal : '', csmRep: match ? match.csmRep : '', setupMatch: !!match, lastPaymentDate };
                 });
             }, [cashflowData, setupData]);
 
             // Filter and search
             const filteredData = useMemo(() => {
                 let data = enrichedCashflow;
+                // Hide clients with no payment in last 7 months
+                if (hideInactive) {
+                    const sevenMonthsAgo = new Date(CURRENT_YEAR, CURRENT_MONTH - 7, 1);
+                    data = data.filter(c => {
+                        if (c.subActive) return true; // always show active subscriptions
+                        if (c.lastPaymentDate && c.lastPaymentDate >= sevenMonthsAgo) return true;
+                        // Check if they have overrides in the future
+                        const clientKey = c.email || c.name.toLowerCase();
+                        const hasFutureOverride = Object.keys(overrides).some(k => k.startsWith(clientKey + '|'));
+                        if (hasFutureOverride) return true;
+                        return false;
+                    });
+                }
                 // Source filter
                 if (dataSource !== 'all') {
                     data = data.filter(c => c.sources.includes(dataSource));
@@ -8586,7 +8614,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     data = [...data].sort((a, b) => b.grandTotal - a.grandTotal);
                 }
                 return data;
-            }, [enrichedCashflow, search, filterStatus, sortConfig, dataSource]);
+            }, [enrichedCashflow, search, filterStatus, sortConfig, dataSource, hideInactive, overrides]);
 
             const handleSort = (key) => {
                 setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
@@ -8693,9 +8721,11 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 React.createElement('div', { className: 'flex items-center justify-between' },
                     React.createElement('div', null,
                         React.createElement('h2', { className: 'text-2xl font-bold text-primary' }, 'Cashflow Schedule'),
-                        React.createElement('p', { className: 'text-secondary text-sm mt-1' }, `Auto-generated from Stripe & Whop • ${stats.totalClients} clients • ${stats.activeClients} active`)
+                        React.createElement('p', { className: 'text-secondary text-sm mt-1' }, `Auto-generated from Stripe & Whop • ${stats.totalClients} clients • ${stats.activeClients} active${hideInactive ? ` • ${stats.totalClients - filteredData.length} hidden` : ''}`)
                     ),
-                    React.createElement('div', { className: 'flex gap-2' },
+                    React.createElement('div', { className: 'flex gap-2 flex-wrap' },
+                        React.createElement('button', { onClick: () => setHideInactive(!hideInactive), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${hideInactive ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, hideInactive ? 'Inactive Hidden' : 'Show All Clients'),
+                        React.createElement('button', { onClick: () => setHighlightSheetClients(!highlightSheetClients), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${highlightSheetClients ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, highlightSheetClients ? 'Sheet Clients Highlighted' : 'Highlight Sheet Clients'),
                         React.createElement('button', { onClick: () => setShowProjections(!showProjections), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${showProjections ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, showProjections ? '2026 Projections ON' : '2026 Projections OFF'),
                         React.createElement('button', { onClick: exportCSV, className: 'px-3 py-1.5 rounded-lg text-sm font-medium bg-dark-700 text-secondary hover:bg-dark-600 transition-all' }, 'Export CSV'),
                         React.createElement('button', { onClick: () => { localStorage.removeItem('vam_auto_cashflow'); localStorage.removeItem('vam_auto_cashflow_time'); window.location.reload(); }, className: 'px-3 py-1.5 rounded-lg text-sm font-medium bg-dark-700 text-secondary hover:bg-dark-600 transition-all' }, 'Refresh')
@@ -8829,11 +8859,13 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                 // Client rows
                                 ...filteredData.map((c, idx) => {
                                     const clientKey = c.email || c.name.toLowerCase();
-                                    return React.createElement('tr', { key: idx, className: 'border-b divider hover-bg transition-colors' },
-                                        React.createElement('td', { className: 'p-2 bg-dark-900', style: { position: 'sticky', left: 0, zIndex: 10 } },
+                                    const isSheetClient = highlightSheetClients && c.setupMatch;
+                                    return React.createElement('tr', { key: idx, className: `border-b divider hover-bg transition-colors${isSheetClient ? ' bg-emerald-500/8' : ''}`, style: isSheetClient ? { boxShadow: 'inset 3px 0 0 0 #10b981' } : undefined },
+                                        React.createElement('td', { className: `p-2 ${isSheetClient ? 'bg-emerald-950/50' : 'bg-dark-900'}`, style: { position: 'sticky', left: 0, zIndex: 10 } },
                                             React.createElement('div', { className: 'flex items-center gap-1' },
+                                                isSheetClient ? React.createElement('span', { className: 'text-emerald-400', style: { fontSize: '8px', flexShrink: 0 } }, '\u25CF') : null,
                                                 React.createElement('div', { className: 'flex-1 min-w-0' },
-                                                    React.createElement('div', { className: 'text-xs font-medium text-primary truncate', style: { maxWidth: '150px' } }, c.name || c.email),
+                                                    React.createElement('div', { className: `text-xs font-medium truncate ${isSheetClient ? 'text-emerald-300' : 'text-primary'}`, style: { maxWidth: '150px' } }, c.name || c.email),
                                                     c.name && c.email ? React.createElement('div', { className: 'text-xs text-muted truncate', style: { maxWidth: '150px', fontSize: '9px' } }, c.email) : null
                                                 ),
                                                 React.createElement('button', {
@@ -8842,8 +8874,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                                 }, '+')
                                             )
                                         ),
-                                        React.createElement('td', { className: 'p-1 text-center bg-dark-900', style: { position: 'sticky', left: 180, zIndex: 5 } }, sourceBadge(c.sources)),
-                                        React.createElement('td', { className: `text-right p-2 text-xs bg-dark-900 ${c.subAmount > 0 ? 'text-brand-cyan font-medium' : 'text-muted'}`, style: { position: 'sticky', left: 220, zIndex: 5, boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } }, c.subAmount > 0 ? fmt(c.subAmount) : ''),
+                                        React.createElement('td', { className: `p-1 text-center ${isSheetClient ? 'bg-emerald-950/50' : 'bg-dark-900'}`, style: { position: 'sticky', left: 180, zIndex: 5 } }, sourceBadge(c.sources)),
+                                        React.createElement('td', { className: `text-right p-2 text-xs ${isSheetClient ? 'bg-emerald-950/50' : 'bg-dark-900'} ${c.subAmount > 0 ? 'text-brand-cyan font-medium' : 'text-muted'}`, style: { position: 'sticky', left: 220, zIndex: 5, boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } }, c.subAmount > 0 ? fmt(c.subAmount) : ''),
                                         ...visibleYears.flatMap(yr => {
                                             const monthData = yr === 2026 ? c.projected2026 : (c.yearData[yr] || new Array(12).fill(0));
                                             if (collapsedYears.has(yr)) {
