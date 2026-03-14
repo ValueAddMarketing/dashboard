@@ -139,7 +139,119 @@
 
         const AuthContext = createContext(null);
         const ThemeContext = createContext(null);
+        const BillingDataContext = createContext(null);
         const useAuth = () => useContext(AuthContext);
+        const useBillingData = () => useContext(BillingDataContext);
+
+        // Centralized billing data provider — fetches Stripe/Whop/Fanbasis once, shares across all tabs
+        const BillingDataProvider = ({ children }) => {
+            const [subscriptions, setSubscriptions] = useState({ stripe: [], whop: [], fanbasis: [], errors: [] });
+            const [invoiceData, setInvoiceData] = useState({ stripe: [], stripeUpcoming: [], errors: [] });
+            const [subsLoading, setSubsLoading] = useState(true);
+            const [invoicesLoading, setInvoicesLoading] = useState(true);
+
+            // Promise dedup refs to prevent concurrent fetches
+            const subsPromiseRef = useRef(null);
+            const invoicesPromiseRef = useRef(null);
+
+            const fetchSubscriptions = useCallback((force = false) => {
+                // Return existing in-flight promise if one exists
+                if (subsPromiseRef.current && !force) return subsPromiseRef.current;
+
+                const cached = localStorage.getItem('vam_subscriptions');
+                const cacheTime = localStorage.getItem('vam_subscriptions_cache_time');
+                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
+                if (!force && cached && cacheAge < 30 * 60 * 1000) {
+                    try {
+                        const parsed = JSON.parse(cached);
+                        setSubscriptions(parsed);
+                        setSubsLoading(false);
+                        return Promise.resolve(parsed);
+                    } catch(e) {}
+                }
+
+                setSubsLoading(true);
+                const p = fetch('/api/billing-subscriptions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'fetchAll' })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
+                    setSubscriptions(subs);
+                    try {
+                        localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
+                        localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString());
+                    } catch(e) {}
+                    return subs;
+                })
+                .catch(err => { console.error('[BillingData] subs fetch error:', err); return subscriptions; })
+                .finally(() => { setSubsLoading(false); subsPromiseRef.current = null; });
+
+                subsPromiseRef.current = p;
+                return p;
+            }, []);
+
+            const fetchInvoices = useCallback((force = false, monthsBack = 6) => {
+                if (invoicesPromiseRef.current && !force) return invoicesPromiseRef.current;
+
+                const cached = localStorage.getItem('vam_billing_invoices');
+                const cacheTime = localStorage.getItem('vam_billing_invoices_cache_time');
+                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
+                if (!force && cached && cacheAge < 30 * 60 * 1000) {
+                    try {
+                        const parsed = JSON.parse(cached);
+                        setInvoiceData(parsed);
+                        setInvoicesLoading(false);
+                        return Promise.resolve(parsed);
+                    } catch(e) {}
+                }
+
+                setInvoicesLoading(true);
+                const p = fetch('/api/billing-errors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'fetchInvoices', monthsBack })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    setInvoiceData(data);
+                    try {
+                        localStorage.setItem('vam_billing_invoices', JSON.stringify(data));
+                        localStorage.setItem('vam_billing_invoices_cache_time', Date.now().toString());
+                    } catch(e) {}
+                    return data;
+                })
+                .catch(err => { console.error('[BillingData] invoices fetch error:', err); return invoiceData; })
+                .finally(() => { setInvoicesLoading(false); invoicesPromiseRef.current = null; });
+
+                invoicesPromiseRef.current = p;
+                return p;
+            }, []);
+
+            const refreshAll = useCallback(() => {
+                localStorage.removeItem('vam_subscriptions');
+                localStorage.removeItem('vam_subscriptions_cache_time');
+                localStorage.removeItem('vam_billing_invoices');
+                localStorage.removeItem('vam_billing_invoices_cache_time');
+                return Promise.all([fetchSubscriptions(true), fetchInvoices(true)]);
+            }, [fetchSubscriptions, fetchInvoices]);
+
+            // Fetch on mount
+            useEffect(() => {
+                fetchSubscriptions();
+                fetchInvoices();
+            }, []);
+
+            const value = useMemo(() => ({
+                subscriptions, invoiceData,
+                subsLoading, invoicesLoading,
+                fetchSubscriptions, fetchInvoices, refreshAll
+            }), [subscriptions, invoiceData, subsLoading, invoicesLoading, fetchSubscriptions, fetchInvoices, refreshAll]);
+
+            return React.createElement(BillingDataContext.Provider, { value }, children);
+        };
 
         const URLS = {
             clientAdsPerformance: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4LTw-15NE0j25eIOpY_bTPSAipW7-F2eXnL0xtdXMWCZtK9z3MYWxHr6ltnMChLk-YDLzwiXAfvwE/pub?gid=964722332&single=true&output=csv',
@@ -4398,7 +4510,7 @@ ${transcript}`;
 
         // ========== BILLING ERRORS TAB ==========
         const BillingErrorsTab = ({ setupData }) => {
-            const [invoiceData, setInvoiceData] = useState({ stripe: [], whop: [], stripeUpcoming: [], errors: [] });
+            const { invoiceData, subscriptions: sharedSubs, invoicesLoading, subsLoading } = useBillingData();
             const [loadingInvoices, setLoadingInvoices] = useState(true);
             const [search, setSearch] = useState('');
             const [filterFlag, setFilterFlag] = useState('');
@@ -4452,51 +4564,13 @@ ${transcript}`;
                 try { localStorage.setItem('vam_whop_dismissed', JSON.stringify(updated)); } catch(e) {}
             };
 
+            // Sync from shared BillingDataContext
             useEffect(() => {
-                const invoiceCached = localStorage.getItem('vam_billing_invoices');
-                const invoiceCacheTime = localStorage.getItem('vam_billing_invoices_cache_time');
-                const subsCached = localStorage.getItem('vam_subscriptions');
-                const subsCacheTime = localStorage.getItem('vam_subscriptions_cache_time');
-                const cacheValid = (key, time) => key && time && (Date.now() - parseInt(time)) < 30 * 60 * 1000;
-
-                // Load from cache if valid
-                if (cacheValid(invoiceCached, invoiceCacheTime)) {
-                    setInvoiceData(JSON.parse(invoiceCached));
-                }
-                if (cacheValid(subsCached, subsCacheTime)) {
-                    const parsed = JSON.parse(subsCached);
-                    setWhopSubs((parsed.whop || []).filter(s => s.source === 'whop'));
-                }
-
-                // Fetch both in parallel if either is stale
-                const needInvoices = !cacheValid(invoiceCached, invoiceCacheTime);
-                const needSubs = !cacheValid(subsCached, subsCacheTime);
-
-                if (!needInvoices && !needSubs) { setLoadingInvoices(false); return; }
-
-                const fetches = [];
-                if (needInvoices) {
-                    fetches.push(
-                        fetch('/api/billing-errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchInvoices' }) })
-                            .then(r => r.json())
-                            .then(d => { setInvoiceData(d); try { localStorage.setItem('vam_billing_invoices', JSON.stringify(d)); localStorage.setItem('vam_billing_invoices_cache_time', Date.now().toString()); } catch(e) {} })
-                            .catch(err => setInvoiceData(prev => ({ ...prev, errors: [{ source: 'fetch', message: err.message }] })))
-                    );
-                }
-                if (needSubs) {
-                    fetches.push(
-                        fetch('/api/billing-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fetchAll' }) })
-                            .then(r => r.json())
-                            .then(d => {
-                                const whop = (d.whop || []).filter(s => s.source === 'whop');
-                                setWhopSubs(whop);
-                                try { localStorage.setItem('vam_subscriptions', JSON.stringify(d)); localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString()); } catch(e) {}
-                            })
-                            .catch(err => console.error('[BillingErrors] Whop fetch error:', err))
-                    );
-                }
-                Promise.all(fetches).finally(() => setLoadingInvoices(false));
-            }, []);
+                setWhopSubs((sharedSubs.whop || []).filter(s => s.source === 'whop'));
+            }, [sharedSubs]);
+            useEffect(() => {
+                setLoadingInvoices(invoicesLoading || subsLoading);
+            }, [invoicesLoading, subsLoading]);
 
             // Enrich whopSubs with names/emails from CSV
             useEffect(() => {
@@ -5729,18 +5803,17 @@ Column definitions:
 
         // ========== BILLING AUDIT TAB ==========
         const BillingAuditTab = ({ clients, setupData }) => {
+            const { subscriptions, subsLoading } = useBillingData();
             const [searchFilter, setSearchFilter] = useState('');
             const [filterSeverity, setFilterSeverity] = useState('');
             const [filterTeamMember, setFilterTeamMember] = useState('');
             const [sortConfig, setSortConfig] = useState({ key: null, dir: 'desc' });
             const [dailySpend, setDailySpend] = useState({});
-            const [subscriptions, setSubscriptions] = useState({ stripe: [], whop: [] });
             const [manualMappings, setManualMappings] = useState(() => {
                 try { return JSON.parse(localStorage.getItem('vam_billing_mappings') || '{}'); } catch { return {}; }
             });
             const [showMappingModal, setShowMappingModal] = useState(null);
             const [loading, setLoading] = useState(true);
-            const [subsLoading, setSubsLoading] = useState(true);
 
             const getSetupInfo = (client) => {
                 const name = client.client.toLowerCase().trim();
@@ -5802,32 +5875,6 @@ Column definitions:
                     setLoading(false);
                 }
             }, [clients, setupData]);
-
-            // Fetch Stripe + Whop subscriptions
-            useEffect(() => {
-                const cached = localStorage.getItem('vam_subscriptions');
-                const cacheTime = localStorage.getItem('vam_subscriptions_cache_time');
-                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
-                if (cached && cacheAge < 30 * 60 * 1000) {
-                    try { setSubscriptions(JSON.parse(cached)); setSubsLoading(false); return; } catch(e) {}
-                }
-                fetch('/api/billing-subscriptions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'fetchAll' })
-                })
-                .then(r => r.json())
-                .then(data => {
-                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
-                    setSubscriptions(subs);
-                    try {
-                        localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
-                        localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString());
-                    } catch(e) {}
-                })
-                .catch(() => {})
-                .finally(() => setSubsLoading(false));
-            }, []);
 
             // Match client to subscription
             const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop, ...(subscriptions.fanbasis || [])], [subscriptions]);
@@ -7571,7 +7618,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
         // ========== LTV & CHURN TAB ==========
         const LTVChurnTab = () => {
-            const [subscriptions, setSubscriptions] = useState({ stripe: [], whop: [] });
+            const { subscriptions, subsLoading } = useBillingData();
             const [loading, setLoading] = useState(true);
             const [view, setView] = useState('overview');
             const [sortConfig, setSortConfig] = useState({ key: 'created', dir: 'asc' });
@@ -7595,30 +7642,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
             const dateRange = getDateRange();
 
-            useEffect(() => {
-                const cached = localStorage.getItem('vam_subscriptions');
-                const cacheTime = localStorage.getItem('vam_subscriptions_cache_time');
-                const cacheAge = cacheTime ? Date.now() - parseInt(cacheTime) : Infinity;
-                if (cached && cacheAge < 30 * 60 * 1000) {
-                    try { setSubscriptions(JSON.parse(cached)); setLoading(false); return; } catch(e) {}
-                }
-                fetch('/api/billing-subscriptions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'fetchAll' })
-                })
-                .then(r => r.json())
-                .then(data => {
-                    const subs = { stripe: data.stripe || [], whop: data.whop || [], fanbasis: data.fanbasis || [], errors: data.errors || [] };
-                    setSubscriptions(subs);
-                    try {
-                        localStorage.setItem('vam_subscriptions', JSON.stringify(subs));
-                        localStorage.setItem('vam_subscriptions_cache_time', Date.now().toString());
-                    } catch(e) {}
-                })
-                .catch(() => {})
-                .finally(() => setLoading(false));
-            }, []);
+            useEffect(() => { setLoading(subsLoading); }, [subsLoading]);
 
             const allSubs = useMemo(() => [...subscriptions.stripe, ...subscriptions.whop, ...(subscriptions.fanbasis || [])], [subscriptions]);
 
@@ -8149,6 +8173,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
 
         // ========== CASHFLOW SCHEDULE TAB (Auto from Stripe + Whop) ==========
         const CashflowTab = ({ setupData = [] }) => {
+            const { invoiceData: ctxInvoiceData, subscriptions: ctxSubs, invoicesLoading: ctxInvLoading, subsLoading: ctxSubsLoading, fetchInvoices: ctxFetchInvoices } = useBillingData();
             const [cashflowData, setCashflowData] = useState([]);
             const [activeSubs, setActiveSubs] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -8177,8 +8202,10 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             const CURRENT_YEAR = NOW.getFullYear();
             const CURRENT_MONTH = NOW.getMonth(); // 0-indexed
 
+            // Process cashflow when context data is ready
             useEffect(() => {
-                const fetchAll = async () => {
+                if (ctxInvLoading || ctxSubsLoading) return;
+                const processAll = async () => {
                     try {
                         const cacheKey = 'vam_auto_cashflow';
                         const cacheTimeKey = 'vam_auto_cashflow_time';
@@ -8192,20 +8219,9 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             return;
                         }
 
-                        // Fetch Stripe invoices/charges and Whop payments in parallel
-                        setLoadingMsg('Fetching Stripe invoices & charges...');
-                        const [stripeRes, whopRes] = await Promise.all([
-                            fetch('/api/billing-errors', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ action: 'fetchInvoices' })
-                            }).then(r => r.json()).catch(() => ({ stripe: [], stripeUpcoming: [] })),
-                            fetch('/api/billing-subscriptions', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ action: 'fetchAll' })
-                            }).then(r => r.json()).catch(() => ({ stripe: [], whop: [] }))
-                        ]);
+                        // Use data from shared BillingDataContext (already fetched once)
+                        const stripeRes = ctxInvoiceData;
+                        const whopRes = ctxSubs;
 
                         setLoadingMsg('Processing payment history...');
 
@@ -8394,8 +8410,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     }
                     setLoading(false);
                 };
-                fetchAll();
-            }, []);
+                processAll();
+            }, [ctxInvLoading, ctxSubsLoading, ctxInvoiceData, ctxSubs]);
 
             // Fetch overrides from Supabase
             useEffect(() => {
@@ -10330,6 +10346,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             return (
                 <AuthContext.Provider value={{ user }}>
                     <ThemeContext.Provider value={{ theme, toggleTheme }}>
+                    <BillingDataProvider>
                         <div className="flex min-h-screen">
                             <aside className="w-72 sidebar border-r flex flex-col divider">
                                 <div className="p-5 border-b divider">
@@ -10448,6 +10465,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                             </div>
                         </main>
                     </div>
+                </BillingDataProvider>
                 </ThemeContext.Provider>
                 </AuthContext.Provider>
             );

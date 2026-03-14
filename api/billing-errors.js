@@ -20,6 +20,10 @@ export default async function handler(req, res) {
             return res.json(results);
         }
 
+        // Date filter: only fetch last 6 months by default (covers cashflow + billing errors needs)
+        const monthsBack = req.body.monthsBack || 6;
+        const createdGte = Math.floor(Date.now() / 1000) - (monthsBack * 30 * 86400);
+
         // Helper to fetch all pages of a Stripe list endpoint
         const fetchAllStripePages = async (endpoint, mapFn, extraParams) => {
             const items = [];
@@ -47,6 +51,7 @@ export default async function handler(req, res) {
         };
 
         // Run invoices + active subscriptions + one-time charges in parallel
+        // Invoices and charges are date-filtered to reduce pagination overhead
         const [invoices, subscriptions, charges] = await Promise.all([
             fetchAllStripePages('invoices', (inv) => {
                 const c = getCustomerInfo(inv.customer);
@@ -67,7 +72,7 @@ export default async function handler(req, res) {
                     attemptCount: inv.attempt_count || 0, attempted: inv.attempted || false,
                     chargeId: inv.charge || null,
                 };
-            }).catch(err => { results.errors.push({ source: 'stripe_invoices', message: err.message }); return []; }),
+            }, { 'created[gte]': createdGte.toString() }).catch(err => { results.errors.push({ source: 'stripe_invoices', message: err.message }); return []; }),
 
             fetchAllStripePages('subscriptions', (sub) => {
                 const c = getCustomerInfo(sub.customer);
@@ -105,7 +110,7 @@ export default async function handler(req, res) {
                     description: ch.description || (ch.payment_method_details?.type ? `${ch.payment_method_details.type} payment` : 'One-time charge'),
                     attemptCount: 1, attempted: true,
                 };
-            }).catch(err => { results.errors.push({ source: 'stripe_charges', message: err.message }); return []; }),
+            }, { 'created[gte]': createdGte.toString() }).catch(err => { results.errors.push({ source: 'stripe_charges', message: err.message }); return []; }),
         ]);
 
         // Merge charges that aren't already covered by invoices (avoid double-counting)

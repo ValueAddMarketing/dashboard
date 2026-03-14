@@ -98,14 +98,14 @@ export default async function handler(req, res) {
                     const all = [];
                     let pg = 1, more = true;
                     while (more) {
-                        const r = await fetch(`https://api.whop.com/api/v5/company/${endpoint}${endpoint.includes('?') ? '&' : '?'}per=50&page=${pg}`, { headers: whopHeaders });
+                        const r = await fetch(`https://api.whop.com/api/v5/company/${endpoint}${endpoint.includes('?') ? '&' : '?'}per=100&page=${pg}`, { headers: whopHeaders });
                         if (!r.ok) break;
                         const d = await r.json();
                         const items = d.data || [];
                         if (!items.length) break;
                         all.push(...items);
                         const tp = d.pagination?.total_pages || 1;
-                        if (pg >= tp || items.length < 50) more = false;
+                        if (pg >= tp || items.length < 100) more = false;
                         else pg++;
                     }
                     return all;
