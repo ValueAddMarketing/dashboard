@@ -9708,6 +9708,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                 return 'overview';
             });
             const [loading, setLoading] = useState(true);
+            const [sheetWarnings, setSheetWarnings] = useState([]);
             const [theme, setTheme] = useState('dark');
 
             // Theme toggle function
@@ -9754,33 +9755,47 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             }, [user]);
 
             const fetchFreshData = (clientParam, updateLoading) => {
-                Promise.all([
-                    // Client Ads Performance - headers in row 2, skip row 1
+                // Try server-side proxy first (faster, cached, with validation), fall back to direct sheet fetch
+                const fetchViaProxy = async () => {
+                    const resp = await fetch('/api/sheets', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'fetchAll' })
+                    });
+                    if (!resp.ok) throw new Error('Proxy HTTP ' + resp.status);
+                    return resp.json();
+                };
+
+                const fetchDirectSheets = () => Promise.all([
                     fetch(URLS.clientAdsPerformance).then(r => r.text()).then(csv => {
-                        console.log('[CSH] Ads CSV length:', csv.length);
                         const raw = Papa.parse(csv, { header: false, skipEmptyLines: true });
                         const headers = raw.data[1] || [];
-                        console.log('[CSH] Ads headers:', headers.slice(0, 5), 'Total rows:', raw.data.length);
-                        const result = raw.data.slice(2).map(row => {
-                            const obj = {}; headers.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj;
-                        }).map(mapClient).filter(r => r.client);
-                        console.log('[CSH] Ads clients after filter:', result.length);
-                        return result;
-                    }).catch(err => { console.error('[CSH] Ads fetch error:', err); return []; }),
-                    // Setup Timing - headers in row 1, skip row 2
+                        return { data: raw.data.slice(2).map(row => { const obj = {}; headers.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj; }), warnings: [], errors: [] };
+                    }),
                     fetch(URLS.setupTiming).then(r => r.text()).then(csv => {
-                        console.log('[CSH] Setup CSV length:', csv.length);
                         const raw = Papa.parse(csv, { header: false, skipEmptyLines: true });
                         const headers = raw.data[0] || [];
-                        const result = raw.data.slice(2).map(row => {
-                            const obj = {}; headers.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj;
-                        }).map(mapSetupTiming).filter(r => r.client);
-                        console.log('[CSH] Setup clients after filter:', result.length);
-                        return result;
-                    }).catch(err => { console.error('[CSH] Setup fetch error:', err); return []; }),
-                    // Meta Ads - real-time data from Meta Marketing API
-                    fetchMetaAdData()
-                ]).then(([c, s, metaAds]) => {
+                        return { data: raw.data.slice(2).map(row => { const obj = {}; headers.forEach((h, i) => { obj[h] = row[i] || ''; }); return obj; }), warnings: [], errors: [] };
+                    })
+                ]).then(([ads, setup]) => ({ clientAdsPerformance: ads, setupTiming: setup }));
+
+                const processSheetData = (proxyResult, metaAds) => {
+                    const adsResult = proxyResult.clientAdsPerformance || {};
+                    const setupResult = proxyResult.setupTiming || {};
+
+                    // Collect warnings from server-side validation
+                    const allWarnings = [];
+                    if (adsResult.warnings?.length) allWarnings.push(...adsResult.warnings.map(w => '📊 Ads Sheet: ' + w));
+                    if (adsResult.errors?.length) allWarnings.push(...adsResult.errors.map(e => '🚨 Ads Sheet MISSING: ' + e));
+                    if (setupResult.warnings?.length) allWarnings.push(...setupResult.warnings.map(w => '📋 Setup Sheet: ' + w));
+                    if (setupResult.errors?.length) allWarnings.push(...setupResult.errors.map(e => '🚨 Setup Sheet MISSING: ' + e));
+                    if (allWarnings.length > 0) setSheetWarnings(allWarnings);
+
+                    const c = (adsResult.data || []).map(mapClient).filter(r => r.client);
+                    const s = (setupResult.data || []).map(mapSetupTiming).filter(r => r.client);
+
+                    console.log('[CSH] Loaded', c.length, 'clients,', s.length, 'setup rows. Warnings:', allWarnings.length);
+
                     // Merge Meta ad data into clients
                     const clientsWithMeta = c.map(client => {
                         const meta = metaAds[client.client];
@@ -9790,7 +9805,6 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                         return { ...client, adDataSource: 'sheets' };
                     });
 
-                    // Save to cache
                     localStorage.setItem('vam_clients', JSON.stringify(clientsWithMeta));
                     localStorage.setItem('vam_setup', JSON.stringify(s));
                     localStorage.setItem('vam_cache_time', Date.now().toString());
@@ -9801,6 +9815,19 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                         const found = clientsWithMeta.find(x => x.client.toLowerCase() === decodeURIComponent(clientParam).toLowerCase());
                         if (found) setSelected(found);
                     }
+                    if (updateLoading) setLoading(false);
+                };
+
+                Promise.all([
+                    fetchViaProxy().catch(err => {
+                        console.warn('[CSH] Proxy failed, falling back to direct sheets:', err.message);
+                        return fetchDirectSheets();
+                    }),
+                    fetchMetaAdData()
+                ]).then(([proxyResult, metaAds]) => {
+                    processSheetData(proxyResult, metaAds);
+                }).catch(err => {
+                    console.error('[CSH] All data fetch failed:', err);
                     if (updateLoading) setLoading(false);
                 });
             };
@@ -9946,7 +9973,26 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                     {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
                                 </button>
                             </header>
-                            <div className="flex-1 overflow-y-auto p-8 scrollbar">{renderTab()}</div>
+                            <div className="flex-1 overflow-y-auto p-8 scrollbar">
+                                {sheetWarnings.length > 0 && (
+                                    <div className="mb-6 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-amber-400 font-semibold text-sm">Sheet Structure Warnings</span>
+                                                <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">{sheetWarnings.length}</span>
+                                            </div>
+                                            <button onClick={() => setSheetWarnings([])} className="text-xs text-slate-500 hover:text-slate-300">Dismiss</button>
+                                        </div>
+                                        <div className="space-y-1">
+                                            {sheetWarnings.map((w, i) => (
+                                                <div key={i} className="text-xs text-amber-300">{w}</div>
+                                            ))}
+                                        </div>
+                                        <div className="text-xs text-slate-500 mt-2">Someone may have renamed or removed columns in the Google Sheet. Data for missing columns will show as empty.</div>
+                                    </div>
+                                )}
+                                {renderTab()}
+                            </div>
                         </main>
                     </div>
                 </ThemeContext.Provider>
