@@ -8198,6 +8198,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             const [planNote, setPlanNote] = useState('');
             const [hideInactive, setHideInactive] = useState(true);
             const [highlightSheetClients, setHighlightSheetClients] = useState(false);
+            const [expandedNotes, setExpandedNotes] = useState(null); // clientKey of expanded contract notes row
+            const [showContractCol, setShowContractCol] = useState(true);
 
             const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             const NOW = new Date();
@@ -8557,7 +8559,55 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                         }
                         if (lastPaymentDate) break;
                     }
-                    return { ...c, renewal: match ? match.renewal : '', csmRep: match ? match.csmRep : '', setupMatch: !!match, lastPaymentDate };
+                    // Extract contract notes and rebilling info from setupData match
+                    let contractInfo = null;
+                    if (match) {
+                        const notes = (match.contractNotes || '').trim();
+                        const payNotes = (match.paymentNotes || '').trim();
+                        const combined = notes + ' ' + payNotes;
+                        let billingFreq = null;
+                        if (/monthly|every\s*month|per\s*month|\/mo/i.test(combined)) billingFreq = 'Monthly';
+                        else if (/bi.?weekly|every\s*2\s*weeks/i.test(combined)) billingFreq = 'Biweekly';
+                        else if (/weekly|every\s*week/i.test(combined)) billingFreq = 'Weekly';
+                        else if (/quarterly|every\s*3\s*months/i.test(combined)) billingFreq = 'Quarterly';
+                        else if (/annually|yearly/i.test(combined)) billingFreq = 'Annually';
+                        if (!billingFreq && match.billingCycle) {
+                            if (/month/i.test(match.billingCycle)) billingFreq = 'Monthly';
+                            else if (/bi.?week/i.test(match.billingCycle)) billingFreq = 'Biweekly';
+                            else if (/quarter/i.test(match.billingCycle)) billingFreq = 'Quarterly';
+                        }
+                        // Parse next rebill date
+                        let nextRebillDate = null;
+                        let nextRebillSource = null;
+                        if (match.nextBillingDateSheet) {
+                            const parsed = new Date(match.nextBillingDateSheet);
+                            if (!isNaN(parsed.getTime())) { nextRebillDate = parsed; nextRebillSource = 'sheet'; }
+                        }
+                        if (!nextRebillDate) {
+                            const dateMatch = combined.match(/(?:rebill|bill|charge|next|due|pay)\s*(?:date)?[:\s-]*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/i);
+                            if (dateMatch) {
+                                const mo = parseInt(dateMatch[1]), dy = parseInt(dateMatch[2]);
+                                const yr = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : NOW.getFullYear();
+                                if (mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
+                                    let d = new Date(yr, mo - 1, dy);
+                                    if (d < NOW && !dateMatch[3]) { d = new Date(NOW.getFullYear(), mo - 1, dy); if (d < NOW) d.setFullYear(d.getFullYear() + 1); }
+                                    nextRebillDate = d; nextRebillSource = 'notes';
+                                }
+                            }
+                        }
+                        let daysUntilRebill = nextRebillDate ? Math.ceil((nextRebillDate - NOW) / 86400000) : null;
+                        const isManual = /manual|invoice|venmo|zelle|cash|check|wire|ach|paypal/i.test(combined);
+                        const amtMatch = combined.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+                        const notesAmount = amtMatch ? parseFloat(amtMatch[1].replace(/,/g, '')) : null;
+                        contractInfo = {
+                            contractNotes: notes, paymentNotes: payNotes, hasNotes: notes.length > 0 || payNotes.length > 0,
+                            billingFreq, nextRebillDate, nextRebillSource, daysUntilRebill, isManual, notesAmount,
+                            mrr: match.mrr || '', billingCycle: match.billingCycle || '', duePayment: match.duePayment || '',
+                            contractLength: match.contractLength || '', contractEndDate: match.contractEndDate || '',
+                            paidDate: match.paidDate || '', platform: match.platform || ''
+                        };
+                    }
+                    return { ...c, renewal: match ? match.renewal : '', csmRep: match ? match.csmRep : '', setupMatch: !!match, lastPaymentDate, contractInfo };
                 });
             }, [cashflowData, setupData]);
 
@@ -8725,6 +8775,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     ),
                     React.createElement('div', { className: 'flex gap-2 flex-wrap' },
                         React.createElement('button', { onClick: () => setHideInactive(!hideInactive), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${hideInactive ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, hideInactive ? 'Inactive Hidden' : 'Show All Clients'),
+                        React.createElement('button', { onClick: () => setShowContractCol(!showContractCol), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${showContractCol ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, showContractCol ? 'Contract Notes ON' : 'Contract Notes'),
                         React.createElement('button', { onClick: () => setHighlightSheetClients(!highlightSheetClients), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${highlightSheetClients ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, highlightSheetClients ? 'Sheet Clients Highlighted' : 'Highlight Sheet Clients'),
                         React.createElement('button', { onClick: () => setShowProjections(!showProjections), className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${showProjections ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-dark-700 text-secondary border border-transparent'}` }, showProjections ? '2026 Projections ON' : '2026 Projections OFF'),
                         React.createElement('button', { onClick: exportCSV, className: 'px-3 py-1.5 rounded-lg text-sm font-medium bg-dark-700 text-secondary hover:bg-dark-600 transition-all' }, 'Export CSV'),
@@ -8813,6 +8864,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                         );
                                     }),
                                     React.createElement('th', { className: 'p-2', style: { minWidth: '70px' } }),
+                                    showContractCol && React.createElement('th', { className: 'p-2', style: { minWidth: '180px' } }),
+                                    showContractCol && React.createElement('th', { className: 'p-2', style: { minWidth: '90px' } }),
                                     React.createElement('th', { className: 'p-2', style: { minWidth: '75px' } })
                                 ),
                                 // Month header row
@@ -8832,6 +8885,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                         ];
                                     }),
                                     React.createElement('th', { className: 'text-center p-2 text-xs font-semibold text-secondary', style: { minWidth: '70px' } }, 'Status'),
+                                    showContractCol && React.createElement('th', { className: 'text-left p-2 text-xs font-semibold text-blue-400', style: { minWidth: '180px' } }, 'Contract Notes'),
+                                    showContractCol && React.createElement('th', { className: 'text-center p-2 text-xs font-semibold text-blue-400', style: { minWidth: '90px' } }, 'Next Rebill'),
                                     React.createElement('th', { className: 'text-right p-2 text-xs font-bold text-primary cursor-pointer hover:text-brand-cyan', onClick: () => handleSort('grandTotal'), style: { minWidth: '75px' } }, 'Total')
                                 )
                             ),
@@ -8854,6 +8909,8 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                         ];
                                     }),
                                     React.createElement('td', null),
+                                    showContractCol && React.createElement('td', null),
+                                    showContractCol && React.createElement('td', null),
                                     React.createElement('td', null)
                                 ),
                                 // Client rows
@@ -8947,6 +9004,48 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                                                 getStatusBadge(c.status),
                                                 c.renewal ? React.createElement('span', { className: `px-2 py-0.5 rounded text-xs font-medium ${c.renewal.toLowerCase() === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/10 text-gray-400'}`, style: { fontSize: '9px' } }, c.renewal) : null
                                             )
+                                        ),
+                                        // Contract Notes column
+                                        showContractCol && React.createElement('td', { className: 'p-1', style: { maxWidth: '220px' } },
+                                            c.contractInfo && c.contractInfo.hasNotes
+                                                ? React.createElement('div', {
+                                                    className: 'cursor-pointer',
+                                                    onClick: (e) => { e.stopPropagation(); setExpandedNotes(expandedNotes === clientKey ? null : clientKey); }
+                                                  },
+                                                    React.createElement('div', { className: 'text-xs text-slate-300 truncate', style: { maxWidth: '200px' }, title: c.contractInfo.contractNotes }, c.contractInfo.contractNotes || c.contractInfo.paymentNotes),
+                                                    c.contractInfo.isManual && React.createElement('span', { className: 'px-1.5 py-0.5 rounded text-xs font-medium bg-purple-500/20 text-purple-400 mt-0.5 inline-block', style: { fontSize: '9px' } }, 'Manual'),
+                                                    expandedNotes === clientKey && React.createElement('div', {
+                                                        className: 'mt-1 p-2 rounded-lg bg-dark-800 border border-dark-600 text-xs text-slate-300 whitespace-pre-wrap',
+                                                        style: { maxWidth: '300px', maxHeight: '200px', overflowY: 'auto' },
+                                                        onClick: (e) => e.stopPropagation()
+                                                    },
+                                                        c.contractInfo.contractNotes && React.createElement('div', { className: 'mb-1' },
+                                                            React.createElement('span', { className: 'text-blue-400 font-semibold' }, 'Contract: '),
+                                                            c.contractInfo.contractNotes
+                                                        ),
+                                                        c.contractInfo.paymentNotes && React.createElement('div', null,
+                                                            React.createElement('span', { className: 'text-blue-400 font-semibold' }, 'Payment: '),
+                                                            c.contractInfo.paymentNotes
+                                                        ),
+                                                        c.contractInfo.notesAmount && React.createElement('div', { className: 'mt-1 text-emerald-400 font-semibold' }, 'Amount: $' + c.contractInfo.notesAmount.toLocaleString()),
+                                                        c.contractInfo.billingFreq && React.createElement('div', { className: 'mt-1 text-slate-400' }, 'Frequency: ' + c.contractInfo.billingFreq),
+                                                        c.contractInfo.platform && React.createElement('div', { className: 'text-slate-400' }, 'Platform: ' + c.contractInfo.platform)
+                                                    )
+                                                )
+                                                : React.createElement('span', { className: 'text-xs text-slate-600' }, c.setupMatch ? '\u2014' : '')
+                                        ),
+                                        // Next Rebill column
+                                        showContractCol && React.createElement('td', { className: 'text-center p-1' },
+                                            c.contractInfo && c.contractInfo.nextRebillDate
+                                                ? React.createElement('div', { className: 'flex flex-col items-center gap-0.5' },
+                                                    React.createElement('span', { className: `text-xs font-medium ${c.contractInfo.daysUntilRebill != null && c.contractInfo.daysUntilRebill < 0 ? 'text-red-400' : c.contractInfo.daysUntilRebill <= 7 ? 'text-yellow-400' : 'text-slate-300'}` },
+                                                        c.contractInfo.nextRebillDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                                    ),
+                                                    React.createElement('span', { className: `px-1.5 py-0.5 rounded text-xs font-semibold ${c.contractInfo.daysUntilRebill < 0 ? 'bg-red-500/20 text-red-400' : c.contractInfo.daysUntilRebill <= 3 ? 'bg-orange-500/20 text-orange-400' : c.contractInfo.daysUntilRebill <= 7 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-emerald-500/20 text-emerald-400'}`, style: { fontSize: '9px' } },
+                                                        c.contractInfo.daysUntilRebill < 0 ? Math.abs(c.contractInfo.daysUntilRebill) + 'd overdue' : c.contractInfo.daysUntilRebill + 'd'
+                                                    )
+                                                )
+                                                : React.createElement('span', { className: 'text-xs text-slate-600' }, c.setupMatch ? '\u2014' : '')
                                         ),
                                         React.createElement('td', { className: 'text-right p-2 text-xs font-bold text-primary' }, c.grandTotal > 0 ? fmt(c.grandTotal) : '')
                                     );
