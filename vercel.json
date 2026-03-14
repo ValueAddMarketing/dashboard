@@ -7,7 +7,8 @@
     { "source": "/portal", "destination": "/client-portal/index.html" },
     { "source": "/portal/:path*", "destination": "/client-portal/index.html" },
     { "source": "/george", "destination": "/george/index.html" },
-    { "source": "/billing-errors", "destination": "/billing-errors/index.html" }
+    { "source": "/billing-errors", "destination": "/billing-errors/index.html" },
+    { "source": "/billing", "destination": "/billing/index.html" }
   ],
   "headers": [
     {

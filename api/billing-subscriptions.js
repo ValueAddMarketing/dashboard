@@ -155,7 +155,7 @@ export default async function handler(req, res) {
             // Try FanBasis API first, fall back to Supabase
             if (FANBASIS_API_KEY) {
                 try {
-                    const fbHeaders = { 'Authorization': `Bearer ${FANBASIS_API_KEY}` };
+                    const fbHeaders = { 'Authorization': `Bearer ${FANBASIS_API_KEY}`, 'Accept': 'application/json' };
                     const [subscribersResp, transactionsResp] = await Promise.all([
                         fetch('https://www.fanbasis.com/creator/agency/subscribers-list', { headers: fbHeaders }),
                         fetch('https://www.fanbasis.com/creator/agency/transactions', { headers: fbHeaders }),
