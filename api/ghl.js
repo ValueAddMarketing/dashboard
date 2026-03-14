@@ -103,7 +103,7 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const { action, locationId, contactId, startDate, endDate } = req.body;
+    const { action, locationId, contactId, startDate, endDate, clientName } = req.body;
 
     // Get the best available agency token (OAuth first, then PIT fallback)
     const oauthData = await getAgencyOAuthToken();
@@ -283,6 +283,84 @@ export default async function handler(req, res) {
             });
         }
 
+        // ========== CALL TRACKING: Fetch all calls for all clients ==========
+        if (action === 'getAllCalls') {
+            const mappingsRes = await fetch(`${SUPABASE_URL}/rest/v1/client_ghl_locations?select=*`, {
+                headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+            });
+            const mappings = await mappingsRes.json();
+
+            if (!Array.isArray(mappings) || mappings.length === 0) {
+                return res.json({ results: {}, mappingsCount: 0, error: 'No GHL location mappings found. Set up mappings in the Speed to Lead tab first.' });
+            }
+
+            const processable = [];
+            for (const m of mappings) {
+                if (m.ghl_token) {
+                    processable.push({ ...m, tokenSource: 'stored' });
+                } else if (hasOAuth) {
+                    processable.push({ ...m, ghl_token: oauthData.token, tokenSource: 'oauth_direct' });
+                }
+            }
+
+            if (processable.length === 0) {
+                return res.json({ results: {}, mappingsCount: mappings.length, tokensConfigured: 0, error: 'No tokens available. Install the GHL OAuth app or add sub-account tokens.' });
+            }
+
+            const since = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            const until = endDate || new Date().toISOString();
+
+            const results = {};
+            const errors = {};
+
+            for (const mapping of processable) {
+                try {
+                    const locationFetch = makeGhlFetch(mapping.ghl_token);
+                    const calls = await fetchLocationCalls(locationFetch, mapping.ghl_location_id, since, until);
+                    const metrics = computeCallMetrics(calls);
+                    results[mapping.client_name] = { calls, metrics };
+                } catch (err) {
+                    errors[mapping.client_name] = err.message;
+                }
+            }
+
+            return res.json({
+                results,
+                errors: Object.keys(errors).length > 0 ? errors : undefined,
+                dateRange: { since, until },
+                mappingsCount: mappings.length,
+                tokensConfigured: processable.length
+            });
+        }
+
+        // ========== CALL TRACKING: Fetch calls for a single client ==========
+        if (action === 'getClientCalls') {
+            if (!clientName) return res.status(400).json({ error: 'clientName required' });
+
+            const mappingRes = await fetch(
+                `${SUPABASE_URL}/rest/v1/client_ghl_locations?client_name=eq.${encodeURIComponent(clientName)}&select=*&limit=1`,
+                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+            );
+            const mappingArr = await mappingRes.json();
+
+            if (!Array.isArray(mappingArr) || mappingArr.length === 0) {
+                return res.status(404).json({ error: `No GHL mapping found for "${clientName}"` });
+            }
+
+            const mapping = mappingArr[0];
+            const token = mapping.ghl_token || (hasOAuth ? oauthData.token : null);
+            if (!token) return res.status(400).json({ error: 'No token available for this client' });
+
+            const since = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            const until = endDate || new Date().toISOString();
+
+            const locationFetch = makeGhlFetch(token);
+            const calls = await fetchLocationCalls(locationFetch, mapping.ghl_location_id, since, until);
+            const metrics = computeCallMetrics(calls);
+
+            return res.json({ calls, metrics, dateRange: { since, until } });
+        }
+
         return res.status(400).json({ error: 'Invalid action.' });
     } catch (error) {
         console.error('GHL API error:', error);
@@ -406,5 +484,185 @@ async function processLocationSpeedToLead(ghlFetch, locationId, since, until) {
             fastestMinutes: speeds.length > 0 ? Math.min(...speeds) : null,
             slowestMinutes: speeds.length > 0 ? Math.max(...speeds) : null
         }
+    };
+}
+
+// ========== CALL TRACKING HELPERS ==========
+
+// Fetch all calls for a single location using the Conversations API
+async function fetchLocationCalls(ghlFetch, locationId, startDate, endDate) {
+    const calls = [];
+    let page = 0;
+    const maxPages = 20;
+    let hasMore = true;
+    let lastMessageAfter = null;
+
+    while (hasMore && page < maxPages) {
+        const searchBody = {
+            locationId,
+            limit: 50,
+            type: 'TYPE_CALL',
+            sortBy: 'last_message_date',
+            sortOrder: 'desc'
+        };
+
+        if (startDate) searchBody.startsAfter = new Date(startDate).getTime();
+        if (endDate) searchBody.startsBefore = new Date(endDate).getTime();
+        if (lastMessageAfter) searchBody.lastMessageAfter = lastMessageAfter;
+
+        try {
+            const data = await ghlFetch(`${GHL_BASE}/conversations/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(searchBody)
+            });
+
+            const conversations = data.conversations || [];
+            if (conversations.length === 0) { hasMore = false; break; }
+
+            for (const conv of conversations) {
+                try {
+                    const messagesData = await ghlFetch(
+                        `${GHL_BASE}/conversations/${conv.id}/messages?limit=50&type=TYPE_CALL`
+                    );
+                    const messages = messagesData.messages?.messages || messagesData.messages || [];
+
+                    for (const msg of messages) {
+                        const msgDate = new Date(msg.dateAdded || msg.createdAt);
+                        if (startDate && msgDate < new Date(startDate)) continue;
+                        if (endDate && msgDate > new Date(endDate)) continue;
+
+                        // Extract recording URL
+                        let recordingUrl = null;
+                        if (msg.attachments && msg.attachments.length > 0) {
+                            const audioAttachment = msg.attachments.find(a =>
+                                a.url && (a.contentType?.startsWith('audio/') || a.url.includes('.mp3') || a.url.includes('.wav') || a.url.includes('recording'))
+                            );
+                            if (audioAttachment) recordingUrl = audioAttachment.url;
+                        }
+                        if (!recordingUrl && msg.meta?.recordingUrl) recordingUrl = msg.meta.recordingUrl;
+                        if (!recordingUrl && msg.meta?.recording) recordingUrl = msg.meta.recording;
+                        if (!recordingUrl && msg.recordingUrl) recordingUrl = msg.recordingUrl;
+
+                        // Extract duration
+                        let duration = null;
+                        if (msg.meta?.duration != null) duration = parseInt(msg.meta.duration);
+                        else if (msg.meta?.callDuration != null) duration = parseInt(msg.meta.callDuration);
+                        else if (msg.duration != null) duration = parseInt(msg.duration);
+
+                        // Call status
+                        let callStatus = msg.meta?.callStatus || msg.meta?.status || msg.status || 'unknown';
+                        if (callStatus === 'completed' && duration === 0) callStatus = 'no-answer';
+
+                        // Direction
+                        const direction = msg.direction || msg.meta?.direction || (msg.type === 1 ? 'inbound' : 'outbound');
+
+                        calls.push({
+                            id: msg.id || `${conv.id}-${msgDate.getTime()}`,
+                            conversationId: conv.id,
+                            contactId: conv.contactId,
+                            contactName: conv.contactName || conv.fullName || 'Unknown',
+                            contactEmail: conv.email || '',
+                            contactPhone: conv.phone || '',
+                            date: msg.dateAdded || msg.createdAt,
+                            direction,
+                            duration,
+                            status: callStatus,
+                            recordingUrl,
+                            body: msg.body || ''
+                        });
+                    }
+                } catch (msgErr) {
+                    console.error(`Failed to fetch messages for conversation ${conv.id}:`, msgErr.message);
+                    calls.push({
+                        id: conv.id,
+                        conversationId: conv.id,
+                        contactId: conv.contactId,
+                        contactName: conv.contactName || conv.fullName || 'Unknown',
+                        contactEmail: conv.email || '',
+                        contactPhone: conv.phone || '',
+                        date: conv.lastMessageDate || conv.dateAdded,
+                        direction: 'unknown',
+                        duration: null,
+                        status: 'unknown',
+                        recordingUrl: null,
+                        body: ''
+                    });
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            if (conversations.length < 50) {
+                hasMore = false;
+            } else {
+                const lastConv = conversations[conversations.length - 1];
+                lastMessageAfter = lastConv.lastMessageDate || lastConv.dateAdded;
+                if (!lastMessageAfter) hasMore = false;
+            }
+            page++;
+        } catch (err) {
+            console.error(`Conversations search failed for location ${locationId}:`, err.message);
+            hasMore = false;
+        }
+    }
+
+    return calls;
+}
+
+// Compute call metrics from raw call data
+function computeCallMetrics(calls) {
+    const totalCalls = calls.length;
+    if (totalCalls === 0) {
+        return {
+            totalCalls: 0, inboundCalls: 0, outboundCalls: 0, answeredCalls: 0,
+            missedCalls: 0, pickupRate: 0, avgDuration: 0, totalDuration: 0,
+            longestCall: 0, shortestCall: 0, callsWithRecording: 0,
+            callsByDay: {}, callsPerDay: 0, callsByHour: {}
+        };
+    }
+
+    const answered = calls.filter(c => c.status === 'completed' && c.duration > 0);
+    const missed = calls.filter(c => c.status === 'no-answer' || c.status === 'missed' || c.status === 'busy' || (c.status === 'completed' && c.duration === 0));
+    const withDuration = calls.filter(c => c.duration != null && c.duration > 0);
+    const withRecording = calls.filter(c => c.recordingUrl);
+
+    const durations = withDuration.map(c => c.duration);
+    const totalDuration = durations.reduce((a, b) => a + b, 0);
+    const avgDuration = durations.length > 0 ? Math.round(totalDuration / durations.length) : 0;
+
+    const callsByDay = {};
+    const callsByHour = {};
+    const uniqueDates = new Set();
+
+    for (const call of calls) {
+        if (call.date) {
+            const d = new Date(call.date);
+            const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+            callsByDay[dayName] = (callsByDay[dayName] || 0) + 1;
+            const hour = d.getHours();
+            const hourLabel = hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`;
+            callsByHour[hourLabel] = (callsByHour[hourLabel] || 0) + 1;
+            uniqueDates.add(d.toISOString().split('T')[0]);
+        }
+    }
+
+    const dayCount = uniqueDates.size || 1;
+
+    return {
+        totalCalls,
+        inboundCalls: calls.filter(c => c.direction === 'inbound').length,
+        outboundCalls: calls.filter(c => c.direction === 'outbound').length,
+        answeredCalls: answered.length,
+        missedCalls: missed.length,
+        pickupRate: totalCalls > 0 ? Math.round((answered.length / totalCalls) * 100) : 0,
+        avgDuration,
+        totalDuration,
+        longestCall: durations.length > 0 ? Math.max(...durations) : 0,
+        shortestCall: durations.length > 0 ? Math.min(...durations) : 0,
+        callsWithRecording: withRecording.length,
+        callsByDay,
+        callsPerDay: Math.round((totalCalls / dayCount) * 10) / 10,
+        callsByHour,
+        dayCount
     };
 }

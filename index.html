@@ -354,6 +354,7 @@
             { id: 'ltv-churn', name: 'LTV & Churn', icon: '📉', desc: 'Client lifetime value and churn analytics' },
             { id: 'cashflow', name: 'Cashflow Schedule', icon: '💰', desc: 'Auto cashflow from Stripe & Whop payments' },
             { id: 'client-portals', name: 'Client Portals', icon: '🔗', desc: 'Manage client portal access links' },
+            { id: 'call-tracking', name: 'Call Tracking', icon: '📞', desc: 'Call recordings, metrics & accountability' },
         ];
 
         // ========== LOGIN ==========
@@ -9144,6 +9145,556 @@ Be concise, use specific numbers and client names. Format with markdown when hel
             );
         };
 
+        // ========== CALL TRACKING TAB ==========
+        const CallTrackingTab = ({ clients = [], setupData = [] }) => {
+            const [callData, setCallData] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [dateRange, setDateRange] = useState('last_30d');
+            const [selectedClient, setSelectedClient] = useState(null);
+            const [searchFilter, setSearchFilter] = useState('');
+            const [sortConfig, setSortConfig] = useState({ key: 'totalCalls', dir: 'desc' });
+            const [statusFilter, setStatusFilter] = useState('all');
+            const [directionFilter, setDirectionFilter] = useState('all');
+            const [playingId, setPlayingId] = useState(null);
+            const audioRef = useRef(null);
+            const [callLogSort, setCallLogSort] = useState({ key: 'date', dir: 'desc' });
+            const [callLogSearch, setCallLogSearch] = useState('');
+
+            const dateRangeOptions = [
+                { value: 'last_7d', label: 'Last 7 Days', days: 7 },
+                { value: 'last_14d', label: 'Last 14 Days', days: 14 },
+                { value: 'last_30d', label: 'Last 30 Days', days: 30 },
+                { value: 'last_60d', label: 'Last 60 Days', days: 60 },
+                { value: 'last_90d', label: 'Last 90 Days', days: 90 },
+            ];
+
+            const getDateRange = () => {
+                const opt = dateRangeOptions.find(o => o.value === dateRange);
+                const days = opt ? opt.days : 30;
+                const end = new Date();
+                const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+                return { startDate: start.toISOString(), endDate: end.toISOString() };
+            };
+
+            const fetchCallData = async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                    const cacheKey = 'vam_call_tracking_' + dateRange;
+                    const cacheTimeKey = 'vam_call_tracking_time_' + dateRange;
+                    const cached = localStorage.getItem(cacheKey);
+                    const cacheTime = localStorage.getItem(cacheTimeKey);
+                    if (cached && cacheTime && (Date.now() - parseInt(cacheTime)) < 600000) {
+                        setCallData(JSON.parse(cached));
+                        setLoading(false);
+                        return;
+                    }
+
+                    const { startDate, endDate } = getDateRange();
+                    const resp = await fetch('/api/ghl', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'getAllCalls', startDate, endDate })
+                    });
+                    const data = await resp.json();
+                    if (data.error && !data.results) throw new Error(data.error);
+
+                    const results = data.results || {};
+                    setCallData(results);
+                    localStorage.setItem(cacheKey, JSON.stringify(results));
+                    localStorage.setItem(cacheTimeKey, Date.now().toString());
+                } catch (err) {
+                    setError(err.message);
+                }
+                setLoading(false);
+            };
+
+            useEffect(() => { fetchCallData(); }, []);
+            useEffect(() => { fetchCallData(); }, [dateRange]);
+
+            const formatDuration = (seconds) => {
+                if (seconds == null || seconds === 0) return '0s';
+                if (seconds < 60) return seconds + 's';
+                const m = Math.floor(seconds / 60);
+                const s = seconds % 60;
+                if (m < 60) return m + 'm ' + (s > 0 ? s + 's' : '');
+                const h = Math.floor(m / 60);
+                return h + 'h ' + (m % 60) + 'm';
+            };
+
+            const getPickupColor = (rate) => {
+                if (rate >= 80) return 'text-emerald-400';
+                if (rate >= 60) return 'text-green-400';
+                if (rate >= 40) return 'text-yellow-400';
+                if (rate >= 20) return 'text-orange-400';
+                return 'text-red-400';
+            };
+
+            const getPickupBadge = (rate) => {
+                if (rate >= 80) return { label: 'Excellent', color: 'bg-emerald-500/20 text-emerald-400' };
+                if (rate >= 60) return { label: 'Good', color: 'bg-green-500/20 text-green-400' };
+                if (rate >= 40) return { label: 'Average', color: 'bg-yellow-500/20 text-yellow-400' };
+                if (rate >= 20) return { label: 'Low', color: 'bg-orange-500/20 text-orange-400' };
+                return { label: 'Critical', color: 'bg-red-500/20 text-red-400' };
+            };
+
+            const getCallVolumeColor = (callsPerDay) => {
+                if (callsPerDay >= 10) return 'text-emerald-400';
+                if (callsPerDay >= 5) return 'text-green-400';
+                if (callsPerDay >= 2) return 'text-yellow-400';
+                if (callsPerDay >= 1) return 'text-orange-400';
+                return 'text-red-400';
+            };
+
+            const getCallVolumeBadge = (callsPerDay) => {
+                if (callsPerDay >= 10) return { label: 'High Volume', color: 'bg-emerald-500/20 text-emerald-400' };
+                if (callsPerDay >= 5) return { label: 'Active', color: 'bg-green-500/20 text-green-400' };
+                if (callsPerDay >= 2) return { label: 'Moderate', color: 'bg-yellow-500/20 text-yellow-400' };
+                if (callsPerDay >= 1) return { label: 'Low', color: 'bg-orange-500/20 text-orange-400' };
+                return { label: 'Inactive', color: 'bg-red-500/20 text-red-400' };
+            };
+
+            const getStatusColor = (status) => {
+                if (status === 'completed') return 'text-emerald-400';
+                if (status === 'no-answer' || status === 'missed') return 'text-red-400';
+                if (status === 'busy') return 'text-orange-400';
+                if (status === 'voicemail') return 'text-yellow-400';
+                return 'text-slate-400';
+            };
+
+            const getStatusBadge = (status) => {
+                if (status === 'completed') return { label: 'Answered', color: 'bg-emerald-500/20 text-emerald-400' };
+                if (status === 'no-answer' || status === 'missed') return { label: 'Missed', color: 'bg-red-500/20 text-red-400' };
+                if (status === 'busy') return { label: 'Busy', color: 'bg-orange-500/20 text-orange-400' };
+                if (status === 'voicemail') return { label: 'Voicemail', color: 'bg-yellow-500/20 text-yellow-400' };
+                return { label: status || 'Unknown', color: 'bg-slate-700 text-slate-400' };
+            };
+
+            const playRecording = (callId, url) => {
+                if (playingId === callId) {
+                    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+                    setPlayingId(null);
+                    return;
+                }
+                if (audioRef.current) { audioRef.current.pause(); }
+                const audio = new Audio(url);
+                audio.play().catch(err => console.error('Audio playback failed:', err));
+                audio.onended = () => setPlayingId(null);
+                audioRef.current = audio;
+                setPlayingId(callId);
+            };
+
+            const downloadRecording = (url, contactName, date) => {
+                const fileName = `call_${contactName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date(date).toISOString().split('T')[0]}.mp3`;
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            };
+
+            // Aggregate stats across all clients
+            const allStats = useMemo(() => {
+                const entries = Object.values(callData);
+                if (entries.length === 0) return null;
+                const totalCalls = entries.reduce((s, e) => s + (e.metrics?.totalCalls || 0), 0);
+                const answered = entries.reduce((s, e) => s + (e.metrics?.answeredCalls || 0), 0);
+                const totalDuration = entries.reduce((s, e) => s + (e.metrics?.totalDuration || 0), 0);
+                const withDuration = entries.flatMap(e => (e.calls || []).filter(c => c.duration > 0));
+                const avgDuration = withDuration.length > 0 ? Math.round(withDuration.reduce((s, c) => s + c.duration, 0) / withDuration.length) : 0;
+                const recordings = entries.reduce((s, e) => s + (e.metrics?.callsWithRecording || 0), 0);
+                const allCallsPerDay = entries.map(e => e.metrics?.callsPerDay || 0);
+                const avgCallsPerDay = allCallsPerDay.length > 0 ? Math.round(allCallsPerDay.reduce((a, b) => a + b, 0) / allCallsPerDay.length * 10) / 10 : 0;
+                return {
+                    totalCalls,
+                    answered,
+                    pickupRate: totalCalls > 0 ? Math.round((answered / totalCalls) * 100) : 0,
+                    avgDuration,
+                    totalDuration,
+                    recordings,
+                    avgCallsPerDay,
+                    clientCount: entries.length
+                };
+            }, [callData]);
+
+            // Leaderboard data
+            const leaderboard = useMemo(() => {
+                return Object.entries(callData).map(([client, d]) => ({
+                    client,
+                    ...d.metrics,
+                    calls: d.calls || []
+                })).filter(c => {
+                    if (!searchFilter) return true;
+                    return c.client.toLowerCase().includes(searchFilter.toLowerCase());
+                }).sort((a, b) => {
+                    const { key, dir } = sortConfig;
+                    let aVal, bVal;
+                    switch (key) {
+                        case 'client': aVal = a.client; bVal = b.client; return dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                        case 'totalCalls': aVal = a.totalCalls || 0; bVal = b.totalCalls || 0; break;
+                        case 'pickupRate': aVal = a.pickupRate || 0; bVal = b.pickupRate || 0; break;
+                        case 'avgDuration': aVal = a.avgDuration || 0; bVal = b.avgDuration || 0; break;
+                        case 'callsPerDay': aVal = a.callsPerDay || 0; bVal = b.callsPerDay || 0; break;
+                        case 'recordings': aVal = a.callsWithRecording || 0; bVal = b.callsWithRecording || 0; break;
+                        case 'outbound': aVal = a.outboundCalls || 0; bVal = b.outboundCalls || 0; break;
+                        default: aVal = 0; bVal = 0;
+                    }
+                    return dir === 'asc' ? aVal - bVal : bVal - aVal;
+                });
+            }, [callData, searchFilter, sortConfig]);
+
+            const handleSort = (key) => {
+                setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'client' ? 'asc' : 'desc' });
+            };
+            const sortArrow = (key) => sortConfig.key === key ? (sortConfig.dir === 'asc' ? ' \u2191' : ' \u2193') : '';
+
+            const handleCallLogSort = (key) => {
+                setCallLogSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'contactName' ? 'asc' : 'desc' });
+            };
+            const callLogSortArrow = (key) => callLogSort.key === key ? (callLogSort.dir === 'asc' ? ' \u2191' : ' \u2193') : '';
+
+            // Export CSV
+            const exportCSV = (clientCalls, clientName) => {
+                const headers = ['Date', 'Contact', 'Phone', 'Direction', 'Duration (s)', 'Status', 'Has Recording'];
+                const rows = clientCalls.map(c => [
+                    c.date ? new Date(c.date).toLocaleString() : '',
+                    c.contactName || '',
+                    c.contactPhone || '',
+                    c.direction || '',
+                    c.duration || 0,
+                    c.status || '',
+                    c.recordingUrl ? 'Yes' : 'No'
+                ]);
+                const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `call_log_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${dateRange}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // Loading state
+            if (loading) {
+                return (
+                    React.createElement('div', { className: 'flex items-center justify-center py-20' },
+                        React.createElement('div', { className: 'text-center' },
+                            React.createElement('div', { className: 'text-4xl mb-4 animate-pulse' }, '\u{1F4DE}'),
+                            React.createElement('p', { className: 'text-slate-400' }, 'Loading call data from GHL...'),
+                            React.createElement('p', { className: 'text-xs text-slate-600 mt-2' }, 'Fetching conversations and recordings for all clients')
+                        )
+                    )
+                );
+            }
+
+            // Error state
+            if (error) {
+                return (
+                    React.createElement('div', { className: 'space-y-4' },
+                        React.createElement('div', { className: 'card p-6 text-center' },
+                            React.createElement('p', { className: 'text-red-400 mb-2' }, 'Error loading call data'),
+                            React.createElement('p', { className: 'text-xs text-slate-500 mb-4' }, error),
+                            React.createElement('button', { onClick: fetchCallData, className: 'px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm' }, 'Retry')
+                        )
+                    )
+                );
+            }
+
+            // Client drill-down view
+            if (selectedClient && callData[selectedClient]) {
+                const clientInfo = callData[selectedClient];
+                const metrics = clientInfo.metrics || {};
+                const badge = getPickupBadge(metrics.pickupRate);
+                const volumeBadge = getCallVolumeBadge(metrics.callsPerDay);
+
+                // Filter and sort calls
+                let filteredCalls = (clientInfo.calls || []).filter(c => {
+                    if (statusFilter !== 'all') {
+                        if (statusFilter === 'answered' && !(c.status === 'completed' && c.duration > 0)) return false;
+                        if (statusFilter === 'missed' && c.status !== 'no-answer' && c.status !== 'missed') return false;
+                        if (statusFilter === 'recording' && !c.recordingUrl) return false;
+                    }
+                    if (directionFilter !== 'all' && c.direction !== directionFilter) return false;
+                    if (callLogSearch) {
+                        const q = callLogSearch.toLowerCase();
+                        return (c.contactName || '').toLowerCase().includes(q) || (c.contactPhone || '').toLowerCase().includes(q) || (c.contactEmail || '').toLowerCase().includes(q);
+                    }
+                    return true;
+                });
+
+                filteredCalls.sort((a, b) => {
+                    const { key, dir } = callLogSort;
+                    let aVal, bVal;
+                    switch (key) {
+                        case 'contactName': aVal = a.contactName || ''; bVal = b.contactName || ''; return dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                        case 'date': aVal = new Date(a.date || 0).getTime(); bVal = new Date(b.date || 0).getTime(); break;
+                        case 'duration': aVal = a.duration || 0; bVal = b.duration || 0; break;
+                        case 'status': aVal = a.status || ''; bVal = b.status || ''; return dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                        default: aVal = 0; bVal = 0;
+                    }
+                    return dir === 'asc' ? aVal - bVal : bVal - aVal;
+                });
+
+                return (
+                    React.createElement('div', { className: 'space-y-6' },
+                        // Back button + header
+                        React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
+                            React.createElement('button', { onClick: () => { setSelectedClient(null); if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } setPlayingId(null); }, className: 'text-brand-cyan hover:text-brand-cyan/80 text-sm' }, '\u2190 Back to Leaderboard'),
+                            React.createElement('h2', { className: 'text-xl font-bold text-white' }, selectedClient),
+                            React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${badge.color}` }, badge.label),
+                            React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${volumeBadge.color}` }, volumeBadge.label)
+                        ),
+
+                        // Client stat cards
+                        React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-5 gap-4' },
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Total Calls'),
+                                React.createElement('p', { className: 'text-2xl font-bold text-white' }, metrics.totalCalls || 0)
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Pickup Rate'),
+                                React.createElement('p', { className: `text-2xl font-bold ${getPickupColor(metrics.pickupRate)}` }, (metrics.pickupRate || 0) + '%')
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Avg Duration'),
+                                React.createElement('p', { className: 'text-2xl font-bold text-white' }, formatDuration(metrics.avgDuration))
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Calls/Day'),
+                                React.createElement('p', { className: `text-2xl font-bold ${getCallVolumeColor(metrics.callsPerDay)}` }, metrics.callsPerDay || 0)
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Recordings'),
+                                React.createElement('p', { className: 'text-2xl font-bold text-brand-purple' }, metrics.callsWithRecording || 0)
+                            )
+                        ),
+
+                        // Call breakdown cards
+                        React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' },
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Outbound'),
+                                React.createElement('p', { className: 'text-xl font-bold text-brand-cyan' }, metrics.outboundCalls || 0)
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Inbound'),
+                                React.createElement('p', { className: 'text-xl font-bold text-brand-purple' }, metrics.inboundCalls || 0)
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Answered'),
+                                React.createElement('p', { className: 'text-xl font-bold text-emerald-400' }, metrics.answeredCalls || 0)
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Missed'),
+                                React.createElement('p', { className: `text-xl font-bold ${metrics.missedCalls > 0 ? 'text-red-400' : 'text-emerald-400'}` }, metrics.missedCalls || 0)
+                            )
+                        ),
+
+                        // Longest & shortest call + total time
+                        React.createElement('div', { className: 'grid grid-cols-3 gap-4' },
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Longest Call'),
+                                React.createElement('p', { className: 'text-xl font-bold text-white' }, formatDuration(metrics.longestCall))
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Shortest Call'),
+                                React.createElement('p', { className: 'text-xl font-bold text-white' }, formatDuration(metrics.shortestCall))
+                            ),
+                            React.createElement('div', { className: 'card p-4 text-center' },
+                                React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Total Talk Time'),
+                                React.createElement('p', { className: 'text-xl font-bold text-white' }, formatDuration(metrics.totalDuration))
+                            )
+                        ),
+
+                        // Filters + Export
+                        React.createElement('div', { className: 'flex gap-3 flex-wrap items-center' },
+                            React.createElement('input', { type: 'text', value: callLogSearch, onChange: (e) => setCallLogSearch(e.target.value), placeholder: 'Search by name, phone, email...', className: 'input-field border rounded-lg px-4 py-2 text-sm', style: { maxWidth: '280px' } }),
+                            React.createElement('select', { value: statusFilter, onChange: (e) => setStatusFilter(e.target.value), className: 'input-field border rounded-lg px-3 py-2 text-sm' },
+                                React.createElement('option', { value: 'all' }, 'All Statuses'),
+                                React.createElement('option', { value: 'answered' }, 'Answered'),
+                                React.createElement('option', { value: 'missed' }, 'Missed'),
+                                React.createElement('option', { value: 'recording' }, 'Has Recording')
+                            ),
+                            React.createElement('select', { value: directionFilter, onChange: (e) => setDirectionFilter(e.target.value), className: 'input-field border rounded-lg px-3 py-2 text-sm' },
+                                React.createElement('option', { value: 'all' }, 'All Directions'),
+                                React.createElement('option', { value: 'outbound' }, 'Outbound'),
+                                React.createElement('option', { value: 'inbound' }, 'Inbound')
+                            ),
+                            React.createElement('button', { onClick: () => exportCSV(filteredCalls, selectedClient), className: 'px-3 py-2 bg-dark-700 hover:bg-dark-600 text-slate-300 rounded-lg text-sm ml-auto' }, 'Export CSV'),
+                            React.createElement('span', { className: 'text-xs text-slate-500' }, filteredCalls.length + ' calls')
+                        ),
+
+                        // Call log table
+                        React.createElement('div', { className: 'card overflow-hidden' },
+                            React.createElement('div', { className: 'p-4 border-b border-dark-700' },
+                                React.createElement('h3', { className: 'text-sm font-semibold text-white' }, 'Call Log (' + filteredCalls.length + ')')
+                            ),
+                            React.createElement('div', { className: 'overflow-x-auto', style: { maxHeight: '600px', overflowY: 'auto' } },
+                                React.createElement('table', { className: 'w-full' },
+                                    React.createElement('thead', null,
+                                        React.createElement('tr', { className: 'text-xs text-slate-500 border-b border-dark-700 sticky top-0 bg-dark-900' },
+                                            React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleCallLogSort('date') }, 'Date' + callLogSortArrow('date')),
+                                            React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleCallLogSort('contactName') }, 'Contact' + callLogSortArrow('contactName')),
+                                            React.createElement('th', { className: 'text-left px-4 py-3' }, 'Direction'),
+                                            React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleCallLogSort('duration') }, 'Duration' + callLogSortArrow('duration')),
+                                            React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleCallLogSort('status') }, 'Status' + callLogSortArrow('status')),
+                                            React.createElement('th', { className: 'text-center px-4 py-3' }, 'Recording')
+                                        )
+                                    ),
+                                    React.createElement('tbody', null,
+                                        filteredCalls.map((call) => {
+                                            const statusBadge = getStatusBadge(call.status);
+                                            const isPlaying = playingId === call.id;
+                                            return React.createElement('tr', { key: call.id, className: 'border-b border-dark-800 hover:bg-dark-800/50' },
+                                                React.createElement('td', { className: 'px-4 py-3 text-xs text-slate-400' },
+                                                    call.date ? new Date(call.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '\u2014',
+                                                    React.createElement('br'),
+                                                    call.date ? new Date(call.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''
+                                                ),
+                                                React.createElement('td', { className: 'px-4 py-3' },
+                                                    React.createElement('div', { className: 'text-sm text-white' }, call.contactName || 'Unknown'),
+                                                    React.createElement('div', { className: 'text-xs text-slate-500' }, call.contactPhone || call.contactEmail || '\u2014')
+                                                ),
+                                                React.createElement('td', { className: 'px-4 py-3' },
+                                                    React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${call.direction === 'outbound' ? 'bg-brand-cyan/20 text-brand-cyan' : call.direction === 'inbound' ? 'bg-brand-purple/20 text-brand-purple' : 'bg-slate-700 text-slate-400'}` },
+                                                        call.direction === 'outbound' ? '\u2197 Out' : call.direction === 'inbound' ? '\u2199 In' : '\u2014'
+                                                    )
+                                                ),
+                                                React.createElement('td', { className: 'px-4 py-3 text-sm text-white font-medium' }, formatDuration(call.duration)),
+                                                React.createElement('td', { className: 'px-4 py-3' },
+                                                    React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${statusBadge.color}` }, statusBadge.label)
+                                                ),
+                                                React.createElement('td', { className: 'px-4 py-3 text-center' },
+                                                    call.recordingUrl ? React.createElement('div', { className: 'flex items-center justify-center gap-2' },
+                                                        React.createElement('button', {
+                                                            onClick: () => playRecording(call.id, call.recordingUrl),
+                                                            className: `px-2 py-1 rounded text-xs font-semibold ${isPlaying ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'} hover:opacity-80`,
+                                                            title: isPlaying ? 'Stop' : 'Play'
+                                                        }, isPlaying ? '\u23F9 Stop' : '\u25B6 Play'),
+                                                        React.createElement('button', {
+                                                            onClick: () => downloadRecording(call.recordingUrl, call.contactName || 'unknown', call.date),
+                                                            className: 'px-2 py-1 rounded text-xs font-semibold bg-brand-purple/20 text-brand-purple hover:opacity-80',
+                                                            title: 'Download'
+                                                        }, '\u2B07 Download')
+                                                    ) : React.createElement('span', { className: 'text-xs text-slate-600' }, '\u2014')
+                                                )
+                                            );
+                                        })
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+            }
+
+            // Main view: overview + leaderboard
+            return (
+                React.createElement('div', { className: 'space-y-6' },
+                    // Header
+                    React.createElement('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
+                        React.createElement('h2', { className: 'text-2xl font-bold text-white' }, 'Call Tracking'),
+                        React.createElement('div', { className: 'flex gap-2 items-center' },
+                            React.createElement('select', { value: dateRange, onChange: (e) => setDateRange(e.target.value), className: 'input-field border rounded-lg px-3 py-2 text-sm' },
+                                dateRangeOptions.map(o => React.createElement('option', { key: o.value, value: o.value }, o.label))
+                            ),
+                            React.createElement('button', { onClick: () => { localStorage.removeItem('vam_call_tracking_' + dateRange); localStorage.removeItem('vam_call_tracking_time_' + dateRange); fetchCallData(); }, className: 'px-3 py-2 bg-dark-700 hover:bg-dark-600 text-slate-300 rounded-lg text-sm' }, 'Refresh')
+                        )
+                    ),
+
+                    // Agency overview cards
+                    allStats && React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' },
+                        React.createElement('div', { className: 'card p-4 text-center' },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Total Calls (All Clients)'),
+                            React.createElement('p', { className: 'text-2xl font-bold text-white' }, allStats.totalCalls)
+                        ),
+                        React.createElement('div', { className: 'card p-4 text-center' },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Avg Pickup Rate'),
+                            React.createElement('p', { className: `text-2xl font-bold ${getPickupColor(allStats.pickupRate)}` }, allStats.pickupRate + '%')
+                        ),
+                        React.createElement('div', { className: 'card p-4 text-center' },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Avg Call Duration'),
+                            React.createElement('p', { className: 'text-2xl font-bold text-white' }, formatDuration(allStats.avgDuration))
+                        ),
+                        React.createElement('div', { className: 'card p-4 text-center' },
+                            React.createElement('p', { className: 'text-xs text-slate-400 mb-1' }, 'Total Recordings'),
+                            React.createElement('p', { className: 'text-2xl font-bold text-brand-purple' }, allStats.recordings)
+                        )
+                    ),
+
+                    // Empty state
+                    Object.keys(callData).length === 0 && !loading && React.createElement('div', { className: 'card p-8 text-center' },
+                        React.createElement('p', { className: 'text-slate-400 mb-2' }, 'No call data found'),
+                        React.createElement('p', { className: 'text-xs text-slate-600 mb-4' }, 'Make sure your clients are mapped to GHL locations in the Speed to Lead tab and have recent call activity.'),
+                        React.createElement('button', { onClick: fetchCallData, className: 'px-4 py-2 bg-brand-cyan text-white rounded-lg text-sm' }, 'Retry')
+                    ),
+
+                    // Search
+                    Object.keys(callData).length > 0 && React.createElement('div', { className: 'flex gap-3' },
+                        React.createElement('input', { type: 'text', value: searchFilter, onChange: (e) => setSearchFilter(e.target.value), placeholder: 'Search clients...', className: 'input-field border rounded-lg px-4 py-2 text-sm flex-1', style: { maxWidth: '300px' } })
+                    ),
+
+                    // Leaderboard table
+                    leaderboard.length > 0 && React.createElement('div', { className: 'card overflow-hidden' },
+                        React.createElement('div', { className: 'p-4 border-b border-dark-700' },
+                            React.createElement('h3', { className: 'text-sm font-semibold text-white' }, 'Client Call Leaderboard')
+                        ),
+                        React.createElement('div', { className: 'overflow-x-auto' },
+                            React.createElement('table', { className: 'w-full' },
+                                React.createElement('thead', null,
+                                    React.createElement('tr', { className: 'text-xs text-slate-500 border-b border-dark-700' },
+                                        React.createElement('th', { className: 'text-left px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('client') }, 'Client' + sortArrow('client')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('totalCalls') }, 'Total Calls' + sortArrow('totalCalls')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('outbound') }, 'Outbound' + sortArrow('outbound')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('pickupRate') }, 'Pickup Rate' + sortArrow('pickupRate')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('avgDuration') }, 'Avg Duration' + sortArrow('avgDuration')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('callsPerDay') }, 'Calls/Day' + sortArrow('callsPerDay')),
+                                        React.createElement('th', { className: 'text-center px-4 py-3 cursor-pointer hover:text-white', onClick: () => handleSort('recordings') }, 'Recordings' + sortArrow('recordings')),
+                                        React.createElement('th', { className: 'text-left px-4 py-3' }, 'Activity'),
+                                        React.createElement('th', { className: 'text-left px-4 py-3' }, 'Rating')
+                                    )
+                                ),
+                                React.createElement('tbody', null,
+                                    leaderboard.map((row, idx) => {
+                                        const badge = getPickupBadge(row.pickupRate);
+                                        const volumeBadge = getCallVolumeBadge(row.callsPerDay);
+                                        return React.createElement('tr', { key: row.client, className: 'border-b border-dark-800 hover:bg-dark-800/50 cursor-pointer', onClick: () => setSelectedClient(row.client) },
+                                            React.createElement('td', { className: 'px-4 py-3' },
+                                                React.createElement('div', { className: 'flex items-center gap-2' },
+                                                    React.createElement('span', { className: 'text-lg' }, idx === 0 ? '\u{1F947}' : idx === 1 ? '\u{1F948}' : idx === 2 ? '\u{1F949}' : ''),
+                                                    React.createElement('span', { className: 'text-sm text-white font-medium' }, row.client)
+                                                )
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center text-white font-semibold' }, row.totalCalls || 0),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center text-brand-cyan' }, row.outboundCalls || 0),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center' },
+                                                React.createElement('span', { className: getPickupColor(row.pickupRate) }, (row.pickupRate || 0) + '%')
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center text-white' }, formatDuration(row.avgDuration)),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center' },
+                                                React.createElement('span', { className: getCallVolumeColor(row.callsPerDay) }, row.callsPerDay || 0)
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3 text-sm text-center text-brand-purple' }, row.callsWithRecording || 0),
+                                            React.createElement('td', { className: 'px-4 py-3' },
+                                                React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${volumeBadge.color}` }, volumeBadge.label)
+                                            ),
+                                            React.createElement('td', { className: 'px-4 py-3' },
+                                                React.createElement('span', { className: `px-2 py-1 rounded text-xs font-semibold ${badge.color}` }, badge.label)
+                                            )
+                                        );
+                                    })
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+        };
+
         // ========== MAIN APP ==========
         const App = () => {
             const [user, setUser] = useState(null);
@@ -9291,6 +9842,7 @@ Be concise, use specific numbers and client names. Format with markdown when hel
                     case 'ltv-churn': return <LTVChurnTab />;
                     case 'cashflow': return <CashflowTab setupData={setupData} />;
                     case 'client-portals': return <ClientPortalsTab clients={clients} setupData={setupData} />;
+                    case 'call-tracking': return <CallTrackingTab clients={clients} setupData={setupData} />;
                     default: return <OverviewTab clients={clients} setupData={setupData} onSelectClient={(c) => { setSelected(c); setTab('health'); }} />;
                 }
             };
